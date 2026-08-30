@@ -1,44 +1,71 @@
 import type { ItemDef } from '../core/types';
+import { buildItemShape } from '../core/shapeBuilders';
+
+/**
+ * A hard-shell 4-wheel spinner isn't a solid box down to the floor — it
+ * stands on 4 small wheel housings, with the shell body starting above
+ * them. Modeling that (rather than one solid box) means the packer's
+ * collision check leaves the gap between the wheels genuinely empty, so a
+ * thin flat item can actually slide underneath it, the way it would in
+ * real life.
+ */
+function wheeledSuitcase(w: number, d: number, h: number, wheelSize: number) {
+  return buildItemShape(w, d, h, [{ kind: 'corners4', size: wheelSize }]);
+}
 
 /**
  * Seed item library. Dimensions are cm, converted from commonly published
  * inch specs for each category (see sourceNote per item) — real items vary
  * by brand/model, which is exactly why "save your own" custom items with
- * exact measured dimensions exist alongside this shared library.
+ * exact measured dimensions exist alongside this shared library. A few
+ * entries are specific named products, researched and sourced directly
+ * (including their wheel/handle protrusions), not generic estimates —
+ * marked below.
  */
 export const ITEMS: ItemDef[] = [
   {
     id: 'suitcase-carryon-hard',
     name: 'Carry-on suitcase (hard-shell)',
     category: 'luggage',
-    shape: { kind: 'box', w: 55.9, d: 22.9, h: 35.6 },
+    shape: wheeledSuitcase(55.9, 22.9, 35.6, 4),
     rigid: true,
     canStandOnEnd: true,
     canTiltForClosing: true,
     orientationsAllowed: 'any',
-    sourceNote: 'Standard carry-on spec: 22×14×9 in.',
+    sourceNote: 'Standard carry-on spec: 22×14×9 in (wheels included, as quoted), modeled with 4 corner wheel housings ~4cm tall.',
+  },
+  {
+    id: 'suitcase-away-carryon',
+    name: 'Away "The Carry-On" (hard-shell)',
+    category: 'luggage',
+    shape: wheeledSuitcase(36.6, 22.9, 55.1, 4),
+    rigid: true,
+    canStandOnEnd: true,
+    canTiltForClosing: true,
+    orientationsAllowed: 'any',
+    sourceNote: 'Named product, researched: awaytravel.com lists 21.7×14.4×9 in exterior (handles and wheels included, as they state); modeled with 4 corner wheel housings ~4cm tall.',
   },
   {
     id: 'suitcase-large-checked',
     name: 'Large checked suitcase',
     category: 'luggage',
-    shape: { kind: 'box', w: 76.2, d: 30.5, h: 50.8 },
+    shape: wheeledSuitcase(76.2, 30.5, 50.8, 5),
     rigid: true,
     canStandOnEnd: true,
     canTiltForClosing: true,
     orientationsAllowed: 'any',
-    sourceNote: 'Typical large checked bag: 30×12×20 in.',
+    sourceNote: 'Typical large checked bag: 30×12×20 in (wheels included, as quoted), modeled with 4 corner wheel housings ~5cm tall.',
   },
   {
     id: 'suitcase-medium-checked',
     name: 'Medium checked suitcase',
     category: 'luggage',
-    shape: { kind: 'box', w: 66.0, d: 27.9, h: 45.7 },
+    shape: wheeledSuitcase(66.0, 27.9, 45.7, 4.5),
     rigid: true,
     canStandOnEnd: true,
     canTiltForClosing: true,
     orientationsAllowed: 'any',
-    sourceNote: 'Typical medium checked bag: 26×11×18 in.',
+    sourceNote: 'Typical medium checked bag: 26×11×18 in (wheels included, as quoted), modeled with 4 corner wheel housings ~4.5cm tall.',
   },
   {
     id: 'duffel-bag',
@@ -81,7 +108,28 @@ export const ITEMS: ItemDef[] = [
     canStandOnEnd: false,
     canTiltForClosing: true,
     orientationsAllowed: 'flatOnly',
-    sourceNote: 'Approximated from typical folded full-size stroller specs (~34×23×14 in); only 90° yaw rotation is modeled for compound shapes.',
+    sourceNote:
+      'Approximated from typical folded full-size stroller specs (~34×23×14 in). Kept flat (wheelbase down) rather than stood on its side — geometrically the packer could do that too, but it is not how you would actually carry a stroller with a wide wheel splay.',
+  },
+  {
+    id: 'stroller-uppababy-vista',
+    name: 'UPPAbaby Vista V3 (folded, seat attached)',
+    category: 'baby-gear',
+    shape: {
+      kind: 'compound',
+      boxes: [
+        // wheelbase: the 11.5in rear wheels dominate the folded footprint width
+        { dx: 0, dy: 0, dz: 0, w: 65.3, d: 25, h: 29.2 },
+        // frame body above the wheels, spanning the full folded depth
+        { dx: 12.65, dy: 0, dz: 29.2, w: 40, d: 43.9, h: 55.4 },
+      ],
+    },
+    rigid: true,
+    canStandOnEnd: false,
+    canTiltForClosing: true,
+    orientationsAllowed: 'flatOnly',
+    sourceNote:
+      'Named product, researched: UPPAbaby/support pages list 17.3×25.7×33.3 in folded with the seat attached, plus 11.5 in rear / 8 in front wheel diameters used to size the wheelbase zone.',
   },
   {
     id: 'stroller-umbrella-folded',
@@ -108,10 +156,10 @@ export const ITEMS: ItemDef[] = [
       ],
     },
     rigid: true,
-    canStandOnEnd: false,
+    canStandOnEnd: true,
     canTiltForClosing: true,
     orientationsAllowed: 'any',
-    sourceNote: 'Typical standing golf bag: ~36 in tall, 10 in base diameter, flaring to ~14 in at the top pockets.',
+    sourceNote: 'Typical standing golf bag: ~36 in tall, 10 in base diameter, flaring to ~14 in at the top pockets. Can also be laid on its side, which the packer will do if that fits better.',
   },
   {
     id: 'cooler-medium',
@@ -123,6 +171,18 @@ export const ITEMS: ItemDef[] = [
     canTiltForClosing: false,
     orientationsAllowed: 'uprightOnly',
     sourceNote: 'Typical medium hard cooler: 25×16×16 in. Kept upright to avoid spilling ice/contents.',
+  },
+  {
+    id: 'cooler-yeti-roadie-24',
+    name: 'YETI Roadie 24 (hard cooler)',
+    category: 'outdoor',
+    shape: { kind: 'box', w: 42.2, d: 35.6, h: 44.2 },
+    rigid: true,
+    canStandOnEnd: false,
+    canTiltForClosing: false,
+    orientationsAllowed: 'uprightOnly',
+    sourceNote:
+      'Named product, researched: yeti.com lists 16.6×14×17.4 in exterior. Modeled as a plain box — its molded-in handle sits flush with the shell rather than sticking out, unlike a suitcase\'s wheels.',
   },
   {
     id: 'moving-box-medium',
@@ -191,6 +251,17 @@ export const ITEMS: ItemDef[] = [
     orientationsAllowed: 'uprightOnly',
     fragile: true,
     sourceNote: 'Typical convertible car seat footprint/height: ~20×20×27 in. Kept upright — not designed to be laid on its side under load.',
+  },
+  {
+    id: 'document-folio',
+    name: 'Flat document/laptop folio',
+    category: 'flat-items',
+    shape: { kind: 'box', w: 40, d: 30, h: 3 },
+    rigid: true,
+    canStandOnEnd: false,
+    canTiltForClosing: true,
+    orientationsAllowed: 'flatOnly',
+    sourceNote: 'Thin enough (~3cm) to actually slide into the gap under a wheeled suitcase\'s body, between its wheel housings — a real example of "what sticks out" mattering for the fit, not just overall volume.',
   },
 ];
 

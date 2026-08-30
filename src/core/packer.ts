@@ -13,12 +13,13 @@ import {
   boxesOverlap,
   boxFitsInCavity,
   boxVolume,
+  generateCompoundOrientations,
   generateOrientations,
   regionLabelAt,
   totalCavityVolume,
-  worldBoxesFor,
+  worldBoxForOrientation,
+  worldBoxesForCompound,
   type Box,
-  type Orientation,
 } from './geometry';
 
 interface ItemInstance {
@@ -44,28 +45,56 @@ function itemVolume(def: ItemDef): number {
   return def.shape.boxes.reduce((s, b) => s + boxVolume(b.w, b.d, b.h), 0);
 }
 
-/** Rough footprint bounding box (unrotated) for a shape, used for the trunk-opening check. */
-function shapeFootprint(def: ItemDef): { w: number; d: number; h: number } {
-  if (def.shape.kind === 'box') return def.shape;
-  const bb = boundingBoxOf(def.shape.boxes.map((b) => ({ x: b.dx, y: b.dy, z: b.dz, w: b.w, d: b.d, h: b.h })));
-  return { w: bb.w, d: bb.d, h: bb.h };
+/** One candidate way to orient an item (box or compound), reduced to
+ * "place its own local origin at a world point and get world-space boxes." */
+interface ShapeVariant {
+  standingOnEnd: boolean;
+  /** Differs from how the item is authored (turned sideways and/or stood up). */
+  rotated: boolean;
+  footprint: { w: number; d: number; h: number };
+  boxesAt: (origin: { x: number; y: number; z: number }) => Box[];
+}
+
+/** All candidate orientations for an item, box or compound alike — both get
+ * the same "which axis is vertical, plus yaw" degrees of freedom, so a
+ * compound item (a stroller, a suitcase modeled with protruding wheels) can
+ * be stood on end just like a simple box can. `scale` shrinks height only,
+ * for compressible items being squeezed into a gap. */
+function buildVariants(def: ItemDef, scale: number): ShapeVariant[] {
+  if (def.shape.kind === 'box') {
+    const original = def.shape;
+    return generateOrientations(original, def.canStandOnEnd, def.orientationsAllowed).map((o) => {
+      const scaled = scale === 1 ? o : { ...o, h: o.h * scale };
+      return {
+        standingOnEnd: scaled.standingOnEnd,
+        rotated: o.w !== original.w || o.d !== original.d || o.h !== original.h,
+        footprint: { w: scaled.w, d: scaled.d, h: scaled.h },
+        boxesAt: (origin) => [worldBoxForOrientation(origin, scaled)],
+      };
+    });
+  }
+  const original = def.shape.boxes;
+  return generateCompoundOrientations(original, def.canStandOnEnd, def.orientationsAllowed).map((variant, i) => {
+    const boxes = scale === 1 ? variant.boxes : variant.boxes.map((b) => ({ ...b, h: b.h * scale, dz: b.dz * scale }));
+    const bb = boundingBoxOf(worldBoxesForCompound({ x: 0, y: 0, z: 0 }, boxes));
+    return {
+      standingOnEnd: variant.standingOnEnd,
+      rotated: i !== 0,
+      footprint: { w: bb.w, d: bb.d, h: bb.h },
+      boxesAt: (origin) => worldBoxesForCompound(origin, boxes),
+    };
+  });
 }
 
 /**
  * Whether the item can pass through the opening in ANY of its valid
  * orientations, not just as authored — a suitcase that's too tall upright
  * can usually still be tipped on its side to slide through a short opening.
- * Compound shapes fall back to their unrotated bounding box (only yaw is
- * modeled for them elsewhere too).
  */
 function fitsThroughOpening(def: ItemDef, opening: CarProfile['opening']): boolean {
   const tol = def.canTiltForClosing ? 1.15 : 1.0;
   const fits = (w: number, h: number) => w <= opening.width * tol && h <= opening.height * tol;
-  if (def.shape.kind === 'box') {
-    return generateOrientations(def.shape, def.canStandOnEnd, def.orientationsAllowed).some((o) => fits(o.w, o.h));
-  }
-  const bb = shapeFootprint(def);
-  return fits(bb.w, bb.h);
+  return buildVariants(def, 1).some((v) => fits(v.footprint.w, v.footprint.h));
 }
 
 /** Candidate x/y grid derived from region edges and already-placed item edges. */
@@ -86,8 +115,8 @@ function regionBounds(regions: CarProfile['trunkRegions']) {
 
 interface PlacementResult {
   origin: { x: number; y: number; z: number };
-  orientation: Orientation;
-  yawSwapped: boolean;
+  standingOnEnd: boolean;
+  rotated: boolean;
   worldBoxes: Box[];
 }
 
@@ -109,24 +138,14 @@ function tryPlace(
   const xEdges = candidateAxis([...regionXEdges, ...placed.flatMap((p) => p.worldBoxes.flatMap((b) => [b.x, b.x + b.w]))], bounds.xMin, bounds.xMax);
   const yEdges = candidateAxis([...regionYEdges, ...placed.flatMap((p) => p.worldBoxes.flatMap((b) => [b.y, b.y + b.d]))], bounds.yMin, bounds.yMax);
 
-  const orientations: { orientation: Orientation; yawSwapped: boolean }[] =
-    def.shape.kind === 'box'
-      ? generateOrientations(def.shape, def.canStandOnEnd, def.orientationsAllowed).map((o) => ({
-          orientation: scaleOrientation(o, scale),
-          yawSwapped: false,
-        }))
-      : [
-          { orientation: { w: 0, d: 0, h: 0, standingOnEnd: false }, yawSwapped: false },
-          { orientation: { w: 0, d: 0, h: 0, standingOnEnd: false }, yawSwapped: true },
-        ];
+  const variants = buildVariants(def, scale);
 
   let best: { score: [number, number, number]; result: PlacementResult } | null = null;
 
-  for (const { orientation, yawSwapped } of orientations) {
+  for (const variant of variants) {
     for (const y of yEdges) {
       for (const x of xEdges) {
-        const probeOrigin = { x, y, z: 0 };
-        const probeBoxes = worldBoxesFor(def.shape, probeOrigin, orientation, yawSwapped);
+        const probeBoxes = variant.boxesAt({ x, y, z: 0 });
         const bb = boundingBoxOf(probeBoxes);
         if (bb.x + bb.w > bounds.xMax + 1e-6) continue;
         if (bb.y + bb.d > bounds.yMax + 1e-6) continue;
@@ -143,7 +162,7 @@ function tryPlace(
         }
 
         const finalOrigin = { x, y, z: z0 };
-        const worldBoxes = worldBoxesFor(def.shape, finalOrigin, orientation, yawSwapped);
+        const worldBoxes = variant.boxesAt(finalOrigin);
 
         const fits = worldBoxes.every((wb) => boxFitsInCavity(wb, regions, { heightCap }));
         if (!fits) continue;
@@ -156,18 +175,13 @@ function tryPlace(
         // then centered/lowest x.
         const score: [number, number, number] = [z0, -y, x];
         if (!best || scoreLess(score, best.score)) {
-          best = { score, result: { origin: finalOrigin, orientation, yawSwapped, worldBoxes } };
+          best = { score, result: { origin: finalOrigin, standingOnEnd: variant.standingOnEnd, rotated: variant.rotated, worldBoxes } };
         }
       }
     }
   }
 
   return best?.result ?? null;
-}
-
-function scaleOrientation(o: Orientation, scale: number): Orientation {
-  if (scale === 1) return o;
-  return { ...o, h: o.h * scale };
 }
 
 function scoreLess(a: [number, number, number], b: [number, number, number]): boolean {
@@ -315,9 +329,8 @@ export function pack(
       category: p.instance.def.category,
       position: p.origin,
       size: { w: bb.w, d: bb.d, h: bb.h },
-      rotated:
-        p.instance.def.shape.kind === 'box' ? p.orientation.w !== p.instance.def.shape.w : p.yawSwapped,
-      standingOnEnd: p.orientation.standingOnEnd,
+      rotated: p.rotated,
+      standingOnEnd: p.standingOnEnd,
       accessible: isAccessible,
       regionLabel: regionLabelAt(regions, p.origin.x, p.origin.y),
       note: buildNote(p, isAccessible),
@@ -347,7 +360,7 @@ export function pack(
 
 function buildNote(p: PlacementResult & { instance: ItemInstance }, accessible: boolean): string | undefined {
   const notes: string[] = [];
-  if (p.orientation.standingOnEnd) notes.push('stand it on end');
+  if (p.standingOnEnd) notes.push('stand it on end');
   if (accessible) notes.push('kept near the opening for easy access');
   return notes.length ? notes.join('; ') : undefined;
 }

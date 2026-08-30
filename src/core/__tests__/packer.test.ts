@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { pack } from '../packer';
 import { buildGenericCarProfile } from '../carTemplates';
-import { totalCavityVolume } from '../geometry';
+import { generateCompoundOrientations, totalCavityVolume } from '../geometry';
 import { CARS, getCarById } from '../../data/cars';
 import { getItemById, ITEMS } from '../../data/items';
 import type { ItemDef, PackRequest } from '../types';
@@ -128,6 +128,30 @@ describe('pack', () => {
     } else {
       expect(duffel.size.w * duffel.size.d * duffel.size.h).toBeGreaterThan(0);
     }
+  });
+
+  it('slides a thin flat item into the gap under a wheeled suitcase, between its wheel housings', () => {
+    const req: PackRequest = {
+      carId: camry.id,
+      items: [
+        { itemId: 'suitcase-large-checked', qty: 1 },
+        { itemId: 'document-folio', qty: 1 },
+      ],
+    };
+    const plan = pack(req, camry, ITEMS);
+    const folio = plan.placements.find((p) => p.itemId === 'document-folio');
+    expect(folio).toBeDefined();
+    // it should be tucked at floor level, under the suitcase's wheel height
+    expect(folio!.position.z).toBeLessThan(5);
+  });
+
+  it('can now stand a compound-shaped item on end, not just rotate it flat', () => {
+    // The old engine only supported yaw for compound shapes; a suitcase's
+    // wheels-plus-body assembly should be standable just like a plain box.
+    const def = ITEMS.find((i) => i.id === 'suitcase-carryon-hard')!;
+    expect(def.shape.kind).toBe('compound');
+    const variants = generateCompoundOrientations((def.shape as { kind: 'compound'; boxes: any[] }).boxes, def.canStandOnEnd, def.orientationsAllowed);
+    expect(variants.some((v) => v.standingOnEnd)).toBe(true);
   });
 
   it('places items even when the trunk floor corner sits in a low-ceiling pinch zone (regression)', () => {

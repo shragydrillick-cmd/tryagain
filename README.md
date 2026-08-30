@@ -13,9 +13,17 @@ actually close."
   arches that pinch the floor, a liftgate that slopes down toward the
   opening, and — critically — the **closed-lid height**, so a plan that
   "fits" also actually lets you shut the trunk.
-- **Items aren't all boxes either.** A folded stroller or a standing golf
-  bag gets modeled as a compound shape (multiple offset sub-boxes), not a
-  single bounding box (`src/data/items.ts`).
+- **Items aren't all boxes either — including what sticks out.** A folded
+  stroller, a standing golf bag, and a wheeled suitcase (its shell doesn't
+  reach the floor — it stands on small wheel housings) all get modeled as
+  compound shapes: a main body plus offset sub-boxes for whatever protrudes
+  (`src/data/items.ts`, built via `src/core/shapeBuilders.ts`). This isn't
+  just cosmetic — leaving the true gap under a suitcase's wheels means a
+  thin flat item can genuinely slide into that space in the plan, the way
+  it would in real life (see the `document-folio` item and its packer
+  test). Compound items can be stood on end, not just rotated flat
+  (`generateCompoundOrientations` in `src/core/geometry.ts`) — the same
+  "which axis is vertical, plus yaw" freedom a plain box gets.
 - **Body-style-aware accessibility.** A sedan's trunk lid opens from the
   top, so "can I reach this without unpacking?" depends on what's stacked
   *above* it. A hatchback/SUV/minivan opens from the rear, so it depends on
@@ -28,13 +36,18 @@ actually close."
 - **Compressible items squeeze last.** Soft bags (duffels, backpacks) are
   tried at full size first, then progressively compressed to fill leftover
   gaps, the way you'd actually jam a duffel into a gap by hand.
-- **Custom items with a photo-assisted measurer.** Don't see your exact
-  suitcase in the library? Add it with manual dimensions, or use the photo
-  tool: tap two points on a part whose length you already know, type that
-  length in, then tap two more points on the part you want measured — the
-  ratio of on-screen pixel distances gives the real length, no camera
-  calibration needed. Saved custom items persist locally and show up again
-  next time.
+- **Custom items are guided, not three blank fields.** "Add your own item"
+  (`app/custom-item.tsx`) asks for the overall size (with per-field
+  guidance on which angle to photograph — front for width/height, side for
+  depth) via the same photo-measuring tool described below, then asks
+  explicitly "what sticks out?" — wheels at all four corners, wheels on
+  one edge, or a top handle housing — and assembles those answers into a
+  real compound shape via `buildItemShape`, the same builder the seed
+  library uses. The photo tool itself: tap two points on a part whose
+  length you already know, type that length in, then tap two more points
+  on the part you want measured — the ratio of on-screen pixel distances
+  gives the real length, no camera calibration needed. Saved custom items
+  persist locally and show up again next time.
 - **Any car, including ones not in the library.** 14 cars ship pre-seeded
   (sedan/coupe/hatchback/wagon/SUV/minivan/pickup, one EV, a couple of
   discontinued models) with dimensions pulled from published specs. Don't
@@ -73,9 +86,15 @@ sampled point of its footprint, not just a single ceiling number.
 
 Car trunk-region breakdowns are engineering approximations built from
 published cargo-volume/opening specs and typical body-style geometry — not
-an official manufacturer CAD export. Each car and item carries a
-`sourceNote` explaining what it's based on. Real trims vary; that's exactly
-why saving your own measured items exists.
+an official manufacturer CAD export. Most seed items are similarly
+"typical for the category" (a generic carry-on, a generic cooler). A few
+are specific named products (Away's Carry-On, a YETI Roadie 24, an
+UPPAbaby Vista) researched directly from the manufacturer's own published
+specs, including wheel/handle dimensions where published, and marked as
+such in their `sourceNote`. Every car and item carries a `sourceNote`
+saying exactly what it's based on. There's no live lookup at runtime (see
+below) — real trims and exact SKUs vary, which is exactly why the guided
+custom-item/custom-car tools exist rather than a plain box fallback.
 
 ## Running it
 

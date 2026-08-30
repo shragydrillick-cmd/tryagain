@@ -140,25 +140,60 @@ export function generateOrientations(
   return out;
 }
 
-/** World-space sub-boxes for a (possibly compound) item shape placed at an
- * origin with a given orientation. Only 90-degree yaw is supported for
- * compound shapes (no standing-on-end swap) to keep multi-box items tractable. */
-export function worldBoxesFor(
-  shape: ItemShape,
-  origin: { x: number; y: number; z: number },
-  orientation: Orientation,
-  yawSwapped: boolean
-): Box[] {
-  if (shape.kind === 'box') {
-    return [{ x: origin.x, y: origin.y, z: origin.z, w: orientation.w, d: orientation.d, h: orientation.h }];
-  }
-  return shape.boxes.map((b) => {
-    const dx = yawSwapped ? b.dy : b.dx;
-    const dy = yawSwapped ? b.dx : b.dy;
-    const w = yawSwapped ? b.d : b.w;
-    const d = yawSwapped ? b.w : b.d;
-    return { x: origin.x + dx, y: origin.y + dy, z: origin.z + b.dz, w, d, h: b.h };
+/** World-space box for a box-shaped item placed at an origin with a given orientation. */
+export function worldBoxForOrientation(origin: { x: number; y: number; z: number }, orientation: Orientation): Box {
+  return { x: origin.x, y: origin.y, z: origin.z, w: orientation.w, d: orientation.d, h: orientation.h };
+}
+
+export type CompoundSubBox = Extract<ItemShape, { kind: 'compound' }>['boxes'][number];
+
+export interface CompoundOrientation {
+  boxes: CompoundSubBox[];
+  standingOnEnd: boolean;
+}
+
+/** Rigidly re-labels two axes of every sub-box in a compound assembly —
+ * equivalent to a 90-degree rotation of the whole assembly about the third
+ * axis. Each axis's sub-box offsets already start at 0 (by construction of
+ * the authored shape), so swapping two axes' (offset, extent) pairs stays a
+ * valid, still-normalized assembly with no renormalization needed. */
+function swapCompoundAxes(boxes: CompoundSubBox[], axes: 'xz' | 'yz' | 'xy'): CompoundSubBox[] {
+  return boxes.map((b) => {
+    if (axes === 'xz') return { dx: b.dz, dy: b.dy, dz: b.dx, w: b.h, d: b.d, h: b.w };
+    if (axes === 'yz') return { dx: b.dx, dy: b.dz, dz: b.dy, w: b.w, d: b.h, h: b.d };
+    return { dx: b.dy, dy: b.dx, dz: b.dz, w: b.d, d: b.w, h: b.h };
   });
+}
+
+/** Generates candidate orientations for a compound (multi-box) shape — the
+ * same "which axis is vertical, plus yaw" degrees of freedom as a plain box
+ * (see generateOrientations), applied to the whole assembly at once so a
+ * compound item (a stroller, a suitcase modeled with protruding wheels) can
+ * be stood on end just like a simple box can, not just rotated flat. */
+export function generateCompoundOrientations(
+  boxes: CompoundSubBox[],
+  canStandOnEnd: boolean,
+  orientationsAllowed: 'any' | 'uprightOnly' | 'flatOnly'
+): CompoundOrientation[] {
+  const verticalVariants: CompoundOrientation[] =
+    orientationsAllowed === 'any' && canStandOnEnd
+      ? [
+          { boxes, standingOnEnd: false },
+          { boxes: swapCompoundAxes(boxes, 'xz'), standingOnEnd: true },
+          { boxes: swapCompoundAxes(boxes, 'yz'), standingOnEnd: true },
+        ]
+      : [{ boxes, standingOnEnd: false }];
+
+  const out: CompoundOrientation[] = [];
+  for (const v of verticalVariants) {
+    out.push(v);
+    out.push({ boxes: swapCompoundAxes(v.boxes, 'xy'), standingOnEnd: v.standingOnEnd });
+  }
+  return out;
+}
+
+export function worldBoxesForCompound(origin: { x: number; y: number; z: number }, boxes: CompoundSubBox[]): Box[] {
+  return boxes.map((b) => ({ x: origin.x + b.dx, y: origin.y + b.dy, z: origin.z + b.dz, w: b.w, d: b.d, h: b.h }));
 }
 
 export function boundingBoxOf(boxes: Box[]): Box {
