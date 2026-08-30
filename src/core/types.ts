@@ -49,7 +49,11 @@ export interface CarProfile {
   make: string;
   model: string;
   years: string;
-  bodyStyle: 'sedan' | 'hatchback' | 'suv' | 'minivan' | 'pickup' | 'wagon';
+  bodyStyle: 'sedan' | 'hatchback' | 'suv' | 'minivan' | 'pickup' | 'wagon' | 'coupe';
+  /** True when this profile was generated from user-entered measurements
+   * (via the "add a car we don't have" flow) rather than curated from
+   * published specs. Surfaced in the UI so the user knows which is which. */
+  isCustom?: boolean;
   trunkRegions: CavityRegion[];
   opening: TrunkOpening;
   rearVisibility?: RearVisibilityProfile;

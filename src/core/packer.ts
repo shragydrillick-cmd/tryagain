@@ -51,9 +51,21 @@ function shapeFootprint(def: ItemDef): { w: number; d: number; h: number } {
   return { w: bb.w, d: bb.d, h: bb.h };
 }
 
-function fitsThroughOpening(w: number, h: number, opening: CarProfile['opening'], canTilt: boolean): boolean {
-  const tol = canTilt ? 1.15 : 1.0;
-  return w <= opening.width * tol && h <= opening.height * tol;
+/**
+ * Whether the item can pass through the opening in ANY of its valid
+ * orientations, not just as authored — a suitcase that's too tall upright
+ * can usually still be tipped on its side to slide through a short opening.
+ * Compound shapes fall back to their unrotated bounding box (only yaw is
+ * modeled for them elsewhere too).
+ */
+function fitsThroughOpening(def: ItemDef, opening: CarProfile['opening']): boolean {
+  const tol = def.canTiltForClosing ? 1.15 : 1.0;
+  const fits = (w: number, h: number) => w <= opening.width * tol && h <= opening.height * tol;
+  if (def.shape.kind === 'box') {
+    return generateOrientations(def.shape, def.canStandOnEnd, def.orientationsAllowed).some((o) => fits(o.w, o.h));
+  }
+  const bb = shapeFootprint(def);
+  return fits(bb.w, bb.h);
 }
 
 /** Candidate x/y grid derived from region edges and already-placed item edges. */
@@ -224,8 +236,7 @@ export function pack(
 
   for (let idx = 0; idx < sorted.length; idx++) {
     const inst = sorted[idx];
-    const { w, h } = shapeFootprint(inst.def);
-    if (!fitsThroughOpening(w, h, car.opening, inst.def.canTiltForClosing)) {
+    if (!fitsThroughOpening(inst.def, car.opening)) {
       unplaced.push({
         itemId: inst.def.id,
         itemName: inst.def.name,
@@ -287,7 +298,7 @@ export function pack(
     const bb = boundingBoxOf(p.worldBoxes);
     const isAccessible = p.instance.accessible;
     if (isAccessible) {
-      const openFromTop = car.bodyStyle === 'sedan';
+      const openFromTop = car.bodyStyle === 'sedan' || car.bodyStyle === 'coupe';
       const reachable = p.worldBoxes.every((wb) => isReachableFromOpening(wb, allBoxesFlat, p.instance.instanceId, openFromTop));
       if (!reachable) {
         warnings.push({

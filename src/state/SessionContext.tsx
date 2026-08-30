@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import type { ItemDef } from '../core/types';
+import type { CarProfile, ItemDef } from '../core/types';
 
 export interface SelectedLine {
   itemId: string;
@@ -11,6 +11,7 @@ interface SessionState {
   seatsFolded: boolean;
   selectedItems: SelectedLine[];
   customItems: ItemDef[];
+  customCars: CarProfile[];
   accessibleItemIds: string[];
   keepRearVisibility: boolean;
   allowBlockingRearView: 'auto' | 'never' | 'ifNeeded';
@@ -21,6 +22,7 @@ interface SessionApi extends SessionState {
   setSeatsFolded: (v: boolean) => void;
   setQty: (itemId: string, qty: number) => void;
   addCustomItem: (item: ItemDef) => void;
+  addCustomCar: (car: CarProfile) => void;
   removeSelected: (itemId: string) => void;
   toggleAccessible: (itemId: string) => void;
   setKeepRearVisibility: (v: boolean) => void;
@@ -33,6 +35,7 @@ const initial: SessionState = {
   seatsFolded: false,
   selectedItems: [],
   customItems: [],
+  customCars: [],
   accessibleItemIds: [],
   keepRearVisibility: false,
   allowBlockingRearView: 'auto',
@@ -67,6 +70,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const addCustomCar = useCallback((car: CarProfile) => {
+    setState((s) => ({ ...s, customCars: [...s.customCars.filter((c) => c.id !== car.id), car] }));
+  }, []);
+
   const removeSelected = useCallback((itemId: string) => {
     setState((s) => ({ ...s, selectedItems: s.selectedItems.filter((l) => l.itemId !== itemId), accessibleItemIds: s.accessibleItemIds.filter((id) => id !== itemId) }));
   }, []);
@@ -80,11 +87,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const setKeepRearVisibility = useCallback((v: boolean) => setState((s) => ({ ...s, keepRearVisibility: v })), []);
   const setAllowBlockingRearView = useCallback((v: SessionState['allowBlockingRearView']) => setState((s) => ({ ...s, allowBlockingRearView: v })), []);
-  const resetItems = useCallback(() => setState((s) => ({ ...initial, carId: s.carId })), []);
+  // customCars must survive a reset — carId may still point at one, and
+  // resolving it later needs the profile to still be in state.
+  const resetItems = useCallback(() => setState((s) => ({ ...initial, carId: s.carId, customCars: s.customCars })), []);
 
   const value = useMemo<SessionApi>(
-    () => ({ ...state, setCar, setSeatsFolded, setQty, addCustomItem, removeSelected, toggleAccessible, setKeepRearVisibility, setAllowBlockingRearView, resetItems }),
-    [state, setCar, setSeatsFolded, setQty, addCustomItem, removeSelected, toggleAccessible, setKeepRearVisibility, setAllowBlockingRearView, resetItems]
+    () => ({
+      ...state,
+      setCar,
+      setSeatsFolded,
+      setQty,
+      addCustomItem,
+      addCustomCar,
+      removeSelected,
+      toggleAccessible,
+      setKeepRearVisibility,
+      setAllowBlockingRearView,
+      resetItems,
+    }),
+    [state, setCar, setSeatsFolded, setQty, addCustomItem, addCustomCar, removeSelected, toggleAccessible, setKeepRearVisibility, setAllowBlockingRearView, resetItems]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

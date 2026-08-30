@@ -35,6 +35,14 @@ actually close."
   ratio of on-screen pixel distances gives the real length, no camera
   calibration needed. Saved custom items persist locally and show up again
   next time.
+- **Any car, including ones not in the library.** 14 cars ship pre-seeded
+  (sedan/coupe/hatchback/wagon/SUV/minivan/pickup, one EV, a couple of
+  discontinued models) with dimensions pulled from published specs. Don't
+  see yours? "Add a car we don't have" (`app/custom-car.tsx`) takes a
+  handful of measurements and body-style toggles and still builds a
+  realistic non-box cavity via `src/core/carTemplates.ts` — the same
+  wheel-arch/slope/hinge-corner modeling the curated cars use — instead of
+  falling back to a plain box.
 
 ## Architecture
 
@@ -87,5 +95,11 @@ If your network blocks Expo's telemetry/update-check calls, run with
 
 - A real vision-model dimension estimator (the photo tool is architected so
   swapping in an actual model call is a one-function change).
-- More cars/items — the data files are the extension point.
-- Persisting a full session (not just saved items) so you can resume a trip.
+- A live lookup backend. This app is client-only — there's no server, so
+  "look up any car/item on the spot" only happens at build time (research
+  baked into `src/data/`), not at runtime. Making it live would mean
+  standing up a small hosted API that takes a make/model (or item name),
+  calls a search/LLM API server-side (never embed that key in client code),
+  and returns a structured profile — real infrastructure, not a code change.
+- Persisting a full session (not just saved items/cars) so you can resume a
+  trip in progress.

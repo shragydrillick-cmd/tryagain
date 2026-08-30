@@ -18,6 +18,7 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="index" options={{ title: 'PackWise' }} />
+          <Stack.Screen name="custom-car" options={{ title: "Add a car we don't have", presentation: 'modal' }} />
           <Stack.Screen name="items" options={{ title: 'Choose items' }} />
           <Stack.Screen name="custom-item" options={{ title: 'Add your own item', presentation: 'modal' }} />
           <Stack.Screen name="preferences" options={{ title: 'Packing preferences' }} />

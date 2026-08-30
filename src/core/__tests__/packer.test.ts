@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { pack } from '../packer';
-import { getCarById } from '../../data/cars';
+import { buildGenericCarProfile } from '../carTemplates';
+import { totalCavityVolume } from '../geometry';
+import { CARS, getCarById } from '../../data/cars';
 import { getItemById, ITEMS } from '../../data/items';
 import type { ItemDef, PackRequest } from '../types';
 
@@ -58,10 +60,12 @@ describe('pack', () => {
     expect(backpack.order).toBe(plan.placements.length);
   });
 
-  it('rejects an item that cannot fit through the trunk opening even though interior volume exists', () => {
-    const tooWide: ItemDef = {
-      id: 'test-too-wide-panel',
-      name: 'Oversized panel',
+  it('lets a long thin item through by orienting it lengthwise, but rejects one that is oversized in both horizontal dimensions', () => {
+    // A thin rod genuinely can slide through a narrower opening lengthwise —
+    // only its cross-section (the two non-length dimensions) has to clear.
+    const rod: ItemDef = {
+      id: 'test-thin-rod',
+      name: 'Thin rod',
       category: 'test',
       shape: { kind: 'box', w: 200, d: 5, h: 5 },
       rigid: true,
@@ -69,7 +73,22 @@ describe('pack', () => {
       canTiltForClosing: false,
       orientationsAllowed: 'flatOnly',
     };
-    const req: PackRequest = { carId: camry.id, items: [{ itemId: tooWide.id, qty: 1, customItem: tooWide }] };
+    const rodPlan = pack({ carId: camry.id, items: [{ itemId: rod.id, qty: 1, customItem: rod }] }, camry, ITEMS);
+    expect(rodPlan.unplaced.find((u) => /opening/i.test(u.reason))).toBeUndefined();
+
+    // A flat panel that's oversized in BOTH horizontal dimensions can't be
+    // rotated into anything that clears the opening.
+    const panel: ItemDef = {
+      id: 'test-too-wide-panel',
+      name: 'Oversized panel',
+      category: 'test',
+      shape: { kind: 'box', w: 200, d: 200, h: 5 },
+      rigid: true,
+      canStandOnEnd: false,
+      canTiltForClosing: false,
+      orientationsAllowed: 'flatOnly',
+    };
+    const req: PackRequest = { carId: camry.id, items: [{ itemId: panel.id, qty: 1, customItem: panel }] };
     const plan = pack(req, camry, ITEMS);
     expect(plan.placements).toHaveLength(0);
     expect(plan.unplaced).toHaveLength(1);
@@ -150,6 +169,33 @@ describe('pack', () => {
     const suvFolded = pack({ ...suvReq, seatsFolded: true }, crv, ITEMS);
     expect(suvFolded.cavityVolumeCm3).toBeGreaterThan(suvBase.cavityVolumeCm3);
     expect(suvFolded.placements.length).toBeGreaterThanOrEqual(suvBase.placements.length);
+  });
+
+  it('every car in the library has a positive cavity volume and can place at least one carry-on', () => {
+    for (const car of CARS) {
+      expect(totalCavityVolume(car.trunkRegions)).toBeGreaterThan(0);
+      const plan = pack({ carId: car.id, items: [{ itemId: 'suitcase-carryon-hard', qty: 1 }] }, car, ITEMS);
+      expect(plan.placements.length, `${car.make} ${car.model} should fit one carry-on`).toBe(1);
+    }
+  });
+
+  it('builds a placeable generic profile for a custom car in each body style', () => {
+    const styles = ['sedan', 'coupe', 'hatchback', 'wagon', 'suv', 'minivan', 'pickup'] as const;
+    for (const bodyStyle of styles) {
+      const car = buildGenericCarProfile({
+        id: `custom-${bodyStyle}`,
+        make: 'Test',
+        model: bodyStyle,
+        bodyStyle,
+        width: 110,
+        depth: 90,
+        height: 60,
+      });
+      expect(car.isCustom).toBe(true);
+      expect(totalCavityVolume(car.trunkRegions)).toBeGreaterThan(0);
+      const plan = pack({ carId: car.id, items: [{ itemId: 'backpack', qty: 1 }] }, car, ITEMS);
+      expect(plan.placements.length, `${bodyStyle} should fit a backpack`).toBe(1);
+    }
   });
 });
 

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSession } from '../src/state/SessionContext';
-import { getCarById } from '../src/data/cars';
+import { resolveCar } from '../src/data/cars';
 import { ITEMS } from '../src/data/items';
 import { pack } from '../src/core/packer';
 import { buildInstructions, summarize } from '../src/core/instructions';
@@ -14,9 +14,9 @@ import type { PackRequest } from '../src/core/types';
 export default function ResultScreen() {
   const router = useRouter();
   const session = useSession();
-  const { carId, selectedItems, customItems, accessibleItemIds, seatsFolded, keepRearVisibility, allowBlockingRearView, resetItems } = session;
+  const { carId, selectedItems, customItems, customCars, accessibleItemIds, seatsFolded, keepRearVisibility, allowBlockingRearView, resetItems } = session;
 
-  const car = carId ? getCarById(carId) : undefined;
+  const car = carId ? resolveCar(carId, customCars) : undefined;
 
   const plan = useMemo(() => {
     if (!car) return null;
@@ -60,6 +60,7 @@ export default function ResultScreen() {
           {car.make} {car.model}
         </Text>
         <Text style={styles.hint}>{summarize(plan)}</Text>
+        {car.isCustom && <Text style={styles.hint}>Estimated from the measurements you entered for this car.</Text>}
       </View>
 
       {plan.placements.length > 0 && (

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Switch } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSession } from '../src/state/SessionContext';
-import { getCarById } from '../src/data/cars';
+import { resolveCar } from '../src/data/cars';
 import { ITEMS } from '../src/data/items';
 import { colors, spacing, radius, type } from '../src/theme';
 
@@ -12,6 +12,7 @@ export default function PreferencesScreen() {
     carId,
     selectedItems,
     customItems,
+    customCars,
     accessibleItemIds,
     toggleAccessible,
     seatsFolded,
@@ -22,7 +23,7 @@ export default function PreferencesScreen() {
     setAllowBlockingRearView,
   } = useSession();
 
-  const car = carId ? getCarById(carId) : undefined;
+  const car = carId ? resolveCar(carId, customCars) : undefined;
 
   useEffect(() => {
     if (!carId || selectedItems.length === 0) router.replace(carId ? '/items' : '/');
@@ -93,7 +94,9 @@ export default function PreferencesScreen() {
         </View>
       ) : (
         <View style={styles.infoBox}>
-          <Text style={styles.hint}>{car.bodyStyle === 'sedan' ? 'Enclosed trunk — packing here never affects your rear-view.' : 'No rear window to worry about here.'}</Text>
+          <Text style={styles.hint}>
+            {car.bodyStyle === 'sedan' || car.bodyStyle === 'coupe' ? 'Enclosed trunk — packing here never affects your rear-view.' : 'No rear window to worry about here.'}
+          </Text>
         </View>
       )}
 
