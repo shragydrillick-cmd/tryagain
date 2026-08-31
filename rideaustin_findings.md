@@ -451,3 +451,57 @@ HTTP/1.1 403 Forbidden   (blocked, same as GitHub — cannot verify directly)
 What's genuinely ruled out (checked directly, confirmed absent or dead): all four named GitHub repos (2 have no raw data at all, 1 doesn't exist, and the parent repo has no forks), every Kaggle search variant tried, Zenodo, Figshare, and all data.world uploads of this dataset (platform-wide retirement, not one account).
 
 What's unresolved because this environment's network access blocked the check, not because I found evidence it's unavailable: the Wayback Machine snapshot of the data.world page (`web.archive.org` and its CDX API are both unreachable from here), `archive.ph` (connection reset), ICPSR's own search (403), and the one Harvard Dataverse hit's actual file contents (needs a login). If you can check the Wayback Machine link above from your own browser, or you have institutional access to ICPSR/Dataverse, those are the three remaining leads worth you personally chasing — I've exhausted what I can verify from here.
+
+---
+
+# Addendum 3: INFORMS replication package and SSRN check
+
+**Bottom line up front: I could not download or view any supplemental/replication content from either source.** Both sites blocked direct access; I'm reporting that plainly rather than guessing at what's behind the block.
+
+## INFORMS PubsOnline article page
+
+Confirmed the article page exists:
+```
+DOI: 10.1287/mnsc.2021.4058
+URL: https://pubsonline.informs.org/doi/10.1287/mnsc.2021.4058
+Journal: Management Science, Vol. 68, Issue 5, pp. 3219-3235
+Published online: August 9, 2021
+```
+
+A direct `curl` to this domain (even with a browser User-Agent) is bot-blocked outright:
+```
+$ curl -A "Mozilla/5.0 ..." -L https://pubsonline.informs.org/doi/10.1287/mnsc.2021.4058
+HTTP_STATUS:403
+```
+
+A fetch through the WebFetch tool (which renders/converts the page rather than raw `curl`) **did** load the article page, and confirmed a supplemental-material link exists:
+```
+Anchor tag href: /doi/suppl/10.1287/mnsc.2021.4058
+Visible link text: "Supplemental Material"
+```
+So INFORMS's own page says supplemental material exists for this article. But following that exact link — `https://pubsonline.informs.org/doi/suppl/10.1287/mnsc.2021.4058` — did not surface any actual file list, PDF, dataset, or code archive. Every fetch of it (three attempts, with prompts specifically asking for raw HTML, embedded JSON, and any `.pdf`/`.zip`/`.csv`/`suppl_file`/`downloadSupplement` strings) returned only the generic INFORMS PubsOnline site shell — nav menus, login prompts, footer contact info — with **no matching strings found**:
+```
+"No files with extensions (.zip, .pdf, .csv, .r, .py) are present on this page."
+"Result: No matching strings found." [searching for suppl_file, .pdf, .zip, .csv, .sm1, .sm2, downloadSupplement]
+```
+
+**I don't know why** — it's one of two things I can't distinguish from here: (a) the actual file list is loaded by JavaScript after page load, which the fetch tool doesn't execute, or (b) the supplement requires an authenticated/subscriber session and silently falls back to the generic shell instead of a clear paywall message. Either way, **nothing was ever exposed to me to download**, so I downloaded nothing. I can't report whether the replication package contains data files, code, or both — I never got to see its contents.
+
+## SSRN (abstract_id=3390346)
+
+**Completely inaccessible.** Every attempt returned HTTP 403:
+```
+$ curl -A "Mozilla/5.0 ..." -L https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3390346
+HTTP_STATUS:403
+
+WebFetch https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3390346 → HTTP 403 Forbidden
+WebFetch https://ssrn.com/abstract=3390346 → HTTP 403 Forbidden
+```
+I could not load the SSRN page at all — not the abstract, not a file list, nothing. This is a hard block (SSRN is known to bot-block automated/non-browser traffic aggressively), not a finding that SSRN lacks supplementary files. I have no information about what, if anything, is attached to the SSRN version.
+
+## What this means for your two questions
+
+- **Does the replication package contain data files or only code?** Unknown — I never got to see its contents on either site.
+- **Is there a file with `driver_id`/`active_driver_id`?** Unknown, for the same reason — nothing was downloadable through my access, so there's nothing to report a column list or row count for.
+
+**This needs a human with a browser** (and ideally institutional/INFORMS-subscriber access, since Management Science articles are often paywalled beyond the abstract) to actually open `https://pubsonline.informs.org/doi/suppl/10.1287/mnsc.2021.4058` and `https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3390346` and see what's there. If you can get either page to load and either send me the resulting file(s)/URLs or paste what you see, I can pick up the analysis (row count, full column list, driver ID check) from there.
