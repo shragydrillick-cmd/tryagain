@@ -590,3 +590,69 @@ This is a 1-hour no-further-trip gap rule — a different, narrower notion than 
 ## Bottom line
 
 The paper reports **driver and trip counts** for its analysis window (3,811 drivers, 503,383 trips) and a precise **operational definition of a shift** (via `active_driver_id`, bounded by first-dispatch-to-last-trip-end), but does **not** report a shift-length distribution, a trips-per-shift distribution, shift-level utilization, idle time, dispatch-time duration, or any cancellation statistic. Where the paper is silent, I'm reporting it as silent rather than filling the gap — the "30% unpaid time" figure that superficially resembles a utilization number is a trip-level metric (unpaid drive-to-pickup share of one job), not the shift-level "time on trip ÷ shift span" metric you asked about.
+
+---
+
+# Addendum 5: driver-reconstruction method from a different paper (arXiv 2502.08893)
+
+This is a **different paper** — "Uncovering Disparities in Rideshare Drivers' Earning and Work Patterns: A Case Study of Chicago" — using the Chicago Trip Network Provider dataset, not RideAustin. It's relevant here because it solves exactly the problem this whole investigation has been stuck on: reconstructing driver-level work patterns from a trip-level dataset **with no driver ID at all**.
+
+```
+$ curl -L -o paper.html https://arxiv.org/html/2502.08893v1
+HTTP_STATUS:200   (no paywall)
+```
+
+## Why they had to do this (the problem, in their words)
+
+They state plainly that the Chicago dataset has the same gap as RideAustin's Kaggle file:
+
+> "the Chicago ride-sharing dataset, similar to many other datasets in this domain, does not associate trips with either drivers or passengers... This prevents us from estimating drivers' total earnings and work hours, which is necessary for studying biases, fairness among driver groups."
+
+## The method: spatiotemporal feasibility between consecutive trips, not travel-time estimation
+
+Yes, they use feasibility between consecutive trips — but it's worth being precise about what they did **not** do: they never estimate travel time as its own quantity (no routing engine, no haversine-distance/speed model, no "time to drive from drop-off to next pickup" calculation — I grepped for `speed`, `haversine`, `routing`, `OSRM`, `Google Maps` and none of those appear as part of the method). Instead, they substitute two independent fixed thresholds as a joint proxy for "this could plausibly be the same driver":
+
+> "Our algorithm works under one assumption—if a driver takes a new trip after finishing a previous one, it is likely that the second trip's pickup location is close to the first one's drop-off location (spatial constraint), and the second trip starts shortly after the first one (temporal constraint)."
+
+The two constraints, stated precisely:
+1. **Temporal constraint**: "The new trip's start time must be after the current trip's end time but within a threshold α (e.g., 15 minutes)."
+2. **Spatial constraint**: "The distance between the current trip's drop-off location and the next trip's pickup location must be less than a specified threshold max_distance."
+3. **Driver constraint** (a third rule, bounding the whole route, not a per-trip feasibility check): "Each driver is assumed to work for no more than 8 hours per day or a maximum of 25 trips, whichever is reached first."
+
+Parameter values actually used: "we set the time threshold α=0.25 (hour) and maximum distance maxDist = 1 (mile)."
+
+**Algorithm 1** (their pseudocode, summarized — not reproduced verbatim line-by-line): pick a random unassigned trip as the seed for a new hypothetical driver's route; repeatedly look for unassigned trips whose start time falls in `[currentTrip.endTime, currentTrip.endTime + α]` **and** whose pickup is within `maxDist` of the current trip's drop-off; if any such candidates exist, randomly pick one of the "top feasible candidates" and append it, continuing until no candidate remains or the 8-hour/25-trip cap is hit; then start a new hypothetical driver with the next unassigned trip. Repeat until every trip is assigned to some hypothetical driver.
+
+Two more assumptions baked into the earnings/hours estimates downstream:
+- **No driver-earnings field exists in the data at all** (this is a fare-only dataset, like the RideAustin Kaggle file's lack of a driver payment column): "the Chicago dataset does not contain driver earning information but just trip cost for passengers. We use the trip total as a reasonable proxy to estimate driver earning."
+- **No wait/idle-time field exists either**, so they impute a flat constant rather than measuring it: "Since the dataset lacks detailed wait-time information, we apply a 0.25-hour wait time to all trips to approximate the real work hours." (Same 15-minute figure as α, applied for a different purpose — added padding to every trip's duration to approximate the driver's actual elapsed work time, not the between-trip matching threshold.)
+
+## Validation: against what, and how much
+
+This is the part worth reading closely, because it's a real limitation, not a formality. They validate only **indirectly**, and say so themselves:
+
+> "The t-SNE visualizations in Appendix A illustrate the spatial distribution of these cluster groups, validating both our simulation methodology and clustering approach."
+
+That's it for direct validation — a qualitative visual check that the resulting clusters look spatially sensible, not a comparison against any independent ground truth. They are explicit that no ground truth exists to validate against:
+
+> "While our approach provides valuable insights and matches previous empirical findings, the lack of direct ground truth data means we rely on approximations. We need alternative data sources to cross-verify our inferred driver activities."
+
+And again, in the numbered limitations:
+
+> "while our simulation model effectively assign trips to hypothetical drivers and return meaningful insights, it lacks a robust evaluation framework due to the absence of ground-truth data. To validate the findings, we plan to conduct a large-scale qualitative study of driver groups in Chicago."
+
+So: no held-out real driver IDs, no comparison dataset, no accuracy/precision number for the reconstruction itself. The closest thing to validation is that the reconstructed clusters' patterns qualitatively "match previous empirical findings" from other studies, plus that t-SNE plot. They propose fixing this in future work — a "large-scale qualitative study" and, notably, they call for the field in general to build proper benchmarks: "we encourage the development of benchmarks and more quantitative studies to better assess simulation approaches for this type of problem" — i.e., as of this paper, no such benchmark exists, including for their own method.
+
+## What they explicitly say it can't do
+
+Stated directly in Section 6 ("Limitations and Future Work"), split into two groups by the paper's own framing — limitations of the raw dataset, and limitations of the simulation method itself:
+
+- **No ground truth to check against** (quoted above) — the core limitation of the whole approach.
+- **Earnings are a proxy, not real earnings**: "we estimated downtime between trips and assumed that drivers' earnings equaled the trip costs paid by passengers. However, this does not fully capture drivers' actual earnings, as it removes platform fees."
+- **Can't scale beyond a small sample**: "due to computational constraints, we limited our analysis to weekly patterns in 2019 and 2023" — one week per year, not the full multi-year dataset, "due to computational constraints" of running the assignment algorithm.
+- Randomness is baked into the algorithm itself (two different "randomly pick" steps — seed trip selection, and choice among tied feasible candidates), meaning **the reconstruction is not deterministic** — rerunning it on the same data would not necessarily produce the same hypothetical drivers. The paper does not report run-to-run stability/variance of the resulting clusters.
+- Implicitly: the entire method identifies *hypothetical* drivers, not real ones — the paper is careful throughout to call the output "hypothetical drivers" / hypothetical driver routes, never claiming the reconstruction recovers actual driver identities, only plausible ones consistent with the spatiotemporal constraints.
+
+## Direct relevance to the RideAustin question this investigation started from
+
+This paper is a working example of the exact class of technique you'd need to apply to the Kaggle `mexwell/rideaustin-data` file (which, per Addendum 1 above, has no driver ID either) to approximate driver-day spans without a real driver key. But per their own limitations section, the output would be a **plausible reconstruction with no ground-truth validation available**, not a substitute for a real `driver_id` column — worth weighing against the earlier finding that RideAustin's own original CSVs (`Rides_DataA.csv`/`Rides_DataB.csv`, confirmed by the `driver_surge_rideaustin` code review in Addendum 1) *did* have a real `driver_id`/`active_driver_id`, making a from-scratch reconstruction a fallback of last resort, not a first choice, if either of those raw files ever resurfaces.
