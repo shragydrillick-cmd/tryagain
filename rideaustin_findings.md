@@ -656,3 +656,193 @@ Stated directly in Section 6 ("Limitations and Future Work"), split into two gro
 ## Direct relevance to the RideAustin question this investigation started from
 
 This paper is a working example of the exact class of technique you'd need to apply to the Kaggle `mexwell/rideaustin-data` file (which, per Addendum 1 above, has no driver ID either) to approximate driver-day spans without a real driver key. But per their own limitations section, the output would be a **plausible reconstruction with no ground-truth validation available**, not a substitute for a real `driver_id` column — worth weighing against the earlier finding that RideAustin's own original CSVs (`Rides_DataA.csv`/`Rides_DataB.csv`, confirmed by the `driver_surge_rideaustin` code review in Addendum 1) *did* have a real `driver_id`/`active_driver_id`, making a from-scratch reconstruction a fallback of last resort, not a first choice, if either of those raw files ever resurfaces.
+
+---
+
+# Addendum 6: Forced-structure analysis on the RideAustin trips
+
+**Headline result up front: under the feasibility rule exactly as specified (no bound on idle time between trips), every single trip in the 7-day window has 2 or more feasible predecessors and 2 or more feasible successors. Zero zero-predecessor trips. Zero zero-successor trips. Zero forced links. Zero forced chains. This holds identically across all 6 settings tested (2 coordinate floors × 3 speed multipliers) — it is not a bug or a computational shortfall, and I proved it by hand below.** The concurrency-floor computation (which doesn't depend on the feasibility rule at all) still works and is reported in full.
+
+## 0. A blocking discrepancy I flagged before running anything
+
+You said coordinates are truncated to 3 decimals (~100m). I checked empirically before trusting that:
+```python
+def decimals(x):
+    s = f"{x:.10f}".rstrip('0')
+    return len(s.split('.')[1]) if '.' in s else 0
+for col in ["start_location_lat","start_location_long","end_location_lat","end_location_long"]:
+    print(col, df[col].dropna().sample(200000, random_state=1).apply(decimals).value_counts().sort_index().to_dict())
+```
+```
+start_location_lat  decimal-place distribution: {0: 3, 1: 20724, 2: 179273}
+start_location_long decimal-place distribution: {0: 31, 1: 7138, 2: 192831}
+end_location_lat    decimal-place distribution: {0: 10, 1: 23637, 2: 176353}
+end_location_long   decimal-place distribution: {0: 62, 1: 6830, 2: 193108}
+```
+**Zero rows have 3+ decimal places.** The real grid is 2 decimals (~1.1km), not 3 (~100m). I asked you how to handle this; you said run both, treat the 1.1km floor as the reliable number and the 100m floor as the upper bound. That's what's below.
+
+**Exact grid size, computed from this data's actual mean latitude (30.27573°N), not assumed:**
+```
+km per 0.01° latitude:  1.1132 km
+km per 0.01° longitude: 0.9614 km
+max rounding error (diagonal of one 0.01°x0.01° cell): 1.4709 km
+```
+
+## 1. Is deadhead distance measurable at 1.1km resolution, or is it noise? (your direct question)
+
+I computed this before building anything else: for every trip in the core week, the haversine distance to whichever trip most recently completed anywhere in the city before it started (the "nearest-in-time candidate," not a proven driver match — just the natural baseline for "how far is the nearest possible handoff").
+```python
+pos = np.searchsorted(A_completed_sorted, B.started_on, side="right") - 1
+# nearest-completed A found for every one of 41,084 core-week trips (0 unmatched)
+```
+```
+deadhead distance to nearest-in-time predecessor (km), n=41,084:
+  min=0.00   10%=1.11   25%=2.42   median=5.29   75%=10.41   90%=16.36   max=119.63   mean=7.41
+
+gap to that same nearest-in-time predecessor (hours), n=41,084:
+  min=0.000  10%=0.000  25%=0.0006  median=0.0017 (~6 sec)  75%=0.0047  90%=0.010  mean=0.0041
+
+fraction of these deadhead distances below the 100m floor: 3.23%
+fraction of these deadhead distances below the 1.1km floor: 6.79%
+```
+**Answer: mostly measurable, not mostly noise — but with a real, non-trivial exception.** At the median, the nearest-available dropoff-to-pickup distance is 5.29km, more than 3x the 1.47km worst-case grid error — clearly a real, meaningful distance, not rounding noise. But at the bottom of the distribution, ~7% of these pairings fall entirely inside the ~1.1–1.47km noise floor, and another chunk between the 10th and 25th percentile (1.11–2.42km) sits close enough to the grid size that the floor choice materially changes whether they read as "adjacent" or "far." So: for most trips, deadhead distance is a real signal; for roughly the closest 10th of pairings, it isn't distinguishable from rounding, which is exactly why the 100m-vs-1.1km floor choice matters and why I ran both.
+
+Also notable, independent of the floor question: the *time* gap to the nearest-in-time candidate is almost always under a few seconds (median ~6 sec) — because ~41,000 trips/week citywide means something is always completing somewhere at almost every instant. That near-simultaneity is exactly why distance has to do the filtering work in this feasibility rule; time alone can't.
+
+## 2. Median effective speed by hour of day (reported before doing anything else, as required)
+
+Computed from the **full dataset** (911,057 rows, all months), duration = completed_on − started_on, distance = haversine(start, end) with the stated floor applied, speed = distance/duration. First dropped 17 rows with duration ≤ 0 (completed_on at or before started_on — a data error, not a modeling choice: negative/zero elapsed time makes speed undefined, so these can't be assigned a value rather than excluded).
+```
+Dropped 17 rows with duration<=0 (data error: completed_on <= started_on). 911057 -> 911040
+```
+
+| hour | n_trips | median speed km/h (100m floor) | frac dist=0 (100m) | median speed km/h (1.1km floor) | frac dist=0 (1.1km) |
+|---|---|---|---|---|---|
+|0|57545|20.634|0.030|20.568|0.074|
+|1|60262|21.753|0.032|21.638|0.080|
+|2|59499|22.459|0.034|22.361|0.081|
+|3|64750|22.424|0.033|22.321|0.081|
+|4|68448|22.644|0.036|22.514|0.085|
+|5|61168|22.845|0.039|22.695|0.092|
+|6|50600|23.761|0.042|23.634|0.092|
+|7|43139|24.032|0.048|23.899|0.090|
+|8|27884|24.838|0.050|24.704|0.091|
+|9|10628|30.001|0.045|29.907|0.084|
+|10|8582|36.936|0.027|36.916|0.051|
+|11|8677|37.361|0.019|37.353|0.034|
+|12|11965|31.212|0.023|31.118|0.052|
+|13|18903|25.143|0.022|25.068|0.064|
+|14|26421|24.796|0.022|24.719|0.069|
+|15|28863|26.586|0.024|26.545|0.065|
+|16|31406|26.226|0.023|26.182|0.063|
+|17|33497|24.384|0.028|24.314|0.069|
+|18|34902|23.059|0.028|22.990|0.069|
+|19|35316|22.933|0.026|22.840|0.067|
+|20|36861|22.528|0.027|22.422|0.064|
+|21|39532|21.766|0.024|21.706|0.060|
+|22|43152|20.306|0.026|20.228|0.063|
+|23|49040|19.835|0.028|19.775|0.070|
+
+No hour has a degenerate (all-zero or median-zero) speed — the "zero distance" fraction stays in the 2–9% range everywhere, so the speed model itself isn't broken by the floor choice. Note the sharp trip-count drop and speed jump at hours 9–11 (8,582–10,628 trips vs 27,000–68,000 elsewhere) — a real, reported pattern in the raw data, not something I'm explaining away; I'm not speculating on its cause since that's outside this task.
+
+## 3. Week selection: 7 consecutive normal days
+
+Checked daily trip counts across the full range to avoid picking a distorted week:
+```
+$ df.groupby(started_on.dt.date).size()  # full range: count=249 days, mean=3659/day, min=7, max=14182
+```
+The data (Jun 4, 2016 – Feb 7, 2017) never overlaps SXSW (mid-March) — it isn't in range at all. I checked Nov 2016 and Sep 2016 daily counts directly and found the same recurring pattern in both: **weekday counts run ~1,200–4,700/day, weekend (Fri night–Sun) counts run 5,600–14,000+/day, consistently, in both months** — a routine weekly cycle for this platform, not a one-off event. I chose **Nov 14 (Mon) – Nov 20 (Sun), 2016** as the core week (with Nov 13 and Nov 21 loaded as a 1-day buffer on each side, purely to supply candidate trips near the boundary so the reporting week's edge trips aren't artificially starved of predecessors/successors — buffer-day trips are never themselves reported on). This week avoids Thanksgiving (Nov 24) and Election Day (Nov 8); I found no record of a major one-off Austin event that week.
+```
+core week daily counts: 3698, 3188, 3325, 3765, 6628, 10570, 9910  (Mon..Sun)
+buffered window (9 days, Nov13-21): 54,336 trips
+core window (7 days, Nov14-20):     41,084 trips
+```
+Data-quality check on this window before proceeding: duration >2h: 11 trips (max 6.27h — nowhere near the 126.6h max seen in the full dataset); haversine start→end distance >100km: 11 trips (max 302km, plausible as real long trips, not obviously corrupted — not dropped, since I'm not filtering on an unstated threshold, just flagging them as present).
+
+## 4. Feasibility computation — method, and proof of exactness
+
+Implemented exactly as specified:
+```
+A can precede B  iff  B.started_on >= A.completed_on
+                 and  A.completed_on + max(haversine(A.end,B.start)-floor, 0)/speed(hour of A.completed_on) <= B.started_on
+```
+For each trip, I classify predecessor count as 0, 1, or "≥2" (not the exact count — not needed for this task, and capping the search early is what makes it exact-and-fast rather than a heuristic): scan candidates in the 9-day buffered window backward from the trip's start time, nearest-completed-first, checking the inequality against each; stop the moment a 2nd satisfying candidate is found (classification is already "≥2" and can't change), otherwise scan every candidate back to the buffer boundary. This is exact — every candidate that could matter is actually checked in order until the answer is determined — not an approximation. Symmetric forward scan for successor count. Ran on the full 54,336-trip buffered window, all 6 (floor × multiplier) combinations:
+```
+[floor1p1_mult1.0]  n=54336  elapsed=40.2s   mean_scan_pred=42.8  max_scan_pred=1079   mean_scan_succ=44.5  max_scan_succ=2742
+[floor1p1_mult0.7]  n=54336  elapsed=49.6s   mean_scan_pred=53.1  max_scan_pred=1504   mean_scan_succ=55.3  max_scan_succ=3610
+[floor1p1_mult1.3]  n=54336  elapsed=33.6s   mean_scan_pred=36.6  max_scan_pred=843    mean_scan_succ=38.0  max_scan_succ=2106
+[floor100m_mult1.0] n=54336  elapsed=44.3s   mean_scan_pred=46.8  max_scan_pred=1079   mean_scan_succ=48.6  max_scan_succ=2742
+[floor100m_mult0.7] n=54336  elapsed=50.0s   mean_scan_pred=59.2  max_scan_pred=1504   mean_scan_succ=61.3  max_scan_succ=3610
+[floor100m_mult1.3] n=54336  elapsed=34.0s   mean_scan_pred=39.5  max_scan_pred=843    mean_scan_succ=41.1  max_scan_succ=2106
+```
+**Graph size was never a problem** — every run completed in under a minute with an exact scan, no heuristic pruning, no sampling. Reporting this per your rule: I'm stating the size (54,336 nodes, worst-case scan 3,610 candidates) rather than claiming I had to approximate, because I didn't.
+
+## 5. Zero-predecessor, zero-successor, forced links — the result, and proof it's real
+
+```
+=== floor1p1_mult1.0: core week n=41084 ===
+pred_count distribution: {2: 41084}
+succ_count distribution: {2: 41084}
+zero-predecessor: 0 (0.00%)
+zero-successor:   0 (0.00%)
+forced links (pred_count==1): 0 (0.00%)
+```
+This is not one lucky/broken setting — **all 6 combinations gave the identical result:**
+```
+floor1p1_mult1.0       zero_pred=0  zero_succ=0  forced_links=0
+floor1p1_mult0.7       zero_pred=0  zero_succ=0  forced_links=0
+floor1p1_mult1.3       zero_pred=0  zero_succ=0  forced_links=0
+floor100m_mult1.0      zero_pred=0  zero_succ=0  forced_links=0
+floor100m_mult0.7      zero_pred=0  zero_succ=0  forced_links=0
+floor100m_mult1.3      zero_pred=0  zero_succ=0  forced_links=0
+```
+I did not trust this on sight — I hand-verified it against the very first trip of the core week, the case most likely to be a genuine zero-predecessor (start of the reporting window):
+```
+B: started_on=2016-11-14 00:00:01, completed_on=2016-11-14 00:17:18, start=(30.22, -97.77)
+candidates available (completed_on <= B.started_on) in the buffered window: 9,483
+earliest available candidate completed_on: 2016-11-13 00:01:06  (gap ≈ 23.98 hours)
+
+manual check of one candidate A, ~8 hours before B:
+  A.completed_on=2016-11-13 15:59:59, A.end=(30.31,-97.69)
+  gap_h=8.001   hour_of_A=15   speed=26.55 km/h   required_bound = 26.55*8.001 = 212.37 km
+  actual deadhead = 12.62 km   -->  12.62 <= 212.37  -->  FEASIBLE
+```
+**This is the real mechanism, not a bug: the inequality rearranges to `deadhead_distance <= speed(hour_A) * gap`. Since the gap is completely unbounded (per your instruction: no shift-length cap), the right-hand side grows without limit as the candidate gets older, and any real Austin-metro distance is eventually dwarfed by it — typically within 1–3 hours at these speeds.** With thousands of trips completing somewhere in the city every day, essentially every trip in the window has *some* earlier-completed trip old enough that the reachability radius has grown past its actual distance — even a trip idling 24 hours "counts" as a feasible predecessor under this rule, because nothing in the stated formula penalizes waiting. The only trips that could ever be genuine zero-predecessor cases are ones with literally no completed trip anywhere before them in the loaded window — which none of the core week's trips are, because the buffer day supplies thousands of technically-eligible (if economically absurd) candidates.
+
+**Consequence: forced links and forced chains do not exist in this dataset under this exact rule — at any of the 6 settings tested.** There is nothing to list per-day, no deadhead/idle-gap pairs to report, and no chain-length distribution to compute, because the set is empty by construction, not by data sparsity.
+
+## 6. Forced chains
+
+**None exist**, directly following from §5 (forced chains are built only from forced links, and there are zero forced links at every one of the 6 settings). No length distribution, span, or on-trip fraction to report — this is a hard empty-set result, not a "the file doesn't determine this" gap.
+
+## 7. Concurrent trips by hour — the certain floor (unaffected by the feasibility rule)
+
+This doesn't depend on the speed model or the floor at all — it's a direct sweep-line over trip start/end intervals (a trip counts as "in progress" from started_on up to completed_on; ties at an exact boundary instant are resolved as non-overlapping, the standard interval-scheduling convention). Peak concurrency per calendar day, core week:
+```
+2016-11-14   88
+2016-11-15  101
+2016-11-16  108
+2016-11-17  104
+2016-11-18  156
+2016-11-19  223   <- Saturday night into Sunday morning
+2016-11-20  199
+```
+Hourly floor ranges from as low as 8 (mid-morning weekday lull) up to 223 (Saturday ~4am). Full hour-by-hour table (168 hours) saved to `concurrency_by_hour.csv`, sent alongside this file.
+
+## 8. Concurrency floor vs. zero-predecessor count
+
+```
+zero-predecessor count (all 6 settings): 0
+peak concurrency floor (core week):      223
+```
+**These numbers tell two very different stories, and the gap between them is itself the finding.** The concurrency floor is airtight: at Saturday ~4am, 223 trips were provably in progress at the same instant, which means at least 223 distinct drivers existed at that moment — this doesn't depend on any speed or reachability assumption, just non-overlapping intervals. The zero-predecessor count, by contrast, is supposed to be a *different, independent* way of proving driver availability ("this pickup couldn't have been reached by anyone finishing a job") — but under the exact rule as specified, it proves nothing at all, anywhere, because unbounded idle-waiting makes almost every trip's "reachability" argument trivially satisfiable. So: the concurrency floor is real, sizable, and load-bearing; the zero-predecessor mechanism, as literally defined here, is not currently capable of independently corroborating it — not because the underlying driver availability isn't there (the concurrency count proves it is), but because the feasibility rule's lack of an idle-time bound makes it too permissive to ever find zero predecessors in a dataset this dense.
+
+## 9. Sensitivity
+
+Already shown in full in §5: all 6 combinations (both floors × all 3 multipliers, including 0.7x — the least generous case, where a lower speed shrinks the reachable radius the most) produced the identical result. **"Do the forced links survive all three?" — there are no forced links to survive, at any multiplier, at either floor. What *is* robust across all 6 settings is the absence itself**: the finding that this rule yields zero forced structure isn't a fragile edge case sensitive to the exact speed or floor chosen — it holds even under the most conservative (slowest-speed, tightest-floor) combination tested.
+
+## Bottom line, and what would change this
+
+Every number above is traceable either to the raw file (trip counts, coordinates, timestamps) or to the speed model derived from it (median speed by hour) — nothing was picked. The one substantive gap I'm flagging rather than filling: the feasibility rule as specified has no bound on idle time between trips, and that single property is what makes the entire forced-structure exercise (zero-predecessor, forced links, forced chains) come back empty on this dataset, regardless of coordinate-floor or speed assumptions. A bounded-idle-time variant (a maximum plausible wait, not a shift-length cap — a different, narrower assumption than the one you explicitly ruled out) would very likely produce a non-degenerate result, given how tight the *nearest-in-time* candidate distances actually are (§1: median 5.29km, near-simultaneous in time). I did not implement that on my own judgment since it's a new assumption you didn't specify — flagging it as the natural next question rather than picking a bound myself.
+
+Files from this run (speed table, concurrency table, full per-trip classification for all 6 settings) are in the scratchpad and can be sent on request.
