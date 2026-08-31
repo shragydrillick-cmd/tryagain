@@ -170,3 +170,126 @@ PRCP / TMAX / TMIN / AWND / GustSpeed2 / Fog / HeavyFog / Thunder    0 (all)
 ## Summary answer to the main question
 
 **There is no driver ID column in this dataset.** Nothing in the 29 columns identifies which driver operated a given ride. As a direct consequence, distinct driver count, driver-day work-span distribution, and utilization (all of #2, #3, #5) cannot be computed from this file — not approximated, not estimated from proxies, just not derivable from what's here.
+
+---
+
+# Addendum: `driver_surge_rideaustin` repo review + data.world source check
+
+## Task 1: `nikhgarg/driver_surge_rideaustin` preprocessing code
+
+```
+$ git clone https://github.com/nikhgarg/driver_surge_rideaustin.git
+Cloning into 'driver_surge_rideaustin'...
+$ grep -rn "Rides_Data" .
+./readme.md:10:1. Download data from above link (Rides_DataA.csv, Rides_DataB.csv) and put in data/rideaustin/ folder
+./readme.md:25:- **create_clean_rides_file.py**: merges Rides_DataA.csv, Rides_DataB.csv, and converts time-zones, and replaces incorrect values with NaN.
+./data_preprocessing/create_clean_rides_file.py:17:    filename1 = 'Rides_DataA.csv'
+./data_preprocessing/create_clean_rides_file.py:18:    filename2 = 'Rides_DataB.csv'
+```
+
+The only script in the repo that reads `Rides_DataA.csv`/`Rides_DataB.csv` directly is `data_preprocessing/create_clean_rides_file.py`. Relevant lines:
+
+```python
+# data_preprocessing/create_clean_rides_file.py, lines 16-23
+def clean_and_merge_datafiles(folder = 'data/rideaustin/', filelabel = 'rides3', override_start_with_dispatch = False):
+    filename1 = 'Rides_DataA.csv'
+    filename2 = 'Rides_DataB.csv'
+
+    df = pd.read_csv(folder + filename1)
+    df2 = pd.read_csv(folder + filename2)
+
+    austin= pd.merge(left= df, right= df2, on='RIDE_ID').set_index('RIDE_ID')
+```
+
+Both files are read with plain `pd.read_csv` (no `usecols`), so **every** column present in each raw CSV is loaded — the code doesn't itself enumerate a full schema of A vs. B. The only column it explicitly names as tying the two files together is **`RIDE_ID`** (the merge key). After the merge, the script goes on to explicitly reference these columns by name:
+
+```python
+# lines 30-32 (comment, listing fields — NOT all of these are actually processed, see below)
+    # date_fields = ['driver_reached_on', 'started_on', 'completed_on', 'created_date', 'updated_date', 'driver_accepted_on', 'dispatched_on','cancelled_on']
+    date_fields_to_convert = ['started_on', 'completed_on', 'dispatched_on']
+    date_fields_newnames = ['start_hour', 'end_hour', 'dispatch_hour']
+```
+
+Only `started_on`, `completed_on`, `dispatched_on` are actually converted/used (`date_fields_to_convert`); `driver_reached_on`, `created_date`, `updated_date`, `driver_accepted_on`, `cancelled_on` appear **only inside a comment** (line 30, prefixed `#`) — the code never touches them.
+
+Columns the script actually reads/writes later on (quoted verbatim):
+
+```python
+austin['surged_trip'] = austin.surge_factor>1                                    # line 66
+incomplete =  austin[austin.total_fare.isnull()].index                           # line 69
+austin['miles']= austin['distance_travelled']*.000621371                          # line 74
+rates_to_low = austin[(austin.rate_per_minute <=0)].index                         # line 88
+rates_to_low = austin[(austin.rate_per_mile <=0)].index                           # line 92
+surge0 = austin[(austin.surge_factor <=0)].index                                  # line 98
+toohightotalfare = austin[austin.total_fare>480].index                            # line 104
+```
+
+**Full set of Rides_DataA/B column names this preprocessing script explicitly references:** `RIDE_ID`, `started_on`, `completed_on`, `dispatched_on`, `surge_factor`, `total_fare`, `distance_travelled`, `rate_per_minute`, `rate_per_mile` — plus five more named only in the disabled comment on line 30 (`driver_reached_on`, `created_date`, `updated_date`, `driver_accepted_on`, `cancelled_on`), which the running code does not act on.
+
+### Is there a driver identifier?
+
+**Not in `create_clean_rides_file.py` itself** — I grepped this file specifically for `driver` (beyond the two `driver_*_on` timestamp fields above) and got zero matches. The merge-and-clean script that actually touches `Rides_DataA.csv`/`Rides_DataB.csv` never references a driver ID column.
+
+A driver identifier **does appear elsewhere in the repo**, under two different names, both used only on the *already-merged* data (i.e., assumed to already be a column, not something the code derives):
+
+**`driver_id`** — declared in `settings.py`'s `relevant_columns` list:
+```python
+# settings.py, line 36
+    "driver_id",
+```
+and used downstream as the key to group/identify a driver's trips:
+```python
+# pipeline.py, line 100
+df_grouped = df.groupby("driver_id")
+
+# shift_earnings/shift_earning_functions.py, lines 15, 20
+aggdict['driver_id'] = 'count' # doesn't matter which column it is, I just want a count
+...
+df_session.rename(columns = {'driver_id' : 'number_trips'}, inplace = True)
+
+# trip_indifference/matching_period_functions.py, line 28
+driverid = matched_row.driver_id
+
+# trip_indifference/earnings_utilities.py, lines 29, 49
+driverid = row.driver_id
+driverid = matched_row.driver_id
+
+# trip_indifference/matching_functions.py, lines 53, 55 (and duplicated at 86, 88)
+relevant = relevant.drop_duplicates(subset = 'driver_id', keep = 'last', inplace =False)
+relevant = relevant[relevant.driver_id != row.driver_id] #check that their driver id is different than the one I want to match
+```
+So `driver_id` is used to: group all of a driver's trips together (`groupby`/`get_group`) to look up "this driver's other trips" for earnings and matching calculations; count trips per driver; and exclude a row's own driver when searching for a comparable/matched driver nearby.
+
+**`active_driver_id`** — also declared in `settings.py`'s `relevant_columns` (line 16), and used specifically as the grouping key for a driver **shift/session**, not the whole-history driver identity:
+```python
+# settings.py, lines 65
+    "driver_shift_columns": ["active_driver_id"],
+
+# shift_earnings/shift_earning_functions.py, line 7
+def get_session_earnings_df(df, payment_function_names, shift_column = 'active_driver_id'):
+...
+df_session = df.groupby(shift_column).agg(aggdict)   # groups trips into a driver-shift/session
+```
+This groups trips by `active_driver_id` to compute one row per shift: shift length (`end_hour - dispatch_hour`), number of trips, proportion of the shift spent on a trip, and earnings.
+
+**I did not find any comment or docstring in the repo that defines the difference between `driver_id` and `active_driver_id`.** The code just uses two differently-named columns for two different groupings (all-time driver identity vs. a shift/session identity) without documenting what distinguishes them. I'm reporting that gap plainly rather than guessing at RideAustin's schema.
+
+**Important caveat:** because `driver_id`/`active_driver_id` are referenced only in code that runs on the *merged and preprocessed* file (not in `create_clean_rides_file.py`, which is the only script that names `Rides_DataA.csv`/`Rides_DataB.csv` directly), the repo's code never states which of the two raw files — A or B — either column physically comes from. That fact isn't in the code, so I'm not inferring it.
+
+## Task 2: data.world source dataset
+
+```
+$ curl -sS -L -o page.html -w "HTTP_STATUS:%{http_code}\nFINAL_URL:%{url_effective}\nREDIRECTS:%{num_redirects}\n" \
+  "https://data.world/ride-austin/ride-austin-june-6-april-13"
+HTTP_STATUS:200
+FINAL_URL:https://data.world/community/goodbye/
+REDIRECTS:2
+```
+
+The dataset URL redirects (2 hops) to `https://data.world/community/goodbye/`. This is **not a login wall** — a data.world account would not help. The page content:
+
+> "The data.world Open Data Community officially retired on July 13, 2026, and all associated community member data is being deleted as part of this process. As a result, the open data community datasets are no longer accessible or available for download."
+>
+> "It is with profound gratitude to the multitude of users who made this community what it was over the last decade that we announce the retirement of the data.world Open Data Community, discontinued as of July 13, 2026, following our acquisition by ServiceNow in 2025."
+
+**The dataset is gone — not access-gated, but retired/deleted by data.world.** I could not download `Rides_DataA.csv`/`Rides_DataB.csv` and therefore cannot report row counts or column lists for them. I did not create a data.world account since one would not restore access to already-deleted community data (per the page's own text), and I did not search for third-party mirrors since that wasn't asked for — let me know if you'd like me to look for one.
