@@ -293,3 +293,161 @@ The dataset URL redirects (2 hops) to `https://data.world/community/goodbye/`. T
 > "It is with profound gratitude to the multitude of users who made this community what it was over the last decade that we announce the retirement of the data.world Open Data Community, discontinued as of July 13, 2026, following our acquisition by ServiceNow in 2025."
 
 **The dataset is gone — not access-gated, but retired/deleted by data.world.** I could not download `Rides_DataA.csv`/`Rides_DataB.csv` and therefore cannot report row counts or column lists for them. I did not create a data.world account since one would not restore access to already-deleted community data (per the page's own text), and I did not search for third-party mirrors since that wasn't asked for — let me know if you'd like me to look for one.
+
+---
+
+# Addendum 2: Searching for a surviving copy of Rides_DataA.csv / Rides_DataB.csv
+
+Goal: find a mirror of the ~1.5M-row, 60-column raw file with `driver_id`/`active_driver_id`, since the data.world source is gone. Result: **not found anywhere I could actually check.** Full trail below — commands and raw output first, then what each result means.
+
+## 1. GitHub — named repos
+
+```
+$ git clone https://github.com/Johnsoneer/RideAustin_Capstone.git
+Cloning into 'Johnsoneer_RideAustin_Capstone'...  [succeeded]
+
+$ git clone https://github.com/princebot/RideAustin.git
+Cloning into 'princebot_RideAustin'...  [succeeded]
+
+$ git clone https://github.com/JCMontalbano/RideAustin.git
+fatal: could not read Username for 'https://github.com': terminal prompts disabled
+```
+
+`JCMontalbano/RideAustin` — a WebFetch directly to `https://github.com/JCMontalbano/RideAustin` returned a genuine **HTTP 404** from GitHub. The git-clone failure (asking for credentials) is consistent with that: git does the same thing for a 404 as for a private repo. A web search summary claimed this repo "exists," but I verified directly against GitHub itself and it does not — I'm going with the direct check, not the search summary.
+
+Contents of the two repos that did clone (`find <repo> -type f`, `.git` excluded):
+
+- **Johnsoneer/RideAustin_Capstone**: notebooks, a Tableau workbook, images, and a `csv's/` folder with `current_areas.csv`, `current_hotspots.csv`, `future_hotspots.csv`, `polygons.csv`, `previous_hotspots.csv`. All are small **derived/aggregated** tables (cluster centroids, polygon vertices, per-area summary stats) — not raw trip records. Header check on each, e.g.:
+  ```
+  $ head -1 current_hotspots.csv
+  cluster,status_value,total_rides,avg_fare,lat,long
+  ```
+  No `driver_id` anywhere.
+  ```
+  $ grep -rl "driver_id\|Rides_DataA\|Rides_DataB\|active_driver_id" Johnsoneer_RideAustin_Capstone/ princebot_RideAustin/
+  [no output — zero matches]
+  ```
+
+- **princebot/RideAustin**: one notebook, `masks.py`, and `RideVolume.csv`:
+  ```
+  $ head -3 RideVolume.csv
+  Date,Rides
+  "Thursday, June 16",190
+  "Friday, June 17",345
+  $ wc -l RideVolume.csv
+  78
+  ```
+  A 78-row daily aggregate (just a date and a ride count) — no driver info. Its README explicitly says it's derived from `github.com/JCMontalbano/RideAustin` (doesn't exist, see above) and `data.world/andytryba/rideaustin` (dead, see §4).
+
+**Ruled out**: neither repo contains, nor points to a live copy of, the raw file.
+
+## 2. GitHub — code search / forks
+
+I don't have unauthenticated GitHub code-search or API access in this environment — direct calls to `api.github.com` and to `github.com` web pages (outside `git clone`) are blocked by this session's proxy for repos outside its configured scope:
+```
+$ curl -i https://api.github.com/search/code?q=Rides_DataA.csv
+HTTP/1.1 403 Forbidden
+{"message":"GitHub access to this repository is not enabled for this session...
+```
+(Confirmed this is a blanket proxy block, not a repo-specific one — the same 403 comes back even for `octocat/Hello-World`, a repo that definitely exists and is public.)
+
+So I substituted web search for GitHub-wide code search:
+- `site:github.com "Rides_DataA.csv"` — only hit was the already-known `nikhgarg/driver_surge_rideaustin`.
+- Fork list for `nikhgarg/driver_surge_rideaustin` (`https://github.com/nikhgarg/driver_surge_rideaustin/forks`): **"No forked repositories found."**
+
+**Ruled out, with a caveat**: web search is not the same as GitHub's own code-search index, so I can't claim this is exhaustive — only that nothing surfaced.
+
+## 3. Wayback Machine
+
+```
+$ curl "http://archive.org/wayback/available?url=data.world/ride-austin/ride-austin-june-6-april-13"
+{"url": "...", "archived_snapshots": {"closest": {"status": "200", "available": true,
+  "url": "http://web.archive.org/web/20260706153652/https://data.world/ride-austin/ride-austin-june-6-april-13",
+  "timestamp": "20260706153652"}}}
+```
+This says a snapshot of the *dataset page* exists from 2026-07-06 (before the July 13 retirement) — potentially promising. But I **could not fetch it**:
+```
+$ curl -L "http://web.archive.org/web/20260706153652/https://data.world/ride-austin/ride-austin-june-6-april-13"
+HTTP_STATUS:403   (0 bytes returned)
+
+WebFetch same URL → "Claude Code is unable to fetch from web.archive.org"
+
+$ curl "http://web.archive.org/cdx/search/cdx?url=data.world/ride-austin*&matchType=prefix&output=json"
+Blocked by egress policy
+```
+**Not ruled out — genuinely unknown.** This is an environment restriction (this session cannot reach `web.archive.org` at all, via curl or WebFetch), not evidence about what is or isn't archived. Also worth noting even if I could fetch it: data.world dataset pages typically serve file downloads via signed/dynamic URLs, which the Wayback Machine usually can't capture even when it captures the page shell — so a snapshot existing is not the same as the actual CSV bytes being recoverable. **You may have better luck checking this snapshot yourself in a browser**: `http://web.archive.org/web/20260706153652/https://data.world/ride-austin/ride-austin-june-6-april-13`. I also tried `archive.ph` as an alternative archive and got a connection reset — also unreachable from here.
+
+## 4. Other data.world uploads (not just the `ride-austin` org account)
+
+Web search surfaced two more data.world links citing this same dataset:
+- `data.world/andytryba/rideaustin` (RideAustin's CEO's own upload, cited by princebot's README, with a stated 1,494,002-row count that matches your ~1.5M figure)
+- `data.world/jcmontalbano/kmeansdriveroptimization-historical-data-csv`
+
+Both checked directly:
+```
+WebFetch → both show the identical "data.world Open Data Community... officially retired on July 13, 2026... all associated community member data is being deleted" notice.
+```
+**Ruled out.** The retirement is platform-wide across the whole Open Data Community, not scoped to the one `ride-austin` org account — every uploader's copy is gone the same way.
+
+## 5. Other Kaggle uploads
+
+```
+$ kaggle datasets list -s rideaustin
+mexwell/rideaustin-data                                   24238939 bytes  (already downloaded — see top of this file: 1 CSV, 911,057 rows, 29 cols, no driver_id)
+thedevastator/austin-hourly-and-daily-weather-2016-2017    8248154 bytes  (weather only, unrelated)
+
+$ kaggle datasets list -s "ride austin"
+[same two, plus unrelated: historical-hourly-weather-data, leadforge-lead-scoring x3, google-capstone-project-cyclistic]
+
+$ kaggle datasets list -s "austin rideshare"
+mexwell/rideaustin-data   [only hit]
+
+$ kaggle datasets list -s "ride-austin"
+[same set as "ride austin" search]
+
+$ kaggle datasets list -s "rideaustin trips"
+No datasets found
+```
+**Ruled out.** Every search variant surfaces the same single relevant dataset (`mexwell/rideaustin-data`, already fully documented above — 29 columns, no driver ID) plus unrelated weather/other datasets. No second Kaggle upload with `driver_id`/60 columns exists under any of these search terms.
+
+## 6. Zenodo, Figshare, Harvard Dataverse, ICPSR
+
+```
+$ curl -L "https://zenodo.org/api/records/?q=rideaustin&size=10"
+{"hits": {"hits": [], "total": 0}, ...}
+```
+**Zenodo: 0 hits. Ruled out.**
+
+```
+$ curl -X POST "https://api.figshare.com/v2/articles/search" -d '{"search_for":"rideaustin"}'
+[only unrelated hits: individual figures/supplementary files from a road-safety paper
+ ("Associating ridesourcing with road safety outcomes: Insights from Austin, Texas"),
+ not the raw trip dataset]
+```
+**Figshare: ruled out** — nothing matching a raw trip-level file with driver IDs.
+
+```
+$ curl "https://dataverse.harvard.edu/api/search?q=rideaustin"
+{"status":"OK","data":{"total_count":1,"items":[{"name":"Shared mobility services and their
+  connection to roadway fatalities [R13]", "global_id":"doi:10.15139/S3/WDBAHJ", ...
+  "description":"We use RideAustin OD trips to examine the effect of ridesourcing exposure
+  on road safety outcomes, such as road crashes, injuries, fatalities, and DWI offenses..."}]}}
+
+$ curl "https://dataverse.harvard.edu/api/datasets/:persistentId/?persistentId=doi:10.15139/S3/WDBAHJ"
+{"status":"ERROR","message":"User :guest is not permitted to perform requested action."}
+```
+**Harvard Dataverse: one hit, but not confirmed as a match, and I could not check its files.** The one result found is a *derived research dataset* about road-safety outcomes (crashes/injuries/DWI), built using RideAustin trips as an input — by its own description, not a repackaging of the raw `Rides_DataA/B` schema. Its file listing requires a Dataverse login I don't have (`guest` was rejected outright), so I could not confirm or rule out whether it happens to include a raw trip file with `driver_id`. I did not create an account to check, since the dataset's stated purpose (crash/safety outcome modeling) doesn't match what you're looking for closely enough to justify guessing — flagging it in case you want to pursue it yourself: https://doi.org/10.15139/S3/WDBAHJ
+
+```
+$ curl -i "https://www.icpsr.umich.edu/web/pages/ICPSR/index.html?q=rideaustin"
+HTTP/1.1 403 Forbidden   (blocked, same as GitHub — cannot verify directly)
+```
+**ICPSR: not checked — blocked.** Web search for "RideAustin ICPSR dataset trip level driver" returned no ICPSR listing, but I could not query ICPSR's own search directly to confirm a true negative.
+
+## Bottom line
+
+**I did not find a working copy of `Rides_DataA.csv`/`Rides_DataB.csv`, or any file with a `driver_id` column, anywhere I could actually verify.** Nothing to download or report a column list for — the instruction to report columns/row count immediately upon finding a `driver_id` file doesn't apply, because no such file turned up.
+
+What's genuinely ruled out (checked directly, confirmed absent or dead): all four named GitHub repos (2 have no raw data at all, 1 doesn't exist, and the parent repo has no forks), every Kaggle search variant tried, Zenodo, Figshare, and all data.world uploads of this dataset (platform-wide retirement, not one account).
+
+What's unresolved because this environment's network access blocked the check, not because I found evidence it's unavailable: the Wayback Machine snapshot of the data.world page (`web.archive.org` and its CDX API are both unreachable from here), `archive.ph` (connection reset), ICPSR's own search (403), and the one Harvard Dataverse hit's actual file contents (needs a login). If you can check the Wayback Machine link above from your own browser, or you have institutional access to ICPSR/Dataverse, those are the three remaining leads worth you personally chasing — I've exhausted what I can verify from here.
