@@ -505,3 +505,88 @@ I could not load the SSRN page at all — not the abstract, not a file list, not
 - **Is there a file with `driver_id`/`active_driver_id`?** Unknown, for the same reason — nothing was downloadable through my access, so there's nothing to report a column list or row count for.
 
 **This needs a human with a browser** (and ideally institutional/INFORMS-subscriber access, since Management Science articles are often paywalled beyond the abstract) to actually open `https://pubsonline.informs.org/doi/suppl/10.1287/mnsc.2021.4058` and `https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3390346` and see what's there. If you can get either page to load and either send me the resulting file(s)/URLs or paste what you see, I can pick up the analysis (row count, full column list, driver ID check) from there.
+
+---
+
+# Addendum 4: RideAustin statistics reported in the arXiv preprint
+
+Downloaded both PDFs successfully — no paywall on either:
+```
+$ curl -L -o driver_surge_pricing_arxiv.pdf https://arxiv.org/pdf/1905.07544
+HTTP_STATUS:200   (2,090,009 bytes)
+
+$ curl -L -o nsf_fulltext.pdf https://par.nsf.gov/servlets/purl/10311967
+HTTP_STATUS:200   (2,100,895 bytes, found via <meta name="citation_pdf_url"> on https://par.nsf.gov/biblio/10311967)
+
+$ pdftotext -layout {file}.pdf {file}.txt   # both files, then:
+$ diff arxiv.txt nsf.txt
+[0 lines of output — identical text content]
+```
+Both sources are the **same manuscript, byte-for-byte identical text** once extracted (67 pages each). Everything below applies to both. Page numbers cited are actual PDF page numbers (verified by splitting on form-feed characters, not estimated).
+
+The empirical RideAustin section is §6 ("Empirical Comparison of Surge Mechanisms," starting p. 18) plus Appendix B ("Supplementary empirical information," pp. 31–39). The paper has **no numbered tables** — all statistics appear either inline in the text or as figure captions/discussion. I checked (`grep "^Table"` — zero matches).
+
+## Number of drivers, shifts, trips
+
+The paper reports counts **only for its restricted analysis window** (Feb 16 – Apr 10, 2017), not for the full RideAustin dataset (June 2016 – Apr 2017) it says it draws from:
+
+> "We analyze 503,383 completed trips by 3811 drivers." (p. 19)
+
+Appendix B.2.1 ("Pre-processing," p. 37) itemizes how that number is reached:
+- 509,823 raw trip rows in the analysis period
+- 4,626 discarded (duration > 1 hour or < 30 seconds)
+- 3,780 discarded (distance > 100 miles or < 0.25 miles; "some overlap" with the duration-based discards)
+- 26 more excluded from fare-calibration only (erroneous total fare)
+- Net: **503,383 trips** — consistent with the main text's "6440 such trips were discarded" (p. 19): 509,823 − 503,383 = 6,440 exactly.
+
+**No shift/session count is reported anywhere** — no total number of shifts, no shifts-per-driver figure. The paper never states how many shifts exist in the data.
+
+## Shift length distribution
+
+**Not reported as a distribution.** The paper defines shift length (see below) and uses it only as a *weighting variable* for one histogram (Figure 12, per-hour earnings) — there is no histogram, mean, median, or percentile of shift length itself anywhere in the paper.
+
+## Trips per shift
+
+**Not reported as a distribution or number**, with one narrow exception: Figure 9e is restricted to "each driver session that has at least 5 trips" (p. 32) as a filter criterion for that one figure — but the paper never reports what fraction of sessions meet that bar, nor any mean/median/distribution of trips-per-shift.
+
+## Proportion of shift spent on a trip (utilization)
+
+**Not computed for RideAustin data.** "Utilization rate" appears several times, but only as a theoretical/model term in the introduction and the model appendix (e.g. p. 8, discussing incentive-compatibility theory) — never as a number calculated from the empirical RideAustin dataset. The paper explicitly does not measure shift-level utilization.
+
+The closest empirical number is a **different, trip-level** metric — don't conflate the two — from Figure 10e (p. 34):
+
+> "Note that this time is substantial in the RideAustin data, on average about 30%."
+
+This is the fraction of a single job's total time that is the unpaid drive-to-rider portion (dispatch → pickup, vs. pickup → drop-off), not the fraction of a whole shift spent on trips at all. It says nothing about time between trips or time waiting for a request.
+
+## Idle time, dispatch time, cancellations
+
+- **Idle time**: not reported. The paper is explicit about why — it states directly (p. 20) that it cannot observe when a driver was idle/available: "we do not observe drivers being open to receive a request, unless they actually received a trip request." This is stated again in Appendix B.1.1 (p. 34) as a reason a related theoretical claim can't be tested empirically.
+- **Dispatch time**: used only as a *timestamp/measurement anchor* (e.g. Figure 17, p. 39, re-runs an earnings calculation starting from dispatch time instead of trip-start time, as a robustness check), never reported as a duration statistic (no mean/median time-to-dispatch, no distribution).
+- **Cancellations**: no cancellation statistic anywhere. The only use of "cancel" in the whole paper (p. 9) is one sentence of general/theoretical discussion about driver behavior in ride-hailing markets broadly ("Some drivers call ahead to find out the rider's destination or even cancel the trip at the pick-up location...") — it is not a RideAustin-derived number, and the paper doesn't cite one.
+
+## How "shift"/"session" is defined
+
+Two different operational definitions appear, both used to identify which trips belong together as one shift, on p. 36 (§B.1.3, "Driver earnings variance"):
+
+> "we calculate statistics regarding the average amount drivers earn during a single driving 'shift,' ideally defined as the time between which drivers turn on their app and when they turn it off. To group trips together into a single driver shift, we use a data column called active driver ID, which is a refinement of driver ID and seems to correspond to a shift as defined internally by RideAustin."
+>
+> "The 'length' of a shift is defined as the time between the first time the driver was dispatched for a trip during the shift, and the end time of the last completed trip during the shift. Note that this value is an underestimate of the true shift length, as it does not contain the time it took to receive the first trip request or the time it takes for the driver to go home after their last trip. Thus, our estimated shift per hour earnings are biased upwards."
+
+So: shifts are grouped by the `active_driver_id` column (which the authors say they believe corresponds to RideAustin's own internal shift concept, but note this is inferred — "seems to correspond to," not confirmed by RideAustin documentation), and shift *length* = first-dispatch-time to last-completed-trip-end-time, which the authors themselves flag as an underestimate.
+
+A second, separate definition of a session boundary appears earlier (p. 20, describing the driver-matching procedure), used only to decide whether a driver is still available for matching purposes, not to define shift length:
+
+> a driver is excluded from matching if they "ended their session (did not start any trip in the next hour)"
+
+This is a 1-hour no-further-trip gap rule — a different, narrower notion than the `active_driver_id`-based shift grouping used for the earnings-variance analysis.
+
+## Other RideAustin numbers reported (not asked for, but relevant context)
+
+- Surge factor: mean 1.19; 70% of trips have surge factor 1 (unsurged); increments of 0.25 between 1 and 5; "more than 97% of surged trips have a surge factor in (1, 3]" (Figure 9a, p. 32)
+- Trip length distribution (non-surge): "a Weibull distribution with shape 2.6 best fits the data" (p. 35, discussing Figure 10b)
+- Per-hour shift earnings (weighted by shift length, Figure 12, p. 36): mean ≈ $32.22; standard deviation $16.97 (status quo fare) vs. $15.83 (simulated additive surge with base fare); in a separate pure-surge-only simulation, $16.59 (additive) vs. $18.35 (multiplicative)
+
+## Bottom line
+
+The paper reports **driver and trip counts** for its analysis window (3,811 drivers, 503,383 trips) and a precise **operational definition of a shift** (via `active_driver_id`, bounded by first-dispatch-to-last-trip-end), but does **not** report a shift-length distribution, a trips-per-shift distribution, shift-level utilization, idle time, dispatch-time duration, or any cancellation statistic. Where the paper is silent, I'm reporting it as silent rather than filling the gap — the "30% unpaid time" figure that superficially resembles a utilization number is a trip-level metric (unpaid drive-to-pickup share of one job), not the shift-level "time on trip ÷ shift span" metric you asked about.
