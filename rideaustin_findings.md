@@ -846,3 +846,95 @@ Already shown in full in §5: all 6 combinations (both floors × all 3 multiplie
 Every number above is traceable either to the raw file (trip counts, coordinates, timestamps) or to the speed model derived from it (median speed by hour) — nothing was picked. The one substantive gap I'm flagging rather than filling: the feasibility rule as specified has no bound on idle time between trips, and that single property is what makes the entire forced-structure exercise (zero-predecessor, forced links, forced chains) come back empty on this dataset, regardless of coordinate-floor or speed assumptions. A bounded-idle-time variant (a maximum plausible wait, not a shift-length cap — a different, narrower assumption than the one you explicitly ruled out) would very likely produce a non-degenerate result, given how tight the *nearest-in-time* candidate distances actually are (§1: median 5.29km, near-simultaneous in time). I did not implement that on my own judgment since it's a new assumption you didn't specify — flagging it as the natural next question rather than picking a bound myself.
 
 Files from this run (speed table, concurrency table, full per-trip classification for all 6 settings) are in the scratchpad and can be sent on request.
+
+---
+
+# Addendum 7: City of Toronto PTC datasets — still live, checked directly
+
+**Both packages exist, are active, and have downloadable resources — confirmed against the raw server responses, not assumed.**
+
+## `private-transportation-companies-summary-and-trip-data`
+
+```
+$ curl "https://ckan0.cf.opendata.inter.prod-toronto.ca/api/3/action/package_show?id=private-transportation-companies-summary-and-trip-data"
+HTTP_STATUS: 200
+```
+Key fields from the raw JSON (`result`):
+```
+success: true
+id: fbac8e59-4883-4252-b73c-4a5caf19126d
+state: active
+is_retired: false
+num_resources: 18
+formats: [CSV, XML, JSON, ZIP, PDF]
+```
+All 18 listed resources, `state: active` on every one:
+
+| name | format | url |
+|---|---|---|
+| trips_and_summary_readme | PDF | `.../resource/6c7e183b.../download/trips_and_summary_readme.pdf` |
+| trips_sample | CSV (datastore) | `https://ckan0.cf.opendata.inter.prod-toronto.ca/datastore/dump/8c434d44-73d1-4409-b8cf-e556c9ee41d3` |
+| summary_stats | CSV (datastore) | `.../datastore/dump/782ff076-...` |
+| summary_stats.csv | CSV | `.../resource/c2f8c4c8.../download/summary_stats.csv` (497,524 bytes) |
+| summary_stats.xml / .json | XML/JSON | (4.4MB / 2.8MB) |
+| trips_sample.csv / .xml / .json | CSV/XML/JSON | 1.28MB / 4.8MB / 3.5MB |
+| trips_2018.zip … trips_2026.zip | ZIP | one per year, 27.7MB (2018) up to 55.4MB (2025), hosted at `opendata.toronto.ca/transportation.services/private-transportation-company-dev/trips/trips_YYYY.zip` |
+
+## `private-transportation-companies-vehicle-operating-data`
+
+```
+$ curl "https://ckan0.cf.opendata.inter.prod-toronto.ca/api/3/action/package_show?id=private-transportation-companies-vehicle-operating-data"
+HTTP_STATUS: 200
+```
+```
+success: true
+id: 082c6a32-dcf2-43da-b4ab-8a2b9ec2e35b
+state: active
+is_retired: false
+num_resources: 12
+formats: [CSV, XML, JSON, ZIP, PDF]
+```
+12 resources, all `state: active`: a readme PDF, `operating_hours_sample` (datastore CSV) + `.csv`/`.xml`/`.json` static copies (1.3MB/8.0MB/5.5MB), and `operating_hours_2020.zip` through `operating_hours_2026.zip` (554MB up to 1.59GB each), same `opendata.toronto.ca/.../operating_hours/` host pattern.
+
+Both packages' `collection_method` field states this is regulatory data PTCs must submit to the City under Toronto Municipal Code Chapter 546-116, covering trip records (pickup/dropoff, request/accept/arrival/pickup/dropoff timestamps, fare, distance, cancellation reason) and "driver availability records" (start/end time and location of a vehicle shift) — i.e., this is a live, still-collected, regulator-mandated feed, not an abandoned one-off upload.
+
+## Downloaded and checked — actual columns and row counts
+
+**`trips_sample.csv`** (from `summary-and-trip-data`):
+```
+$ curl -L -o trips_sample.csv "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/fbac8e59-4883-4252-b73c-4a5caf19126d/resource/749dec62-c305-4266-aaef-7cdf008f10e3/download/trips_sample.csv"
+HTTP_STATUS:200   (1,277,107 bytes)
+```
+Columns (14): `_id, dt, pickup_hr, pickup_municipality, pickup_community_council, pickup_ward, dropoff_municipality, dropoff_community_council, dropoff_ward, trips_total, fare_avg, waittime_avg, distance_avg, duration_avg`
+Row count: 8,134 lines total → **8,133 data rows**.
+
+**Important finding, worth stating plainly despite the "trip data" naming**: this is not row-per-trip data. It's pre-aggregated to (date, pickup-hour, pickup-ward, dropoff-ward) buckets, with `trips_total` and averaged fare/wait/distance/duration per bucket — no individual pickup/dropoff coordinates, no trip-level timestamps, no driver or vehicle ID. I checked whether the *full* (non-sample) yearly files are actually row-per-trip, since "sample" might just mean "a sample of individual trip rows":
+```
+$ curl -L -o trips_2018.zip "https://opendata.toronto.ca/transportation.services/private-transportation-company-dev/trips/trips_2018.zip"
+HTTP_STATUS:200   (27,745,620 bytes; unzips to 12 monthly CSVs, trips_201801.csv..trips_201812.csv, 319,106,871 bytes total)
+
+$ unzip -p trips_2018.zip trips_201801.csv | head -1
+dt,pickup_hr,pickup_municipality,pickup_community_council,pickup_ward,dropoff_municipality,dropoff_community_council,dropoff_ward,trips_total,fare_avg,distance_avg,waittime_avg,duration_avg
+$ wc -l trips_201801.csv
+154508
+```
+**Same schema (minus the datastore `_id` column) — the full yearly files are aggregated the identical way**, just with more (date, hour, ward-pair) buckets: January 2018 alone has 154,507 data rows of ward/hour aggregates. So "trip data" in this package's name means aggregated trip *statistics*, not individual trip records, at both the sample and full-file level — confirmed by actually opening the full file, not inferred from the sample alone.
+
+**`operating_hours_sample.csv`** (from `vehicle-operating-data`):
+```
+$ curl -L -o operating_hours_sample.csv "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/082c6a32-dcf2-43da-b4ab-8a2b9ec2e35b/resource/ed5ed874-3a55-434f-b0a0-3dbbc29e637c/download/operating_hours_sample.csv"
+HTTP_STATUS:200   (1,343,730 bytes)
+```
+Columns (20): `_id, vehid, hr, reported_trips_started, reported_trip_fractions, pooled_trips_started, pooled_trip_fractions, routed_trips_started, driver_cancelled_trips, passenger_cancelled_trips, toronto_boundary_crossed, fares, time_available, time_enroute, time_waiting, time_ontrip, dist_available_routed, dist_enroute_routed, dist_ontrip_routed, dist_ontrip_reported`
+Row count: 9,004 lines total → **9,003 data rows**.
+
+**This one is materially different and more relevant to this whole investigation: it has a `vehid` column and is grouped at (vehicle, hour) granularity**, with `time_available` / `time_enroute` / `time_waiting` / `time_ontrip` reported directly per vehicle-hour — i.e., a real utilization breakdown per vehicle, already computed by the City, not something I'd have to reconstruct. I did not download a full `operating_hours_YYYY.zip` to confirm the full files carry the same `vehid`-level granularity — they're 554MB–1.59GB each, too large for a quick check here — but I did confirm one is genuinely reachable and correctly sized rather than assuming:
+```
+$ curl -I "https://opendata.toronto.ca/transportation.services/private-transportation-company-dev/operating_hours/operating_hours_2020.zip"
+HTTP/1.1 200 OK
+Content-Length: 554204428   (matches the package_show API's reported size exactly)
+```
+
+## Bottom line
+
+Both datasets are live and downloadable — nothing here needed a Wayback Machine or a login, unlike the RideAustin/data.world situation in earlier addenda. The `summary-and-trip-data` package's "trip data" is aggregated statistics only, confirmed at both sample and full-file granularity — not usable for driver-day reconstruction. The `vehicle-operating-data` package's `vehid` + per-vehicle-hour `time_available`/`time_ontrip` breakdown is the more promising lead of the two for anything utilization-related, though I've only confirmed that schema on the *sample* file, not yet on a full year — say the word if you want me to pull and check a full `operating_hours_*.zip` despite the size.
