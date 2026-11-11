@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pick &amp; Sort</title>
+<meta name="description" content="Turn a file of warehouse orders into a shelf-ordered pick list and a last-to-first unpack list.">
+<meta name="theme-color" content="#1f5f8b">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root {
+  --bg: #f4f5f7; --card: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #d9dde3;
+  --accent: #1f5f8b; --accent-text: #ffffff; --accent-soft: #e3eef6;
+  --good: #1e7a46; --good-soft: #e2f4e9; --warn: #9a5b00; --warn-soft: #fff3dc;
+  --danger: #b3261e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171b; --card: #1d2127; --text: #eceff3; --muted: #a2abb7; --line: #343a43;
+    --accent: #5aa7dc; --accent-text: #0d1a24; --accent-soft: #1d3446;
+    --good: #5fd08f; --good-soft: #17352a; --warn: #f0b45a; --warn-soft: #3a2c14;
+    --danger: #ff8a80;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171b; --card: #1d2127; --text: #eceff3; --muted: #a2abb7; --line: #343a43;
+  --accent: #5aa7dc; --accent-text: #0d1a24; --accent-soft: #1d3446;
+  --good: #5fd08f; --good-soft: #17352a; --warn: #f0b45a; --warn-soft: #3a2c14;
+  --danger: #ff8a80;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header.top { position: sticky; top: 0; z-index: 5; background: var(--accent); color: var(--accent-text);
+  display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; }
+header.top h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
+header.top button { background: transparent; color: inherit; border: 1px solid currentColor; border-radius: 10px;
+  padding: 8px 12px; font-size: 15px; cursor: pointer; }
+main { max-width: 860px; margin: 0 auto; padding: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+.card h2 { font-size: 18px; margin: 0 0 8px; }
+.card h3 { font-size: 16px; margin: 14px 0 6px; }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+button.btn, label.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px;
+  padding: 10px 16px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text);
+  font-size: 16px; font-weight: 600; cursor: pointer; }
+button.btn.secondary, label.btn.secondary { background: transparent; color: var(--accent); }
+button.btn.small { min-height: 34px; padding: 4px 10px; font-size: 14px; }
+button.btn:disabled { opacity: .45; cursor: default; }
+button.link { background: none; border: 0; color: var(--accent); padding: 0; font: inherit; text-decoration: underline; cursor: pointer; }
+input[type=number], input[type=text], select, textarea { font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 40px; }
+input[type=number] { width: 90px; }
+textarea { width: 100%; min-height: 140px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; }
+.notice { border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: 15px; }
+.notice.warn { background: var(--warn-soft); color: var(--warn); }
+.notice.good { background: var(--good-soft); color: var(--good); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 8px 0 12px; }
+.stat { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; }
+.stat b { display: block; font-size: 24px; }
+.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
+.tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 12px; font: inherit;
+  color: var(--muted); cursor: pointer; white-space: nowrap; }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+table.list { width: 100%; border-collapse: collapse; }
+table.list th { text-align: left; font-size: 13px; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.list td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.list td.big { font-size: 20px; font-weight: 700; }
+tr.unit-head td { background: var(--accent-soft); font-weight: 700; font-size: 14px; }
+tr.done td { opacity: .4; text-decoration: line-through; }
+tr.last td { background: var(--good-soft); }
+.pile { display: inline-block; min-width: 42px; text-align: center; background: var(--accent); color: var(--accent-text);
+  border-radius: 8px; padding: 2px 8px; font-size: 20px; font-weight: 800; }
+.lastnote { color: var(--good); font-weight: 700; font-size: 14px; }
+.key { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.key div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; align-items: center; gap: 10px; }
+.unit { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 10px 0; }
+.unit-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.shelf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px dashed var(--line); }
+.shelf-row .lbl { width: 110px; font-size: 14px; color: var(--muted); }
+.walk-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.walk-item span.n { width: 28px; text-align: right; color: var(--muted); }
+.walk-item span.name { flex: 1; }
+.hidden { display: none !important; }
+/* step-through */
+#stepper { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; }
+#stepper .bar { height: 6px; background: var(--line); }
+#stepper .bar i { display: block; height: 100%; background: var(--accent); }
+#stepper .body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 16px; gap: 6px; }
+#stepper .item { font-size: 30px; font-weight: 700; }
+#stepper .qty { font-size: 22px; color: var(--muted); }
+#stepper .to { font-size: 22px; margin-top: 14px; color: var(--muted); }
+#stepper .order { font-size: 110px; font-weight: 900; line-height: 1; color: var(--accent); }
+#stepper .done-banner { margin-top: 16px; background: var(--good-soft); color: var(--good); border-radius: 14px; padding: 14px 18px; font-size: 20px; font-weight: 800; }
+#stepper .nav { display: flex; gap: 10px; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+#stepper .nav button { flex: 1; min-height: 64px; font-size: 20px; }
+@media print {
+  header.top, .no-print, .tabs { display: none !important; }
+  body { background: #fff; color: #000; }
+  .card { border: 0; padding: 0; }
+  .tabpane.hidden { display: block !important; page-break-before: always; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1 id="title">Pick &amp; Sort</h1>
+  <button id="navBtn" type="button" aria-label="Settings">&#9881; Settings</button>
+</header>
+
+<main id="homeView">
+  <section class="card no-print">
+    <h2>1. Add your orders file</h2>
+    <p class="muted small">A spreadsheet (Excel or CSV) with one line per item: <b>Order number</b>, <b>Item number</b>, and (optional) <b>Quantity</b>.</p>
+    <div class="row">
+      <label class="btn">Choose file<input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" hidden></label>
+      <button class="btn secondary" id="pasteToggle" type="button">Paste instead</button>
+      <button class="btn secondary" id="exampleBtn" type="button">Try an example</button>
+    </div>
+    <div id="pasteBox" class="hidden" style="margin-top:12px">
+      <textarea id="pasteText" placeholder="Order,Item,Qty&#10;10452,3,1&#10;10452,10,2&#10;10460,59,1"></textarea>
+      <div class="row" style="margin-top:8px"><button class="btn" id="pasteGo" type="button">Use this</button></div>
+    </div>
+    <p class="small muted" style="margin-bottom:0">
+      <button class="link" id="templateBtn" type="button">Download a blank template</button>
+      &nbsp;·&nbsp; File layout:
+      <select id="formatSel" aria-label="File layout">
+        <option value="auto">Figure it out</option>
+        <option value="long">One line per item (Order, Item, Qty)</option>
+        <option value="wide">One line per order (Order, item, item, …)</option>
+      </select>
+    </p>
+    <div id="loadMsg"></div>
+  </section>
+
+  <section id="results" class="card hidden">
+    <h2>2. Your lists</h2>
+    <p class="muted small" id="fileName"></p>
+    <div class="stats" id="stats"></div>
+    <div id="warnings"></div>
+    <div class="row no-print" style="margin-bottom:14px">
+      <button class="btn" id="pdfPick" type="button">&#11015; Pick list PDF</button>
+      <button class="btn" id="pdfUnpack" type="button">&#11015; Unpack list PDF</button>
+      <button class="btn secondary" id="stepBtn" type="button">&#9654; Unpack step by step</button>
+      <button class="btn secondary" id="printBtn" type="button">Print</button>
+    </div>
+    <div class="tabs" role="tablist">
+      <button data-tab="pick" class="on" type="button">Pick list</button>
+      <button data-tab="unpack" type="button">Unpack list</button>
+      <button data-tab="key" type="button">Order numbers</button>
+    </div>
+    <div class="tabpane" id="tab-pick"></div>
+    <div class="tabpane hidden" id="tab-unpack"></div>
+    <div class="tabpane hidden" id="tab-key"></div>
+  </section>
+</main>
+
+<main id="settingsView" class="hidden"></main>
+
+<div id="stepper" class="hidden" role="dialog" aria-label="Unpack step by step">
+  <div class="bar"><i id="stepBar"></i></div>
+  <div class="row" style="justify-content:space-between;padding:12px 16px">
+    <span class="muted" id="stepCount"></span>
+    <button class="btn secondary small" id="stepClose" type="button">Close</button>
+  </div>
+  <div class="body" id="stepBody"></div>
+  <div class="nav">
+    <button class="btn secondary" id="stepPrev" type="button">&#9664; Back</button>
+    <button class="btn" id="stepNext" type="button">Next &#9654;</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   CORE LOGIC (no screen code here)
+   ===================================================================== */
+
+/** Read CSV / TSV / plain text into rows of cells. */
+function parseDelimited(text) {
+  text = String(text).replace(/^﻿/, "");
+  const firstLine = text.split(/\r?\n/).find(l => l.trim()) || "";
+  let delim = null, best = 0;
+  for (const c of ["\t", ",", ";", "|"]) {
+    const n = firstLine.split(c).length - 1;
+    if (n > best) { best = n; delim = c; }
+  }
+  if (!delim) {
+    return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => l.split(/\s+/));
+  }
+  const rows = []; let row = [], field = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === delim) { row.push(field); field = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); rows.push(row); row = []; field = "";
+    } else field += ch;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+const clean = v => String(v == null ? "" : v).trim();
+/** "#0059" -> "59";  "A-12" stays "A-12". */
+function normItem(v) {
+  const s = clean(v).replace(/^#\s*/, "");
+  return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s;
+}
+const itemNumber = s => (/^\d+$/.test(s) ? parseInt(s, 10) : NaN);
+const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+
+function findHeader(row) {
+  const c = row.map(x => clean(x).toLowerCase());
+  const oi = c.findIndex(x => /order|invoice|ticket|^po\b|customer/.test(x));
+  if (oi < 0) return null;
+  const itemCols = c.map((x, i) => (i !== oi && /item|sku|product|part|code|number|^#$|^no\.?$/.test(x) ? i : -1)).filter(i => i >= 0);
+  if (!itemCols.length) return null;
+  const qi = c.findIndex((x, i) => i !== oi && !itemCols.includes(i) && /qty|quant|amount|count|units|pcs|how many/.test(x));
+  return { oi, itemCols, qi };
+}
+
+/** Turn rows into order lines: [{order, item, qty}] */
+function rowsToLines(rows, format) {
+  rows = rows.map(r => r.map(clean)).filter(r => r.some(Boolean));
+  const warnings = [];
+  if (!rows.length) return { lines: [], warnings: ["The file looks empty."] };
+  let header = findHeader(rows[0]);
+  let body = header ? rows.slice(1) : rows;
+  let mode = format;
+  if (mode === "auto") {
+    if (header) mode = header.itemCols.length > 1 && header.qi < 0 ? "wide" : "long";
+    else mode = Math.max(...rows.map(r => r.filter(Boolean).length)) > 3 ? "wide" : "long";
+  }
+  const oi = header ? header.oi : 0;
+  const lines = [];
+  let lastOrder = "";
+  body.forEach((r, idx) => {
+    let order = r[oi] || "";
+    if (!order) order = lastOrder; // blank order cell = same order as the line above
+    if (!order) { warnings.push(`Line ${idx + (header ? 2 : 1)}: no order number, skipped.`); return; }
+    lastOrder = order;
+    if (mode === "wide") {
+      r.forEach((cell, i) => {
+        if (i === oi || !cell) return;
+        const m = cell.match(/^(.+?)\s*[x×*]\s*(\d+)$/i);
+        lines.push({ order, item: normItem(m ? m[1] : cell), qty: m ? parseInt(m[2], 10) : 1 });
+      });
+    } else {
+      const ii = header ? header.itemCols[0] : 1;
+      const qi = header ? header.qi : 2;
+      const item = normItem(r[ii]);
+      if (!item) { warnings.push(`Line ${idx + (header ? 2 : 1)} (order ${order}): no item number, skipped.`); return; }
+      let qty = 1;
+      if (qi >= 0 && r[qi] !== undefined && r[qi] !== "") {
+        qty = parseInt(String(r[qi]).replace(/[^\d]/g, ""), 10);
+        if (!(qty >= 0)) { warnings.push(`Line ${idx + (header ? 2 : 1)}: quantity "${r[qi]}" isn't a number, used 1.`); qty = 1; }
+      }
+      if (qty > 0) lines.push({ order, item, qty });
+    }
+  });
+  return { lines, warnings, mode };
+}
+
+/** Map every item number to its place in the walk. Returns {locate, problems}. */
+function buildLocator(settings) {
+  const map = new Map(), problems = [];
+  const walkIndex = new Map(settings.walk.map((id, i) => [id, i]));
+  settings.units.forEach(u => {
+    const wi = walkIndex.has(u.id) ? walkIndex.get(u.id) : 9999;
+    const S = u.shelves.length;
+    const block = Math.max(1, parseInt(u.block, 10) || 5);
+    u.shelves.forEach((sh, s) => {
+      const a = parseInt(sh.start, 10), b = parseInt(sh.end, 10);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+      const L = Math.abs(b - a) + 1;
+      if (L > 50000) { problems.push(`${u.name}, shelf ${s + 1}: range too big.`); return; }
+      const step = b >= a ? 1 : -1;
+      for (let p = 0; p < L; p++) {
+        const n = a + p * step;
+        if (map.has(n)) { const o = map.get(n); problems.push(`Number ${n} is on both "${o.unitName}" shelf ${o.shelf} and "${u.name}" shelf ${s + 1}.`); continue; }
+        const x = u.dir === "rtl" ? L - 1 - p : p;
+        let k;
+        switch (u.pattern) {
+          case "rows-up": k = [S - 1 - s, x]; break;
+          case "columns": k = [x, s]; break;
+          case "blocks": k = [Math.floor(x / block), s, x]; break;
+          default: k = [s, x]; // rows-down
+        }
+        map.set(n, { unitId: u.id, unitName: u.name, shelf: s + 1, shelves: S, pos: p + 1, key: [wi, ...k] });
+      }
+    });
+  });
+  if (problems.length > 6) problems.splice(6, problems.length - 6, `…and more overlaps.`);
+  return { locate: n => map.get(n) || null, problems, size: map.size };
+}
+
+function compareKeys(a, b) {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? -1) - (b[i] ?? -1);
+    if (d) return d;
+  }
+  return 0;
+}
+
+/** The whole plan: pick list (shelf order) + unpack list (last picked first). */
+function makePlan(lines, settings) {
+  const { locate } = buildLocator(settings);
+  // orders, in first-seen order
+  const orders = new Map();
+  lines.forEach(l => {
+    if (!orders.has(l.order)) orders.set(l.order, { raw: l.order, units: 0, lineCount: 0, items: new Map() });
+    const o = orders.get(l.order);
+    o.units += l.qty;
+    o.items.set(l.item, (o.items.get(l.item) || 0) + l.qty);
+  });
+  const orderList = [...orders.values()];
+  if (settings.orderNumbering !== "file") orderList.sort((a, b) => natural(a.raw, b.raw));
+  orderList.forEach((o, i) => { o.label = i + 1; o.lineCount = o.items.size; });
+
+  // items across all orders
+  const items = new Map();
+  orderList.forEach(o => o.items.forEach((qty, item) => {
+    if (!items.has(item)) items.set(item, { item, qty: 0, orders: [], loc: locate(itemNumber(item)) });
+    const it = items.get(item);
+    it.qty += qty;
+    it.orders.push({ label: o.label, raw: o.raw, qty });
+  }));
+  const picks = [...items.values()];
+  picks.sort((a, b) => {
+    if (a.loc && b.loc) return compareKeys(a.loc.key, b.loc.key);
+    if (a.loc) return -1;
+    if (b.loc) return 1;
+    return natural(a.item, b.item);
+  });
+  picks.forEach((p, i) => { p.step = i + 1; });
+
+  // unpack: top of the cart = last picked
+  const left = new Map(orderList.map(o => [o.label, o.units]));
+  const unpack = [];
+  [...picks].reverse().forEach(p => {
+    p.orders.forEach(o => {
+      left.set(o.label, left.get(o.label) - o.qty);
+      unpack.push({ item: p.item, qty: o.qty, label: o.label, raw: o.raw, loc: p.loc, last: left.get(o.label) === 0 });
+    });
+  });
+  unpack.forEach((u, i) => { u.step = i + 1; });
+
+  return {
+    orders: orderList, picks, unpack,
+    unknown: picks.filter(p => !p.loc).map(p => p.item),
+    totalUnits: picks.reduce((s, p) => s + p.qty, 0),
+  };
+}
+
+/* ---------- settings ---------- */
+let nextId = 1;
+function makeUnits(nUnits, shelvesPer, perShelf, firstNumber) {
+  const units = []; let n = firstNumber;
+  for (let u = 0; u < nUnits; u++) {
+    const count = Array.isArray(shelvesPer) ? shelvesPer[u] : shelvesPer;
+    const shelves = [];
+    for (let s = 0; s < count; s++) { shelves.push({ start: n, end: n + perShelf - 1 }); n += perShelf; }
+    units.push({ id: nextId++, name: `Unit ${u + 1}`, shelves, pattern: "rows-down", block: 5, dir: "ltr" });
+  }
+  return units;
+}
+function defaultSettings() {
+  const units = makeUnits(4, 4, 25, 1);
+  return { version: 1, units, walk: units.map(u => u.id), orderNumbering: "sorted", theme: "auto" };
+}
+function fixSettings(s) {
+  if (!s || !Array.isArray(s.units)) return defaultSettings();
+  s.units.forEach(u => { if (!u.id) u.id = nextId++; nextId = Math.max(nextId, u.id + 1); u.shelves = u.shelves || []; u.pattern = u.pattern || "rows-down"; u.dir = u.dir || "ltr"; u.block = u.block || 5; });
+  const ids = new Set(s.units.map(u => u.id));
+  s.walk = (s.walk || []).filter(id => ids.has(id));
+  s.units.forEach(u => { if (!s.walk.includes(u.id)) s.walk.push(u.id); });
+  s.orderNumbering = s.orderNumbering || "sorted";
+  s.theme = s.theme || "auto";
+  return s;
+}
+const STORE_KEY = "pick-and-sort-settings-v1";
+function loadSettings() {
+  try { const raw = localStorage.getItem(STORE_KEY); if (raw) return fixSettings(JSON.parse(raw)); } catch (e) {}
+  return defaultSettings();
+}
+function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(settings)); } catch (e) {} }
+
+/* =====================================================================
+   SCREEN CODE
+   ===================================================================== */
+let settings = loadSettings();
+let current = null; // { lines, warnings, name }
+let plan = null;
+const $ = id => document.getElementById(id);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, "");
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  kids.flat().forEach(k => { if (k != null && k !== false) el.append(k.nodeType ? k : String(k)); });
+  return el;
+}
+const where = loc => (loc ? `${loc.unitName} · shelf ${loc.shelf}` : "Not on your map");
+function applyTheme() {
+  if (settings.theme === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", settings.theme);
+}
+
+/* ---------- loading ---------- */
+function showLoadMsg(text, kind) { $("loadMsg").innerHTML = ""; if (text) $("loadMsg").append(h("div", { class: `notice ${kind || "warn"}` }, text)); }
+
+function useRows(rows, name) {
+  const r = rowsToLines(rows, $("formatSel").value);
+  if (!r.lines.length) { showLoadMsg("Couldn't find any orders in that file. " + (r.warnings[0] || "Try the template.")); return; }
+  current = { lines: r.lines, warnings: r.warnings, name, src: rows };
+  showLoadMsg("");
+  rebuild();
+  $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("fileInput").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try {
+    if (/\.xlsx?$/i.test(f.name)) {
+      if (!window.XLSX) { showLoadMsg("Excel files need an internet connection the first time. Save the sheet as CSV instead, or connect and reload."); return; }
+      const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      useRows(XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }), f.name);
+    } else useRows(parseDelimited(await f.text()), f.name);
+  } catch (err) { showLoadMsg("Couldn't read that file: " + err.message); }
+});
+$("pasteToggle").onclick = () => $("pasteBox").classList.toggle("hidden");
+$("pasteGo").onclick = () => useRows(parseDelimited($("pasteText").value), "Pasted list");
+$("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name); };
+
+const EXAMPLE = `Order,Item,Qty
+10452,3,1
+10452,10,2
+10452,87,1
+10449,10,1
+10449,40,1
+10449,59,1
+10460,59,2
+10460,5,1
+10451,72,1
+10451,3,1
+10455,40,1
+10455,26,1
+10455,94,1`;
+$("exampleBtn").onclick = () => useRows(parseDelimited(EXAMPLE), "Example orders");
+$("templateBtn").onclick = () => download(new Blob(["Order,Item,Qty\n"], { type: "text/csv" }), "orders-template.csv");
+
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = h("a", { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+/* ---------- results ---------- */
+let pickedDone = new Set();
+function rebuild() {
+  if (!current) return;
+  plan = makePlan(current.lines, settings);
+  pickedDone = new Set();
+  $("results").classList.remove("hidden");
+  $("fileName").textContent = current.name;
+  $("stats").replaceChildren(
+    h("div", { class: "stat" }, h("b", null, plan.orders.length), "orders"),
+    h("div", { class: "stat" }, h("b", null, plan.totalUnits), "items to pick"),
+    h("div", { class: "stat" }, h("b", null, plan.picks.length), "stops on the shelves"));
+  const w = $("warnings"); w.replaceChildren();
+  if (plan.unknown.length) w.append(h("div", { class: "notice warn" },
+    `${plan.unknown.length} item number(s) aren't on your shelf map, so they're listed at the end: ${plan.unknown.slice(0, 12).join(", ")}${plan.unknown.length > 12 ? "…" : ""}. You can fix the map in Settings.`));
+  if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""));
+  renderPick(); renderUnpack(); renderKey();
+}
+
+function renderPick() {
+  const tb = h("tbody");
+  let lastUnit = undefined;
+  plan.picks.forEach(p => {
+    const unitId = p.loc ? p.loc.unitId : "none";
+    if (unitId !== lastUnit) {
+      tb.append(h("tr", { class: "unit-head" }, h("td", { colspan: 4 }, p.loc ? p.loc.unitName : "Not on your shelf map")));
+      lastUnit = unitId;
+    }
+    const tr = h("tr", { class: pickedDone.has(p.step) ? "done" : "" },
+      h("td", null, h("input", { type: "checkbox", "aria-label": `Picked item ${p.item}`, checked: pickedDone.has(p.step),
+        onchange: e => { e.target.checked ? pickedDone.add(p.step) : pickedDone.delete(p.step); tr.className = e.target.checked ? "done" : ""; } })),
+      h("td", { class: "big" }, `${p.qty}×`),
+      h("td", { class: "big" }, `#${p.item}`),
+      h("td", { class: "small muted" }, p.loc ? `shelf ${p.loc.shelf} of ${p.loc.shelves}` : ""));
+    tb.append(tr);
+  });
+  $("tab-pick").replaceChildren(
+    h("p", { class: "small muted" }, "Walk the shelves top to bottom of this list. Tick items off as they go in the cart."),
+    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Take"), h("th", null, "Item"), h("th", null, "Where"))), tb));
+}
+
+function renderUnpack() {
+  const tb = h("tbody");
+  plan.unpack.forEach(u => {
+    tb.append(h("tr", { class: u.last ? "last" : "" },
+      h("td", { class: "small muted" }, u.step),
+      h("td", { class: "big" }, `#${u.item}`),
+      h("td", null, `${u.qty}×`),
+      h("td", null, h("span", { class: "pile" }, u.label),
+        u.last ? h("div", { class: "lastnote" }, `✓ Last item — order ${u.label} is complete. Pack it!`) : null)));
+  });
+  $("tab-unpack").replaceChildren(
+    h("p", { class: "small muted" }, "Start from the top of the cart (the last thing you picked). Put each item on the pile for its order number."),
+    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, "Step"), h("th", null, "Item"), h("th", null, "Qty"), h("th", null, "Put on order"))), tb));
+}
+
+function renderKey() {
+  $("tab-key").replaceChildren(
+    h("p", { class: "small muted" }, settings.orderNumbering === "file"
+      ? "Orders are numbered 1, 2, 3… in the order they appear in your file. Write the short number on each order sheet."
+      : "Orders are numbered 1, 2, 3… from the lowest real order number up. Write the short number on each order sheet."),
+    h("div", { class: "key" }, plan.orders.map(o => h("div", null, h("span", { class: "pile" }, o.label),
+      h("span", null, h("b", null, `#${o.raw}`), h("br"), h("span", { class: "small muted" }, `${o.units} item${o.units === 1 ? "" : "s"}`))))));
+}
+
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".tabpane").forEach(p => p.classList.toggle("hidden", p.id !== "tab-" + b.dataset.tab));
+});
+$("printBtn").onclick = () => window.print();
+
+/* ---------- step-through unpacking ---------- */
+let stepAt = 0;
+function showStep() {
+  const total = plan.unpack.length, u = plan.unpack[stepAt];
+  $("stepBar").style.width = `${((stepAt + 1) / total) * 100}%`;
+  $("stepCount").textContent = `Item ${stepAt + 1} of ${total}`;
+  $("stepBody").replaceChildren(
+    h("div", { class: "item" }, `Item #${u.item}`),
+    h("div", { class: "qty" }, u.qty > 1 ? `Take ${u.qty} of them` : "Take 1"),
+    h("div", { class: "to" }, "put it on order"),
+    h("div", { class: "order" }, u.label),
+    h("div", { class: "small muted" }, `real order #${u.raw}`),
+    ...(u.last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []));
+  $("stepPrev").disabled = stepAt === 0;
+  $("stepNext").textContent = stepAt === total - 1 ? "Finish ✓" : "Next ▶";
+}
+$("stepBtn").onclick = () => { stepAt = 0; $("stepper").classList.remove("hidden"); showStep(); };
+$("stepClose").onclick = () => $("stepper").classList.add("hidden");
+$("stepPrev").onclick = () => { if (stepAt > 0) { stepAt--; showStep(); } };
+$("stepNext").onclick = () => { if (stepAt < plan.unpack.length - 1) { stepAt++; showStep(); } else $("stepper").classList.add("hidden"); };
+document.addEventListener("keydown", e => {
+  if ($("stepper").classList.contains("hidden")) return;
+  if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); $("stepNext").click(); }
+  if (e.key === "ArrowLeft") $("stepPrev").click();
+  if (e.key === "Escape") $("stepClose").click();
+});
+
+/* ---------- PDFs ---------- */
+const PW = 612, PH = 792, M = 40;
+function today() { return new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
+function newDoc() {
+  if (!window.jspdf) { alert("Making PDFs needs an internet connection the first time the page loads. Use the Print button instead (choose 'Save as PDF')."); return null; }
+  return new window.jspdf.jsPDF({ unit: "pt", format: "letter" });
+}
+function footer(doc, title) {
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i); doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(120);
+    doc.text(`${title} · page ${i} of ${n}`, PW / 2, PH - 20, { align: "center" });
+  }
+  doc.setTextColor(0);
+}
+function docHeader(doc, title, sub) {
+  doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.text(title, M, M + 18);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.setTextColor(80);
+  doc.text(sub, M, M + 36); doc.setTextColor(0);
+  return M + 54;
+}
+function stamp() { return `${plan.orders.length} orders · ${plan.totalUnits} items · ${today()}`; }
+
+function pickPdf() {
+  const doc = newDoc(); if (!doc) return;
+  let y = docHeader(doc, "PICK LIST", `${stamp()} · go top to bottom, tick each box`);
+  const colHead = () => {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(110);
+    doc.text("TAKE", M + 30, y); doc.text("ITEM #", M + 100, y); doc.text("WHERE", M + 250, y);
+    doc.setTextColor(0); y += 6;
+  };
+  colHead();
+  let lastUnit;
+  const rowH = 26;
+  plan.picks.forEach(p => {
+    const unitId = p.loc ? p.loc.unitId : "none";
+    const needHead = unitId !== lastUnit;
+    if (y + rowH + (needHead ? 22 : 0) > PH - 40) { doc.addPage(); y = M; colHead(); }
+    if (needHead) {
+      doc.setFillColor(225, 235, 244); doc.rect(M, y, PW - 2 * M, 20, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+      doc.text(p.loc ? p.loc.unitName : "NOT ON YOUR SHELF MAP", M + 6, y + 14);
+      y += 22; lastUnit = unitId;
+    }
+    doc.setDrawColor(60); doc.setLineWidth(1); doc.rect(M + 4, y + 6, 14, 14, "S");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(16);
+    doc.text(`${p.qty} x`, M + 30, y + 18);
+    doc.text(`#${p.item}`, M + 100, y + 18);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+    doc.text(p.loc ? `shelf ${p.loc.shelf} of ${p.loc.shelves}` : "find it by hand", M + 250, y + 17);
+    doc.setDrawColor(215); doc.setLineWidth(0.5); doc.line(M, y + rowH, PW - M, y + rowH);
+    y += rowH;
+  });
+  footer(doc, "Pick list");
+  doc.save(`pick-list-${fileStamp()}.pdf`);
+}
+
+function unpackPdf() {
+  const doc = newDoc(); if (!doc) return;
+  let y = docHeader(doc, "UNPACK & SORT", `${stamp()} · start at the TOP of the cart`);
+  // order key
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+  doc.text("Lay out your order sheets and number them:", M, y); y += 10;
+  const cols = 4, cw = (PW - 2 * M) / cols, kh = 30;
+  let yy = y - kh;
+  plan.orders.forEach((o, i) => {
+    if (i % cols === 0) { yy += kh; if (yy + kh > PH - 40) { doc.addPage(); yy = M; } }
+    const cx = M + (i % cols) * cw;
+    doc.setFillColor(31, 95, 139); doc.roundedRect(cx, yy + 4, 30, 22, 4, 4, "F");
+    doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(14);
+    doc.text(String(o.label), cx + 15, yy + 20, { align: "center" });
+    doc.setTextColor(0); doc.setFontSize(11); doc.text(`= #${o.raw}`, cx + 36, yy + 15);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(100);
+    doc.text(`${o.units} item${o.units === 1 ? "" : "s"}`, cx + 36, yy + 25); doc.setTextColor(0);
+  });
+  y = yy + kh + 16;
+  if (y + 60 > PH - 40) { doc.addPage(); y = M; }
+
+  const colHead = () => {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(110);
+    doc.text("STEP", M + 4, y); doc.text("ITEM #", M + 50, y); doc.text("QTY", M + 170, y); doc.text("PUT ON ORDER", M + 230, y);
+    doc.setTextColor(0); y += 6;
+  };
+  colHead();
+  plan.unpack.forEach(u => {
+    const rowH = u.last ? 40 : 30;
+    if (y + rowH > PH - 40) { doc.addPage(); y = M; colHead(); }
+    if (u.last) { doc.setFillColor(222, 243, 230); doc.rect(M, y, PW - 2 * M, rowH, "F"); }
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(110);
+    doc.text(String(u.step), M + 4, y + 20); doc.setTextColor(0);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(16);
+    doc.text(`#${u.item}`, M + 50, y + 20);
+    doc.setFontSize(13); doc.text(`${u.qty} x`, M + 170, y + 20);
+    // arrow + order badge
+    doc.setFillColor(90); doc.triangle(M + 200, y + 9, M + 200, y + 21, M + 211, y + 15, "F");
+    doc.setFillColor(31, 95, 139); doc.roundedRect(M + 230, y + 4, 44, 22, 4, 4, "F");
+    doc.setTextColor(255); doc.setFontSize(16); doc.text(String(u.label), M + 252, y + 21, { align: "center" });
+    doc.setTextColor(100); doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+    doc.text(`#${u.raw}`, M + 282, y + 19); doc.setTextColor(0);
+    if (u.last) {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 110, 60);
+      doc.text(`LAST ITEM - order ${u.label} is complete. Pack it!`, M + 50, y + 35); doc.setTextColor(0);
+    }
+    doc.setDrawColor(215); doc.setLineWidth(0.5); doc.line(M, y + rowH, PW - M, y + rowH);
+    y += rowH;
+  });
+  footer(doc, "Unpack & sort");
+  doc.save(`unpack-list-${fileStamp()}.pdf`);
+}
+function fileStamp() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+$("pdfPick").onclick = pickPdf;
+$("pdfUnpack").onclick = unpackPdf;
+
+/* ---------- settings screen ---------- */
+const PATTERNS = [
+  ["rows-down", "Shelf by shelf, top shelf first"],
+  ["rows-up", "Shelf by shelf, bottom shelf first"],
+  ["columns", "Up and down: one spot at a time, all shelves top to bottom"],
+  ["blocks", "Sections: a few spots on every shelf, then move along"],
+];
+let view = "home";
+$("navBtn").onclick = () => {
+  view = view === "home" ? "settings" : "home";
+  $("homeView").classList.toggle("hidden", view !== "home");
+  $("settingsView").classList.toggle("hidden", view !== "settings");
+  $("navBtn").innerHTML = view === "home" ? "&#9881; Settings" : "&#10003; Done";
+  if (view === "settings") renderSettings(); else rebuild();
+  window.scrollTo(0, 0);
+};
+function changed(rerender) { saveSettings(); if (rerender) renderSettings(); else renderChecks(); }
+function numInput(value, onset, attrs) {
+  return h("input", Object.assign({ type: "number", value: value ?? "", inputmode: "numeric",
+    oninput: e => { onset(e.target.value === "" ? "" : parseInt(e.target.value, 10)); changed(false); } }, attrs || {}));
+}
+
+function renderSettings() {
+  const v = $("settingsView");
+  const quick = { units: 4, shelves: 4, per: 25, first: 1 };
+  v.replaceChildren(
+    h("section", { class: "card" },
+      h("h2", null, "Quick setup"),
+      h("p", { class: "small muted" }, "Builds a starting map with numbers running in order: unit 1 top shelf left → right, then the next shelf down, then unit 2. Adjust any shelf below afterwards."),
+      h("div", { class: "row" },
+        h("label", null, "Shelving units ", numInput(quick.units, x => quick.units = x, { min: 1, oninput: null, onchange: e => quick.units = +e.target.value })),
+        h("label", null, "Shelves on each ", numInput(quick.shelves, x => quick.shelves = x, { min: 1, oninput: null, onchange: e => quick.shelves = +e.target.value })),
+        h("label", null, "Items per shelf ", numInput(quick.per, x => quick.per = x, { min: 1, oninput: null, onchange: e => quick.per = +e.target.value })),
+        h("label", null, "First number ", numInput(quick.first, x => quick.first = x, { oninput: null, onchange: e => quick.first = +e.target.value }))),
+      h("div", { class: "row", style: "margin-top:10px" },
+        h("button", { class: "btn", type: "button", onclick: () => {
+          if (!confirm("Replace your whole shelf map with this one?")) return;
+          settings.units = makeUnits(Math.max(1, quick.units | 0), Math.max(1, quick.shelves | 0), Math.max(1, quick.per | 0), quick.first | 0);
+          settings.walk = settings.units.map(u => u.id); changed(true);
+        } }, "Build this map"))),
+    h("section", { class: "card" },
+      h("h2", null, "Your shelving units"),
+      h("p", { class: "small muted" }, "For each shelf, type the item number on its far left and on its far right. Shelf 1 is the top shelf. Then choose how to walk that unit."),
+      h("div", { id: "checks" }),
+      settings.units.map((u, ui) => unitCard(u, ui)),
+      h("button", { class: "btn secondary", type: "button", onclick: () => {
+        const last = settings.units[settings.units.length - 1];
+        const lastShelves = last ? last.shelves.length : 4;
+        let maxN = 0; settings.units.forEach(x => x.shelves.forEach(s => { maxN = Math.max(maxN, s.start | 0, s.end | 0); }));
+        const per = last && last.shelves[0] ? Math.abs((last.shelves[0].end | 0) - (last.shelves[0].start | 0)) + 1 : 25;
+        const [nu] = makeUnits(1, lastShelves, per, maxN + 1); nu.name = `Unit ${settings.units.length + 1}`;
+        settings.units.push(nu); settings.walk.push(nu.id); changed(true);
+      } }, "+ Add a shelving unit")),
+    h("section", { class: "card" },
+      h("h2", null, "Walking order"),
+      h("p", { class: "small muted" }, "Which unit you visit first, second, third… Use the arrows to change it. (It doesn't have to match the numbers.)"),
+      settings.walk.map((id, i) => {
+        const u = settings.units.find(x => x.id === id);
+        return h("div", { class: "walk-item" }, h("span", { class: "n" }, `${i + 1}.`), h("span", { class: "name" }, u.name),
+          h("button", { class: "btn secondary small", type: "button", disabled: i === 0, "aria-label": "Move up", onclick: () => { [settings.walk[i - 1], settings.walk[i]] = [settings.walk[i], settings.walk[i - 1]]; changed(true); } }, "▲"),
+          h("button", { class: "btn secondary small", type: "button", disabled: i === settings.walk.length - 1, "aria-label": "Move down", onclick: () => { [settings.walk[i + 1], settings.walk[i]] = [settings.walk[i], settings.walk[i + 1]]; changed(true); } }, "▼"));
+      })),
+    h("section", { class: "card" },
+      h("h2", null, "Order numbers"),
+      h("p", { class: "small muted" }, "Long order numbers get swapped for short ones: 1, 2, 3…"),
+      ["sorted", "file"].map(val => h("label", { style: "display:block;padding:6px 0" },
+        h("input", { type: "radio", name: "onum", checked: settings.orderNumbering === val, onchange: () => { settings.orderNumbering = val; changed(false); } }),
+        val === "sorted" ? " Lowest order number becomes 1" : " First order in the file becomes 1"))),
+    h("section", { class: "card" },
+      h("h2", null, "Check a number"),
+      h("p", { class: "small muted" }, "Type an item number to see where your map puts it."),
+      h("div", { class: "row" }, h("input", { type: "number", id: "probe", inputmode: "numeric", oninput: renderChecks }), h("span", { id: "probeOut" }))),
+    h("section", { class: "card" },
+      h("h2", null, "Backup & other devices"),
+      h("p", { class: "small muted" }, "Settings are saved on this device only. Save them to a file to copy them to another phone, tablet or computer."),
+      h("div", { class: "row" },
+        h("button", { class: "btn secondary", type: "button", onclick: () => download(new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" }), "pick-and-sort-settings.json") }, "Save settings file"),
+        h("label", { class: "btn secondary" }, "Load settings file", h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: async e => {
+          const f = e.target.files[0]; if (!f) return;
+          try { settings = fixSettings(JSON.parse(await f.text())); changed(true); alert("Settings loaded."); } catch (err) { alert("That isn't a settings file."); }
+        } })),
+        h("button", { class: "btn secondary", type: "button", onclick: () => { if (confirm("Start over with the example map?")) { settings = defaultSettings(); changed(true); } } }, "Reset")),
+      h("p", { class: "small muted" }, "Look: ",
+        h("select", { onchange: e => { settings.theme = e.target.value; applyTheme(); saveSettings(); } },
+          [["auto", "Match device"], ["light", "Light"], ["dark", "Dark"]].map(([val, t]) => h("option", { value: val, selected: settings.theme === val }, t))))));
+  renderChecks();
+}
+
+function unitCard(u, ui) {
+  return h("div", { class: "unit" },
+    h("div", { class: "unit-top" },
+      h("input", { type: "text", value: u.name, "aria-label": "Unit name", style: "font-weight:700;max-width:220px",
+        onchange: e => { u.name = e.target.value.trim() || `Unit ${ui + 1}`; changed(true); } }),
+      h("button", { class: "btn secondary small", type: "button", onclick: () => {
+        if (!confirm(`Delete ${u.name}?`)) return;
+        settings.units.splice(ui, 1); settings.walk = settings.walk.filter(id => id !== u.id); changed(true);
+      } }, "Delete unit")),
+    h("div", { class: "row", style: "margin:10px 0" },
+      h("select", { "aria-label": "How to walk this unit", onchange: e => { u.pattern = e.target.value; changed(true); } },
+        PATTERNS.map(([val, t]) => h("option", { value: val, selected: u.pattern === val }, t))),
+      u.pattern === "blocks" ? h("label", null, "spots per section ", numInput(u.block, x => u.block = x, { min: 1 })) : null,
+      h("select", { "aria-label": "Direction", onchange: e => { u.dir = e.target.value; changed(false); } },
+        [["ltr", "Left to right"], ["rtl", "Right to left"]].map(([val, t]) => h("option", { value: val, selected: u.dir === val }, t)))),
+    u.shelves.map((s, si) => h("div", { class: "shelf-row" },
+      h("span", { class: "lbl" }, si === 0 ? "Shelf 1 (top)" : si === u.shelves.length - 1 ? `Shelf ${si + 1} (bottom)` : `Shelf ${si + 1}`),
+      h("label", null, "left ", numInput(s.start, x => s.start = x)),
+      h("label", null, "right ", numInput(s.end, x => s.end = x)),
+      h("button", { class: "btn secondary small", type: "button", "aria-label": "Remove shelf", onclick: () => { u.shelves.splice(si, 1); changed(true); } }, "✕"))),
+    h("button", { class: "btn secondary small", type: "button", style: "margin-top:6px", onclick: () => {
+      const last = u.shelves[u.shelves.length - 1];
+      const len = last ? Math.abs((last.end | 0) - (last.start | 0)) + 1 : 10;
+      const st = last ? (last.end | 0) + 1 : 1;
+      u.shelves.push({ start: st, end: st + len - 1 }); changed(true);
+    } }, "+ Add shelf at the bottom"));
+}
+
+function renderChecks() {
+  const loc = buildLocator(settings);
+  const box = $("checks");
+  if (box) box.replaceChildren(loc.problems.length
+    ? h("div", { class: "notice warn" }, "Overlaps: ", loc.problems.join(" "))
+    : h("div", { class: "notice good" }, `Map covers ${loc.size} item numbers.`));
+  const p = $("probe");
+  if (p && p.value !== "") {
+    const n = parseInt(p.value, 10), l = loc.locate(n);
+    $("probeOut").textContent = l ? `${l.unitName}, shelf ${l.shelf} of ${l.shelves}, spot ${l.pos} from the left` : "Not on the map";
+  } else if ($("probeOut")) $("probeOut").textContent = "";
+}
+
+applyTheme();
+</script>
+</body>
+</html>
