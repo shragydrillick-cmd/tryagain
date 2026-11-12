@@ -103,13 +103,14 @@ Settings opens with two buttons:
 
 - **Map**: the store's layout. It lists the aisles (e.g. "Aisle C · 6 shelves high
   · C1 – C96"), with **Edit** for one aisle, **+ Add an aisle** and **Change all**.
-  Each of those asks simple questions one at a time: how many aisles, the
-  aisle's letter, how many shelves high, the first number, where box 1 is (top
-  left / top right / bottom left / bottom right), whether 2 is next to 1 or
-  under/above it, then the box at the left end and the right end of each shelf
-  (what can be worked out is filled in). Then it checks the maths: if it adds up
-  it says so and shows the aisle; if not, it asks one question at a time (with
-  the likely answers as buttons) until it does.
+  Each of those asks only: how many aisles (Change all), the aisle's letter, how
+  many shelves high, then **the box at the left end of each shelf, top to bottom**
+  and **the box at the right end of each shelf, top to bottom**. Once a pattern is
+  clear the rest is filled in (shown in grey to check). From those numbers the app
+  works out where box 1 is and whether the numbers go along the shelves or down
+  the columns. If something doesn't add up it asks one question at a time, with
+  the likely answers as buttons (including "Where is C2: next to C1 or under it?"
+  when it can't tell).
 - **Order**: which aisle first, how to pick (for every aisle at once, or one
   aisle only), with a picture of the picking order.
 

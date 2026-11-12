@@ -138,6 +138,7 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 .bigopts { display: grid; gap: 10px; }
 .bigopt { display: flex; flex-direction: column; gap: 4px; text-align: left; }
 .bigopt b { font-size: 19px; }
+.bigin.auto { color: var(--muted); font-style: italic; }
 .endrow2 { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; }
 .askq { font-size: 18px; font-weight: 600; }
 .wiznav { margin-top: 18px; }
@@ -2019,7 +2020,7 @@ function startWizard(mode, u) {
   else wiz = { mode, drafts: [], ai: 0, step: "count", count: Math.max(1, settings.units.length || 1) };
   go("wizard");
 }
-const STEPS = ["letter", "shelves", "first", "start", "dir", "left", "right", "check"];
+const STEPS = ["letter", "shelves", "left", "right", "check"]; // the rest is worked out from the numbers, and asked only if unclear
 function wizNext() { const i = STEPS.indexOf(wiz.step); wiz.step = STEPS[Math.min(STEPS.length - 1, i + 1)]; if (wiz.step === "left" || wiz.step === "right") autofill(wcur()); renderSettings(); window.scrollTo(0, 0); }
 function wizBack() {
   const i = STEPS.indexOf(wiz.step);
@@ -2039,40 +2040,75 @@ function setEnd(d, side, i, value) {
 }
 /** Fill in the shelf ends that follow from what's known; never overwrites what was typed. */
 function autofill(d) {
-  const S = d.shelves, top = d.start[0] === "t", onLeft = d.start[1] === "l", n = endNumber;
+  const S = d.shelves, n = endNumber;
   d.auto = d.auto || { left: [], right: [] };
   for (const side of ["left", "right"]) { // forget what was filled in before; keep what was typed
     d[side] = Array.from({ length: S }, (_, i) => (d.auto[side][i] ? "" : d[side][i] || ""));
     d.auto[side] = Array.from({ length: S }, () => false);
   }
-  const set = (arr, i, val) => { if (!arr[i] && val > 0) { arr[i] = codeOf(d, val); d.auto[arr === d.left ? "left" : "right"][i] = true; } };
-  if (d.vertical) {
-    const startCol = onLeft ? d.left : d.right, otherCol = onLeft ? d.right : d.left;
-    for (let i = 0; i < S; i++) set(startCol, i, d.first + (top ? i : S - 1 - i)); // 1, 2, 3 … down (or up) the first column
-    const k = otherCol.findIndex(v => n(v) != null); // the far column also counts by one per shelf
-    if (k >= 0) for (let i = 0; i < S; i++) set(otherCol, i, n(otherCol[k]) + (top ? i - k : k - i));
-  } else {
-    const order = Array.from({ length: S }, (_, i) => (top ? i : S - 1 - i));
-    const startSide = onLeft ? d.left : d.right, endSide = onLeft ? d.right : d.left;
-    set(startSide, order[0], d.first);
-    for (let j = 1; j < S; j++) { const prev = n(endSide[order[j - 1]]); if (prev != null) set(startSide, order[j], prev + 1); }
-  }
+  const set = (side, i, val) => { if (!d[side][i] && val > 0) { d[side][i] = codeOf(d, val); d.auto[side][i] = true; } };
+  const typed = side => d[side].map((v, i) => [i, n(v)]).filter(x => x[1] != null);
+  // continue a column's pattern once it's clear: two typed boxes give the step from shelf to shelf
+  const extend = (side, hint) => {
+    const t = typed(side); let step = null;
+    if (!t.length) return; // nothing typed in this column yet
+    if (t.length >= 2 && (t[1][1] - t[0][1]) % (t[1][0] - t[0][0]) === 0) step = (t[1][1] - t[0][1]) / (t[1][0] - t[0][0]);
+    if (hint && (step == null || Math.abs(step) !== Math.abs(hint))) step = hint; // the known pattern wins; a typo then shows up in the check
+    if (!step) return;
+    for (let i = 0; i < S; i++) set(side, i, t[0][1] + (i - t[0][0]) * step);
+  };
+  extend("left", null);
+  const L = typed("left"), ls = L.length >= 2 ? (L[1][1] - L[0][1]) / (L[1][0] - L[0][0]) : null;
+  if (ls === 1 || ls === -1) extend("right", ls); // numbers go down the columns: the right end does too
+  else if (ls) { // along the shelves: once one right end is typed we know which way the numbers run
+    const R = typed("right");
+    if (R.length) {
+      const k = R[0][0], runsRight = R[0][1] > n(d.left[k]); // numbers go up from left to right on the shelf
+      for (let i = 0; i < S; i++) {
+        if (runsRight && i < S - 1 && n(d.left[i + 1]) != null) set("right", i, n(d.left[i + 1]) - Math.sign(ls)); // ends just before the next shelf starts
+        if (!runsRight && i > 0 && n(d.left[i - 1]) != null) set("right", i, n(d.left[i - 1]) + Math.sign(ls)); // starts just after the shelf above ends
+      }
+    }
+  } else extend("right", null);
+}
+/** Down the columns or along the shelves? Worked out from the numbers (or as answered). */
+function inferVertical(d) {
+  if (d.dirForced != null) return d.dirForced;
+  const n = endNumber, S = d.shelves;
+  if (S < 2) return false;
+  const r = d.left.map((v, i) => { const a = n(v), b = n(d.right[i]); return [Math.min(a, b), Math.max(a, b)]; });
+  for (let i = 0; i < S; i++) for (let j = i + 1; j < S; j++) if (r[i][0] <= r[j][1] && r[j][0] <= r[i][1]) return true; // shelves interleave: columns
+  return Math.abs(n(d.left[1]) - n(d.left[0])) === 1 && Math.abs(n(d.right[1]) - n(d.right[0])) === 1;
 }
 /** The first thing that doesn't add up, as a question with likely answers (null = all good). */
 function checkDraft(d) {
-  const S = d.shelves, n = endNumber, top = d.start[0] === "t";
+  const S = d.shelves, n = endNumber;
   for (const side of ["left", "right"]) for (let i = 0; i < S; i++) if (n(d[side][i]) == null)
     return { text: `What box is at the ${side} end of the ${shelfLabel(i, S).toLowerCase()}?`, typeStep: side };
-  if (d.vertical) {
+  const issue = problemsAs(d, inferVertical(d));
+  if (issue && d.dirForced != null) // answered "the numbers go the other way": let them take it back
+    issue.options = (issue.options || []).concat({ label: "Undo: go back to how the numbers looked", apply: () => { d.dirForced = null; } });
+  if (issue && d.dirForced == null && S > 1 && !problemsAs(d, !inferVertical(d))) {
+    // the numbers fit the other way round better: ask which way they go
+    const lo = Math.min(...d.left.concat(d.right).map(n));
+    return { text: `Where is ${codeOf(d, lo + 1)}?`, options: [
+      { label: `Next to ${codeOf(d, lo)}`, apply: () => { d.dirForced = false; } },
+      { label: `Under or above ${codeOf(d, lo)}`, apply: () => { d.dirForced = true; } }], typeStep: "left" };
+  }
+  return issue;
+}
+function problemsAs(d, vertical) {
+  const S = d.shelves, n = endNumber;
+  if (vertical) {
     for (const side of ["left", "right"]) {
-      const col = d[side].map(n);
+      const col = d[side].map(n), sg = Math.sign(col[1] - col[0]) || 1, word = sg > 0 ? "under" : "above";
       for (let i = 1; i < S; i++) {
-        const want = col[i - 1] + (top ? 1 : -1);
+        const want = col[i - 1] + sg;
         if (col[i] !== want) return {
-          text: `At the ${side} end, ${top ? "under" : "above"} ${codeOf(d, col[i - 1])} (${shelfLabel(i - 1, S).toLowerCase()}) should be ${codeOf(d, want)}, but the ${shelfLabel(i, S).toLowerCase()} says ${codeOf(d, col[i])}. Which is right?`,
+          text: `At the ${side} end, ${word} ${codeOf(d, col[i - 1])} (${shelfLabel(i - 1, S).toLowerCase()}) should be ${codeOf(d, want)}, but the ${shelfLabel(i, S).toLowerCase()} says ${codeOf(d, col[i])}. Which is right?`,
           options: [
             { label: `${codeOf(d, want)} is right`, apply: () => setEnd(d, side, i, codeOf(d, want)) },
-            { label: `${codeOf(d, col[i])} is right`, apply: () => setEnd(d, side, i - 1, codeOf(d, col[i] - (top ? 1 : -1))) }],
+            { label: `${codeOf(d, col[i])} is right`, apply: () => setEnd(d, side, i - 1, codeOf(d, col[i] - sg)) }],
           typeStep: side };
       }
     }
@@ -2093,8 +2129,10 @@ function checkDraft(d) {
 }
 function draftToSpec(d) {
   const n = endNumber;
-  return { letter: d.letter, shelves: d.shelves, vertical: d.vertical, byEnds: true, rtl: d.start[1] === "r", fromBottom: d.start[0] === "b",
-    first: d.first, per: "10", manual: false,
+  const nums = d.left.concat(d.right).map(n), lo = Math.min(...nums);
+  const at = d.left.map(n).indexOf(lo) >= 0 ? "l" : "r", row = Math.max(d.left.map(n).indexOf(lo), d.right.map(n).indexOf(lo));
+  return { letter: d.letter, shelves: d.shelves, vertical: inferVertical(d), byEnds: true, rtl: at === "r", fromBottom: row >= d.shelves / 2,
+    first: lo, per: "10", manual: false,
     ends: d.left.map((lv, i) => { const a = n(lv), b = n(d.right[i]); return { first: codeOf(d, Math.min(a, b)), last: codeOf(d, Math.max(a, b)), rtl: a > b }; }) };
 }
 function saveDraft(d, k) {
@@ -2154,38 +2192,16 @@ function renderWizard(v) {
       help = "Count the shelves stacked on top of each other.";
       body = askNumber("Shelves high", d.shelves, 1, x => { const nS = Math.max(1, x || 1); if (nS !== d.shelves) { d.shelves = nS; d.left = []; d.right = []; d.auto = null; } });
       break;
-    case "first":
-      q = `What's the first number in aisle ${d.letter}?`;
-      help = `Usually 1 (box ${d.letter}1).`;
-      body = h("div", { class: "row" }, h("b", { class: "biglabel" }, d.letter), askNumber("First number", d.first, 0, x => { const f = Number.isFinite(x) ? x : 1; if (f !== d.first) { d.first = f; if (d.auto) autofill(d); } }));
-      break;
-    case "start": {
-      q = `Where is box ${codeOf(d, d.first)}?`;
-      help = "Standing in front of the shelves.";
-      const corner = (k, label) => h("button", { class: "corner" + (d.start === k ? " on" : ""), type: "button", onclick: () => { if (d.start !== k) { d.start = k; d.left = []; d.right = []; d.auto = null; } wizNext(); } }, label);
-      body = h("div", { class: "corners" }, corner("tl", "Top left"), corner("tr", "Top right"), corner("bl", "Bottom left"), corner("br", "Bottom right"));
-      nav = [back];
-      break;
-    }
-    case "dir": {
-      const top = d.start[0] === "t", n1 = codeOf(d, d.first), n2 = codeOf(d, d.first + 1);
-      q = `Where is ${n2}?`;
-      const opt = (vert, label, sub) => h("button", { class: "bigopt" + (d.vertical === vert ? " on" : ""), type: "button", onclick: () => { if (d.vertical !== vert) { d.vertical = vert; d.left = []; d.right = []; d.auto = null; } wizNext(); } },
-        h("b", null, label), h("span", { class: "small muted" }, sub));
-      body = h("div", { class: "bigopts" },
-        opt(false, `Next to ${n1}`, `Numbers go along the shelf (${n1}, ${n2}, ${codeOf(d, d.first + 2)}… side by side)`),
-        opt(true, top ? `Under ${n1}` : `Above ${n1}`, `Numbers go ${top ? "down" : "up"} the shelves (${n2} ${top ? "under" : "above"} ${n1}, then the next column)`));
-      nav = [back];
-      break;
-    }
     case "left": case "right": {
       const side = wiz.step;
       q = `What box is at the ${side.toUpperCase()} end of each shelf?`;
-      help = "Top shelf first. What could be worked out is filled in already; check it and fill in the rest.";
+      help = side === "left" ? "Top shelf first, going down. Type the first two and the rest is filled in; grey ones were filled in for you, so check them."
+        : "Top shelf first, going down. Grey ones were filled in for you; check them and fix any that are wrong.";
       body = h("div", { class: "endsrows" }, Array.from({ length: d.shelves }, (_, i) => h("div", { class: "endrow2" },
         h("span", { class: "lbl" }, shelfLabel(i, d.shelves)),
-        h("input", { type: "text", value: d[side][i] || "", placeholder: d.letter + "…", class: "bigin", style: "text-transform:uppercase", "aria-label": `${shelfLabel(i, d.shelves)}, ${side} end`,
-          onchange: e => { const t = normBox(e.target.value); setEnd(d, side, i, /^\d+$/.test(t) ? codeOf(d, t) : t); renderSettings(); } }))));
+        h("input", { type: "text", value: d[side][i] || "", placeholder: d.letter + "…", class: "bigin" + (d.auto && d.auto[side][i] ? " auto" : ""), style: "text-transform:uppercase", "aria-label": `${shelfLabel(i, d.shelves)}, ${side} end`,
+          onchange: e => { const t = normBox(e.target.value); setEnd(d, side, i, /^\d+$/.test(t) ? codeOf(d, t) : t); renderSettings();
+            const nextIn = $("settingsView").querySelectorAll(".endrow2 input")[i + 1]; if (nextIn && !nextIn.value) try { nextIn.focus(); } catch (er) {} } }))));
       break;
     }
     case "check": {
@@ -2199,14 +2215,16 @@ function renderWizard(v) {
       } else {
         const boxes = aisleShelves(draftToSpec(d)).reduce((a, sh) => a + expandBoxes(sh.boxes).boxes.length, 0);
         q = `✓ Aisle ${d.letter} makes sense`;
-        help = `${d.shelves} shel${d.shelves === 1 ? "f" : "ves"} high, ${boxes} boxes.`;
-        body = aislePreview(d);
+        const vert = inferVertical(d), spec = draftToSpec(d), firstBox = codeOf(d, spec.first);
+        help = `${d.shelves} shel${d.shelves === 1 ? "f" : "ves"} high, ${boxes} boxes. ${firstBox} is at the ${spec.fromBottom ? "bottom" : "top"} ${spec.rtl ? "right" : "left"}; the numbers go ${vert ? (spec.fromBottom ? "up" : "down") + " the columns" : "along the shelves"}.`;
+        body = h("div", null, aislePreview(d), d.shelves > 1 ? h("button", { class: "link small", type: "button", style: "margin-top:8px", onclick: () => { d.dirForced = !vert; renderSettings(); } },
+          vert ? `Not right? The numbers go along the shelves (${codeOf(d, spec.first + 1)} is next to ${firstBox})` : `Not right? The numbers go up/down (${codeOf(d, spec.first + 1)} is under or above ${firstBox})`) : null);
         const last = wiz.ai >= wiz.drafts.length - 1;
         next.textContent = last ? "Save ✓" : `Next: aisle ${wiz.drafts[wiz.ai + 1].letter || letterAfter(d.letter)} ▶`;
         next.onclick = () => {
           saveDraft(d, wiz.ai);
           if (last) { toast(wiz.mode === "all" ? "Map saved." : `Aisle ${d.letter} saved.`); wiz = null; go("map"); }
-          else { wiz.ai++; wiz.step = "letter"; const nd = wcur(); if (!nd.left.length) Object.assign(nd, { shelves: d.shelves, start: d.start, vertical: d.vertical }); renderSettings(); window.scrollTo(0, 0); }
+          else { wiz.ai++; wiz.step = "letter"; const nd = wcur(); if (!nd.left.length) nd.shelves = d.shelves; renderSettings(); window.scrollTo(0, 0); }
         };
       }
       break;
