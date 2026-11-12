@@ -73,6 +73,9 @@ with bin "?". An orders file that has its own Bin column ignores the inventory.
 Each shelving unit can have its own number of shelves. For each shelf, type its
 boxes from left to right: a run like `A1-A10`, or a list like `A1, A2, A5`.
 Quick setup can build an aisle-style map (A1, A2… B1, B2…) in one go.
+**Make a map from my bins** builds the map straight from the bins in your
+inventory and orders: one unit per aisle, boxes in number order. Bins that aren't
+on the map yet are marked "not on map" and still listed by aisle and number.
 
 ## Ways to walk a shelving unit
 

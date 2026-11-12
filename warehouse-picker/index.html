@@ -485,6 +485,8 @@ function makePlan(lines, settings) {
 }
 /** What to call an item when the box number isn't shown. */
 const itemName = t => t.name || `Item from box ${t.box}`;
+/** "shelf 2 of 4", or nothing when the unit has a single shelf. */
+const shelfText = loc => (loc && loc.shelves > 1 ? `shelf ${loc.shelf} of ${loc.shelves}` : "");
 
 /* When one box holds several items (e.g. the same blanket in blue and gray),
    find the words that tell them apart, so they can be highlighted. */
@@ -539,6 +541,51 @@ function makeAisleUnits(aisles, unitsPerAisle, shelvesPer, perShelf) {
     }
   }
   return units;
+}
+/**
+ * Map made from the bins themselves: one unit per aisle (the letters in front of
+ * the number), with that aisle's boxes in number order, written as runs (A1-A12, A15).
+ */
+function binsToUnits(bins) {
+  const groups = new Map();
+  [...new Set(bins)].filter(b => b && b !== "?").forEach(b => {
+    const m = b.match(/^([A-Z]*)(\d+)([A-Z]*)$/);
+    const key = m ? m[1] + "\u0000" + m[3] : "\u0001";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m ? { pre: m[1], n: parseInt(m[2], 10), post: m[3] } : { raw: b });
+  });
+  const units = [];
+  [...groups.keys()].sort(natural).forEach(key => {
+    const list = groups.get(key);
+    let text;
+    if (key === "\u0001") text = list.map(x => x.raw).sort(natural).join(", ");
+    else {
+      const { pre, post } = list[0], ns = [...new Set(list.map(x => x.n))].sort((a, b) => a - b), runs = [];
+      for (let i = 0; i < ns.length; i++) {
+        let j = i; while (j + 1 < ns.length && ns[j + 1] === ns[j] + 1) j++;
+        runs.push(j > i ? `${pre}${ns[i]}${post}-${pre}${ns[j]}${post}` : `${pre}${ns[i]}${post}`); i = j;
+      }
+      text = runs.join(", ");
+    }
+    const [pre, post] = key === "\u0001" ? ["", ""] : key.split("\u0000");
+    const name = key === "\u0001" ? "Other bins" : pre ? `Aisle ${pre}` : post ? `Shelf ${post}` : "Bins";
+    units.push({ id: nextId++, name, shelves: [{ boxes: text }], pattern: "rows-down", block: 5, dir: "ltr" });
+  });
+  return units;
+}
+/** Every bin we know of: from the inventory and the orders loaded now. */
+function knownBins() {
+  const bins = [];
+  if (settings.inventory && settings.inventory.rows) settings.inventory.rows.forEach(r => bins.push(r[1]));
+  if (current) current.lines.forEach(l => bins.push(l.box));
+  return bins.filter(b => b && b !== "?");
+}
+function buildMapFromBins() {
+  const units = binsToUnits(knownBins());
+  if (!units.length) { toast("Load an inventory or orders file first."); return false; }
+  settings.units = units; settings.walk = units.map(u => u.id); saveSettings();
+  toast(`Map made: ${units.length} aisle${units.length === 1 ? "" : "s"}.`);
+  return true;
 }
 /** Suggest the next shelf below, from the one above: 1A-10A -> 1B-10B; 1-25 -> 26-50. */
 function guessNextShelf(text) {
@@ -778,7 +825,8 @@ function rebuild() {
     `${current.missing.length} item number(s) aren't in your inventory, so they're listed at the end with bin "?": ${current.missing.slice(0, 12).join(", ")}${current.missing.length > 12 ? "…" : ""}.`));
   const unknownBins = plan.unknown.filter(b => b !== "?");
   if (unknownBins.length) w.append(h("div", { class: "notice warn" },
-    `${unknownBins.length} box number(s) aren't on your shelf map, so they're listed at the end: ${unknownBins.slice(0, 12).join(", ")}${unknownBins.length > 12 ? "…" : ""}. You can add them in Settings.`));
+    h("span", null, `${unknownBins.length} box number(s) aren't on your shelf map yet, so they're listed by aisle and number: ${unknownBins.slice(0, 12).join(", ")}${unknownBins.length > 12 ? "…" : ""}. `),
+    h("button", { class: "btn small", type: "button", style: "margin-top:6px", onclick: e => tapTwice(e.currentTarget, "Replace your shelf map?", () => { if (buildMapFromBins()) rebuild(); }) }, "Make a map from my bins")));
   if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""));
   renderPick(); renderUnpack(); renderKey();
 }
@@ -820,7 +868,7 @@ function renderPick() {
     g.items.forEach((p, i) => {
       const tr = h("tr", { class: pickedDone.has(p.step) ? "done" : "" },
         i === 0 ? h("td", { class: "box" + (g.items.length > 1 ? " multi" : ""), rowspan: g.items.length }, g.box,
-          h("span", { class: "where" }, g.loc ? `shelf ${g.loc.shelf} of ${g.loc.shelves}` : "find by hand")) : null,
+          h("span", { class: "where" }, g.loc ? shelfText(g.loc) : g.box === "?" ? "not in inventory" : "not on map")) : null,
         h("td", null, h("input", { type: "checkbox", "aria-label": `Picked ${itemName(p)}`, checked: pickedDone.has(p.step),
           onchange: e => { e.target.checked ? pickedDone.add(p.step) : pickedDone.delete(p.step); tr.className = e.target.checked ? "done" : ""; } })),
         h("td", { class: "big" }, `${p.qty}×`),
@@ -885,7 +933,7 @@ function stepContent(i, isCurrent) {
     return [
       h("div", { class: "to" }, "go to box"),
       h("div", { class: "boxcode" }, u.box),
-      h("div", { class: "small muted" }, u.loc ? `${u.loc.unitName} · shelf ${u.loc.shelf} of ${u.loc.shelves}` : "not on your shelf map"),
+      h("div", { class: "small muted" }, u.loc ? [u.loc.unitName, shelfText(u.loc)].filter(Boolean).join(" · ") : "not on your shelf map"),
       ...(u.items.length > 1 ? [h("div", { class: "note" }, `Take ${u.items.length} different items from this box. Check the highlighted words.`)] : []),
       h("div", { class: "takes" }, u.items.map(p => h("div", { class: "take" },
         h("div", { class: "takeqty" }, `${p.qty}×`),
@@ -1102,7 +1150,7 @@ function pickPdf() {
     doc.setFont("helvetica", "bold"); doc.setFontSize(20);
     doc.text(g.box, cx, y + gh / 2 + 1, { align: "center" });
     doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(100);
-    doc.text(g.loc ? `shelf ${g.loc.shelf} of ${g.loc.shelves}` : "find by hand", cx, y + gh / 2 + 11, { align: "center" });
+    doc.text(g.loc ? shelfText(g.loc) : g.box === "?" ? "not in inventory" : "not on map", cx, y + gh / 2 + 11, { align: "center" });
     doc.setTextColor(0);
     g.items.forEach((p, i) => {
       const rowH = rowHs[i];
@@ -1239,6 +1287,9 @@ function renderSettings() {
         }) }, "Build this map"))),
     h("section", { class: "card" },
       h("h2", null, "Your shelving units"),
+      h("div", { class: "row", style: "margin-bottom:8px" },
+        h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace your shelf map?", () => { if (buildMapFromBins()) renderSettings(); }) }, "Make a map from my bins"),
+        h("span", { class: "small muted" }, "One unit per aisle, from the bins in your inventory and orders.")),
       h("p", { class: "small muted" }, "For each shelf, type its boxes from left to right. Shelf 1 is the top shelf. Use a dash for a run (A1-A10), or list them with commas (A1, A2, A5). Then choose how to walk that unit."),
       h("div", { id: "checks" }),
       settings.units.map((u, ui) => unitCard(u, ui)),
