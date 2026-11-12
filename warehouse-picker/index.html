@@ -96,6 +96,9 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 #stepper .take .iname { font-size: 22px; }
 #stepper .take .idet { font-size: 16px; }
 #stepper .takeqty { font-size: 32px; font-weight: 900; min-width: 64px; }
+#stepper .skipchip { background: var(--hl); color: var(--text); border-color: var(--hl); white-space: nowrap; }
+#stepper button.take.sk { font: inherit; color: var(--text); cursor: pointer; width: 100%; }
+#stepper button.take.sk .takeqty { font-size: 24px; }
 #stepper .note { margin-top: 12px; background: var(--hl); color: var(--text); border-radius: 12px; padding: 10px 14px; font-size: 16px; font-weight: 600; }
 #stepper .details { font-size: 18px; color: var(--muted); }
 .key { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
@@ -198,7 +201,10 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 <div id="stepper" class="hidden" role="dialog" aria-label="Step by step">
   <div class="bar"><i id="stepBar"></i></div>
   <div class="row" style="justify-content:space-between;padding:12px 16px">
-    <span class="muted" id="stepCount"></span>
+    <div class="row" style="gap:8px;flex-wrap:nowrap;min-width:0">
+      <button class="btn small skipchip hidden" id="skipChip" type="button">Skipped</button>
+      <span class="muted small" id="stepCount"></span>
+    </div>
     <button class="btn secondary small" id="stepClose" type="button">Close</button>
   </div>
   <div class="body" id="stepBody"></div>
@@ -687,68 +693,122 @@ if (inClaude) $("printBtn").classList.add("hidden");
 
 /* ---------- step by step (picking and unpacking) ----------
    seq is the running order of steps. "Skip" moves the current step to the end,
-   so it comes back after everything else. */
+   so it comes back after everything else. Skipped steps can also be opened from
+   the "Skipped" list at any time and finished there. */
 let stepAt = 0, stepMode = "unpack", seq = [], skipped = new Set(), stepItems = [];
+let stepView = "step", detailIdx = null; // "step" | "list" | "detail"
 const stepList = () => stepItems;
 const cur = () => stepItems[seq[stepAt]];
-function showStep() {
-  const total = seq.length, u = cur();
-  $("stepBar").style.width = `${((stepAt + 1) / total) * 100}%`;
-  const wasSkipped = skipped.has(seq[stepAt]);
-  const skipNote = wasSkipped ? [h("div", { class: "note" }, "You skipped this earlier. Look for it again.")] : [];
-  const left = seq.length - stepAt - 1;
-  const waiting = [...skipped].filter(i => seq.indexOf(i) > stepAt).length;
+/** Skipped steps still waiting, not counting the one on screen now. */
+const waitingSkipped = () => seq.slice(stepAt + 1).filter(i => skipped.has(i));
+
+/** The main content for one step (a box when picking, an item when unpacking). */
+function stepContent(i, isCurrent) {
+  const u = stepItems[i];
   if (stepMode === "pick") {
-    const g = u;
-    $("stepCount").textContent = `Picking: box ${stepAt + 1} of ${total}${waiting ? ` · ${waiting} skipped` : ""}`;
-    $("stepBody").replaceChildren(
-      ...skipNote,
+    return [
       h("div", { class: "to" }, "go to box"),
-      h("div", { class: "boxcode" }, g.box),
-      h("div", { class: "small muted" }, g.loc ? `${g.loc.unitName} · shelf ${g.loc.shelf} of ${g.loc.shelves}` : "not on your shelf map"),
-      ...(g.items.length > 1 ? [h("div", { class: "note" }, `Take ${g.items.length} different items from this box. Check the highlighted words.`)] : []),
-      h("div", { class: "takes" }, g.items.map(p => h("div", { class: "take" },
+      h("div", { class: "boxcode" }, u.box),
+      h("div", { class: "small muted" }, u.loc ? `${u.loc.unitName} · shelf ${u.loc.shelf} of ${u.loc.shelves}` : "not on your shelf map"),
+      ...(u.items.length > 1 ? [h("div", { class: "note" }, `Take ${u.items.length} different items from this box. Check the highlighted words.`)] : []),
+      h("div", { class: "takes" }, u.items.map(p => h("div", { class: "take" },
         h("div", { class: "takeqty" }, `${p.qty}×`),
         h("div", null,
           h("div", { class: "iname" }, hl(itemName(p), p.marks)),
-          ...(p.details ? [h("div", { class: "idet" }, hl(p.details, p.marks))] : []))))));
-  } else {
-    // "last item" depends on what is still to come, so a skipped item keeps its order open
-    const last = !seq.slice(stepAt + 1).some(i => stepItems[i].label === u.label);
-    const stillOpen = !last && seq.slice(stepAt + 1).every(i => stepItems[i].label !== u.label || skipped.has(i));
-    $("stepCount").textContent = `Unpacking: ${stepAt + 1} of ${total}${waiting ? ` · ${waiting} skipped` : ""}`;
-    $("stepBody").replaceChildren(
-      ...skipNote,
-      h("div", { class: "item" }, hl(itemName(u), u.marks)),
-      ...(u.details ? [h("div", { class: "details" }, hl(u.details, u.marks))] : []),
-      h("div", { class: "qty" }, u.qty > 1 ? `Take ${u.qty} of them` : "Take 1"),
-      h("div", { class: "to" }, "put on order"),
-      h("div", { class: "order" }, u.label),
-      h("div", { class: "small muted" }, `real order #${u.raw}`),
-      ...(last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []),
-      ...(stillOpen ? [h("div", { class: "note" }, `Order ${u.label} is still waiting for a skipped item. Don't pack it yet.`)] : []));
+          ...(p.details ? [h("div", { class: "idet" }, hl(p.details, p.marks))] : [])))))];
   }
+  // "last item" depends on what is still to come, so a skipped item keeps its order open
+  const rest = (isCurrent ? seq.slice(stepAt + 1) : seq.slice(stepAt)).filter(j => j !== i && stepItems[j].label === u.label);
+  const last = !rest.length, stillOpen = !last && rest.every(j => skipped.has(j));
+  return [
+    h("div", { class: "item" }, hl(itemName(u), u.marks)),
+    ...(u.details ? [h("div", { class: "details" }, hl(u.details, u.marks))] : []),
+    h("div", { class: "qty" }, u.qty > 1 ? `Take ${u.qty} of them` : "Take 1"),
+    h("div", { class: "to" }, "put on order"),
+    h("div", { class: "order" }, u.label),
+    h("div", { class: "small muted" }, `real order #${u.raw}`),
+    ...(last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []),
+    ...(stillOpen ? [h("div", { class: "note" }, `Order ${u.label} is still waiting for a skipped item. Don't pack it yet.`)] : [])];
+}
+
+function setNav(prev, skip, next) {
+  [["stepPrev", prev], ["stepSkip", skip], ["stepNext", next]].forEach(([id, label]) => {
+    $(id).classList.toggle("hidden", !label); if (label) $(id).textContent = label;
+  });
+}
+
+function showStep() {
+  const total = seq.length, waiting = waitingSkipped();
+  const chip = $("skipChip");
+  chip.classList.toggle("hidden", !waiting.length || stepView !== "step");
+  chip.textContent = `Skipped (${waiting.length})`;
+  $("stepBar").style.width = `${((stepAt + 1) / total) * 100}%`;
+  const word = stepMode === "pick" ? "Picking" : "Unpacking";
+
+  if (stepView === "list") {
+    $("stepCount").textContent = `${word}: skipped`;
+    $("stepBody").replaceChildren(
+      h("h2", { style: "margin:0 0 4px" }, "Skipped so far"),
+      h("p", { class: "small muted", style: "margin:0 0 8px" }, stepMode === "pick" ? "Tap a box when you find it." : "Tap an item when you find it to see where it goes."),
+      h("div", { class: "takes" }, waiting.map(i => {
+        const u = stepItems[i];
+        return h("button", { class: "take sk", type: "button", onclick: () => { detailIdx = i; stepView = "detail"; showStep(); } },
+          stepMode === "pick"
+            ? [h("div", { class: "takeqty" }, u.box), h("div", null, u.items.map(p => h("div", { class: "idet" }, `${p.qty}× `, hl(itemName(p), p.marks))))]
+            : [h("span", { class: "pile" }, u.label), h("div", { style: "flex:1" },
+                h("div", { class: "iname" }, `${u.qty}× `, hl(itemName(u), u.marks)),
+                ...(u.details ? [h("div", { class: "idet" }, hl(u.details, u.marks))] : []))]);
+      })));
+    setNav("◀ Back", null, null);
+  } else if (stepView === "detail") {
+    $("stepCount").textContent = `${word}: skipped item`;
+    $("stepBody").replaceChildren(h("div", { class: "note" }, "Skipped item. When it's done, you'll go back to where you were."), ...stepContent(detailIdx, false));
+    setNav("◀ List", "Not yet", stepMode === "pick" ? "In cart ✓" : "Placed ✓");
+  } else {
+    const wasSkipped = skipped.has(seq[stepAt]);
+    $("stepCount").textContent = `${word}: ${stepAt + 1} of ${total}`;
+    $("stepBody").replaceChildren(
+      ...(wasSkipped ? [h("div", { class: "note" }, "You skipped this earlier. Look for it again.")] : []),
+      ...stepContent(seq[stepAt], true));
+    const left = total - stepAt - 1;
+    setNav("◀ Back", left === 0 ? "Not found" : "Skip", left === 0 ? "Finish ✓" : stepMode === "pick" ? "In cart ▶" : "Next ▶");
+    $("stepPrev").disabled = stepAt === 0;
+  }
+  if (stepView !== "step") $("stepPrev").disabled = false;
   $("stepBody").scrollTop = 0;
-  $("stepPrev").disabled = stepAt === 0;
-  $("stepSkip").textContent = left === 0 ? "Not found" : "Skip";
-  $("stepNext").textContent = left === 0 ? "Finish ✓" : stepMode === "pick" ? "In cart ▶" : "Next ▶";
 }
 function openSteps(mode) {
   stepMode = mode; stepItems = mode === "pick" ? boxGroups() : plan.unpack;
-  seq = stepItems.map((_, i) => i); skipped = new Set(); stepAt = 0;
+  seq = stepItems.map((_, i) => i); skipped = new Set(); stepAt = 0; stepView = "step";
   $("stepper").classList.remove("hidden"); document.body.style.overflow = "hidden"; showStep();
 }
 function closeSteps() { $("stepper").classList.add("hidden"); document.body.style.overflow = ""; if (stepMode === "pick") renderPick(); }
+/** Finish a skipped step from the list: it counts as done just before where you are now. */
+function finishSkipped(i) {
+  if (stepMode === "pick") stepItems[i].items.forEach(p => pickedDone.add(p.step));
+  seq.splice(seq.indexOf(i), 1);
+  seq.splice(stepAt, 0, i); stepAt++;
+  skipped.delete(i);
+  stepView = "step"; showStep();
+  toast(stepMode === "pick" ? `Box ${stepItems[i].box} is in the cart.` : `${itemName(stepItems[i])} placed on order ${stepItems[i].label}.`);
+}
 $("stepBtn").onclick = () => openSteps("unpack");
 $("stepPickBtn").onclick = () => openSteps("pick");
 $("stepClose").onclick = closeSteps;
-$("stepPrev").onclick = () => { if (stepAt > 0) { stepAt--; if (stepMode === "pick") cur().items.forEach(p => pickedDone.delete(p.step)); showStep(); } };
+$("skipChip").onclick = () => { stepView = "list"; showStep(); };
+$("stepPrev").onclick = () => {
+  if (stepView === "list") { stepView = "step"; return showStep(); }
+  if (stepView === "detail") { stepView = "list"; return showStep(); }
+  if (stepAt > 0) { stepAt--; if (stepMode === "pick") cur().items.forEach(p => pickedDone.delete(p.step)); showStep(); }
+};
 $("stepNext").onclick = () => {
+  if (stepView === "detail") return finishSkipped(detailIdx);
   if (stepMode === "pick") cur().items.forEach(p => pickedDone.add(p.step)); // ticks them on the list too
   skipped.delete(seq[stepAt]);
   if (stepAt < seq.length - 1) { stepAt++; showStep(); } else closeSteps();
 };
 $("stepSkip").onclick = () => {
+  if (stepView === "detail") { stepView = "step"; return showStep(); }
   if (stepAt === seq.length - 1) { // nothing left to try after this one
     const u = cur();
     toast(`Still missing: ${stepMode === "pick" ? `box ${u.box}` : `${itemName(u)} for order ${u.label}`}`);
@@ -759,7 +819,7 @@ $("stepSkip").onclick = () => {
   showStep();
 };
 document.addEventListener("keydown", e => {
-  if ($("stepper").classList.contains("hidden")) return;
+  if ($("stepper").classList.contains("hidden") || stepView !== "step") return;
   if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); $("stepNext").click(); }
   if (e.key === "ArrowLeft") $("stepPrev").click();
   if (e.key === "Escape") $("stepClose").click();
