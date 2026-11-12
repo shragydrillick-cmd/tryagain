@@ -118,7 +118,8 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 #stepper .order { font-size: 110px; font-weight: 900; line-height: 1; color: var(--accent); }
 #stepper .done-banner { margin-top: 16px; background: var(--good-soft); color: var(--good); border-radius: 14px; padding: 14px 18px; font-size: 20px; font-weight: 800; }
 #stepper .nav { display: flex; gap: 10px; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
-#stepper .nav button { flex: 1; min-height: 64px; font-size: 20px; }
+#stepper .nav button { flex: 1; min-height: 64px; font-size: 18px; padding: 8px; }
+#stepper #stepPrev { flex: 0.7; }
 @media print {
   header.top, .no-print, .tabs { display: none !important; }
   body { background: #fff; color: #000; }
@@ -196,6 +197,7 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
   <div class="body" id="stepBody"></div>
   <div class="nav">
     <button class="btn secondary" id="stepPrev" type="button">&#9664; Back</button>
+    <button class="btn secondary" id="stepSkip" type="button">Skip for now</button>
     <button class="btn" id="stepNext" type="button">Next &#9654;</button>
   </div>
 </div>
@@ -676,19 +678,24 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 $("printBtn").onclick = () => window.print();
 if (inClaude) $("printBtn").classList.add("hidden");
 
-/* ---------- step by step (picking and unpacking) ---------- */
-let stepAt = 0, stepMode = "unpack";
-const stepList = () => (stepMode === "pick" ? boxGroups() : plan.unpack); // picking: one step per box
+/* ---------- step by step (picking and unpacking) ----------
+   seq is the running order of steps. "Skip" moves the current step to the end,
+   so it comes back after everything else. */
+let stepAt = 0, stepMode = "unpack", seq = [], skipped = new Set(), stepItems = [];
+const stepList = () => stepItems;
+const cur = () => stepItems[seq[stepAt]];
 function showStep() {
-  const list = stepList(), total = list.length, u = list[stepAt];
+  const total = seq.length, u = cur();
   $("stepBar").style.width = `${((stepAt + 1) / total) * 100}%`;
-  const what = h("div", null,
-    h("div", { class: "item" }, hl(itemName(u), u.marks)),
-    ...(u.details ? [h("div", { class: "details" }, hl(u.details, u.marks))] : []));
+  const wasSkipped = skipped.has(seq[stepAt]);
+  const skipNote = wasSkipped ? [h("div", { class: "note" }, "You skipped this earlier. Look for it again.")] : [];
+  const left = seq.length - stepAt - 1;
+  const waiting = [...skipped].filter(i => seq.indexOf(i) > stepAt).length;
   if (stepMode === "pick") {
     const g = u;
-    $("stepCount").textContent = `Picking: box ${stepAt + 1} of ${total}`;
+    $("stepCount").textContent = `Picking: box ${stepAt + 1} of ${total}${waiting ? ` · ${waiting} skipped` : ""}`;
     $("stepBody").replaceChildren(
+      ...skipNote,
       h("div", { class: "to" }, "go to box"),
       h("div", { class: "boxcode" }, g.box),
       h("div", { class: "small muted" }, g.loc ? `${g.loc.unitName} · shelf ${g.loc.shelf} of ${g.loc.shelves}` : "not on your shelf map"),
@@ -699,27 +706,49 @@ function showStep() {
           h("div", { class: "iname" }, hl(itemName(p), p.marks)),
           ...(p.details ? [h("div", { class: "idet" }, hl(p.details, p.marks))] : []))))));
   } else {
-    $("stepCount").textContent = `Unpacking: ${stepAt + 1} of ${total}`;
+    // "last item" depends on what is still to come, so a skipped item keeps its order open
+    const last = !seq.slice(stepAt + 1).some(i => stepItems[i].label === u.label);
+    const stillOpen = !last && seq.slice(stepAt + 1).every(i => stepItems[i].label !== u.label || skipped.has(i));
+    $("stepCount").textContent = `Unpacking: ${stepAt + 1} of ${total}${waiting ? ` · ${waiting} skipped` : ""}`;
     $("stepBody").replaceChildren(
-      what,
+      ...skipNote,
+      h("div", { class: "item" }, hl(itemName(u), u.marks)),
+      ...(u.details ? [h("div", { class: "details" }, hl(u.details, u.marks))] : []),
       h("div", { class: "qty" }, u.qty > 1 ? `Take ${u.qty} of them` : "Take 1"),
       h("div", { class: "to" }, "put on order"),
       h("div", { class: "order" }, u.label),
       h("div", { class: "small muted" }, `real order #${u.raw}`),
-      ...(u.last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []));
+      ...(last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []),
+      ...(stillOpen ? [h("div", { class: "note" }, `Order ${u.label} is still waiting for a skipped item. Don't pack it yet.`)] : []));
   }
   $("stepPrev").disabled = stepAt === 0;
-  $("stepNext").textContent = stepAt === total - 1 ? "Finish ✓" : stepMode === "pick" ? "In the cart ▶" : "Next ▶";
+  $("stepSkip").textContent = left === 0 ? "Can't find it" : "Skip for now";
+  $("stepNext").textContent = left === 0 ? "Finish ✓" : stepMode === "pick" ? "In the cart ▶" : "Next ▶";
 }
-function openSteps(mode) { stepMode = mode; stepAt = 0; $("stepper").classList.remove("hidden"); showStep(); }
+function openSteps(mode) {
+  stepMode = mode; stepItems = mode === "pick" ? boxGroups() : plan.unpack;
+  seq = stepItems.map((_, i) => i); skipped = new Set(); stepAt = 0;
+  $("stepper").classList.remove("hidden"); showStep();
+}
 function closeSteps() { $("stepper").classList.add("hidden"); if (stepMode === "pick") renderPick(); }
 $("stepBtn").onclick = () => openSteps("unpack");
 $("stepPickBtn").onclick = () => openSteps("pick");
 $("stepClose").onclick = closeSteps;
-$("stepPrev").onclick = () => { if (stepAt > 0) { stepAt--; if (stepMode === "pick") stepList()[stepAt].items.forEach(p => pickedDone.delete(p.step)); showStep(); } };
+$("stepPrev").onclick = () => { if (stepAt > 0) { stepAt--; if (stepMode === "pick") cur().items.forEach(p => pickedDone.delete(p.step)); showStep(); } };
 $("stepNext").onclick = () => {
-  if (stepMode === "pick") stepList()[stepAt].items.forEach(p => pickedDone.add(p.step)); // ticks them on the list too
-  if (stepAt < stepList().length - 1) { stepAt++; showStep(); } else closeSteps();
+  if (stepMode === "pick") cur().items.forEach(p => pickedDone.add(p.step)); // ticks them on the list too
+  skipped.delete(seq[stepAt]);
+  if (stepAt < seq.length - 1) { stepAt++; showStep(); } else closeSteps();
+};
+$("stepSkip").onclick = () => {
+  if (stepAt === seq.length - 1) { // nothing left to try after this one
+    const u = cur();
+    toast(`Still missing: ${stepMode === "pick" ? `box ${u.box}` : `${itemName(u)} for order ${u.label}`}`);
+    closeSteps(); return;
+  }
+  skipped.add(seq[stepAt]);
+  seq.push(seq.splice(stepAt, 1)[0]); // to the back of the line; the next step slides into place
+  showStep();
 };
 document.addEventListener("keydown", e => {
   if ($("stepper").classList.contains("hidden")) return;
