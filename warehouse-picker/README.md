@@ -106,3 +106,29 @@ page show up in the next build. **Always sign updates with the same key**:
 Android refuses an update signed with a different key, and the only way round
 that is uninstalling, which erases the saved shelf setup. For an update, also
 raise `versionCode` in `android/app/build.gradle`.
+
+## iPhone / iPad app
+
+`ios/` is the same idea for iPhone and iPad (iOS 15+): a small Swift app that
+shows the bundled page, fully offline. The shelf setup is saved in a file on the
+device; PDFs open in a preview with **Share / Print / Save to Files**, and a
+copy is kept in the app's folder in the Files app ("On My iPhone › Pick & Sort").
+
+Apple only lets iPhone apps be built on a Mac, so GitHub builds it: the
+**Pick & Sort apps** workflow (`.github/workflows/pick-and-sort-apps.yml`) runs
+on every change. It builds the app, runs an automatic check in the iPhone
+simulator (loads the example orders, makes both PDFs, saves settings), and
+uploads **PickAndSort-unsigned.ipa** under the run's *Artifacts*.
+
+An iPhone only installs an app that's been signed with an Apple account:
+
+- **Free Apple ID, for your own devices:** install the unsigned .ipa with a
+  sideloading tool such as Sideloadly or AltStore on a computer. With a free
+  Apple ID the app has to be re-signed every 7 days (AltStore can do this
+  automatically). The saved shelf setup survives re-signing.
+- **Apple Developer Program (US$99/year), to give it to other people:**
+  distribute through TestFlight (up to 10,000 people, via a link) or the App
+  Store. This needs the account's signing certificate added to the workflow.
+
+To build on a Mac yourself: `brew install xcodegen`, then in `ios/` run
+`./prepare-web.sh && xcodegen generate` and open `PickAndSort.xcodeproj` in Xcode.
