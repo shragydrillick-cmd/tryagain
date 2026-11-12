@@ -77,15 +77,27 @@ Quick setup can build an aisle-style map (A1, A2… B1, B2…) in one go.
 inventory and orders: one unit per aisle, boxes in number order. Bins that aren't
 on the map yet are marked "not on map" and still listed by aisle and number.
 
-## Ways to walk a shelving unit
+## Setting up the shelves and the picking order
 
-- **Shelf by shelf, top shelf first** (or bottom shelf first)
-- **Up and down:** first spot on every shelf top to bottom, then the next spot
-- **Sections:** e.g. 5 spots on the top shelf, the same 5 on the shelf below,
-  and so on down, then move along. Empty sections are just skipped.
+**Shelves (how they really are).** For each shelf, type its boxes in number
+order (`A1-A50`) and tap the arrow to say which end the first number is on
+(**A1 on the left** or **A1 on the right**). Each shelf can be different.
 
-Each unit can also go left→right or right→left, and the units can be visited
-in any order.
+**Picking order (per unit, or once for every unit):**
+
+- **Start from** the left end or the right end. Starting on the right of a
+  shelf numbered from the left means starting at the high numbers.
+- **Order:** shelf by shelf (top first or bottom first), up and down one box
+  across at a time, or **sections** of a few boxes on each shelf, then the
+  shelf below, then the next section.
+- **Inside each section:** the same way you're walking (start right, 3 at a
+  time: 50, 49, 48) or the other way (48, 49, 50).
+- **Zigzag:** shelf by shelf back and forth, or columns down then up.
+- Sections and zigzag skip anything not on the order automatically.
+
+**Show the picking order** draws the unit's shelves with every box's turn
+number, so you can check it at a glance. **Walking order** sets which unit or
+aisle comes first.
 
 ## Internet
 

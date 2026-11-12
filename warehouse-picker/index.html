@@ -108,6 +108,19 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 .unit-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
 .shelf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px dashed var(--line); }
 .shelf-row .lbl { width: 110px; font-size: 14px; color: var(--muted); }
+.unit .sub { font-weight: 700; font-size: 14px; margin: 14px 0 4px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.pickopts { display: grid; gap: 8px; }
+.pickopt { display: grid; grid-template-columns: minmax(110px, 38%) 1fr; gap: 8px; align-items: center; font-size: 15px; }
+.pickopt select, .pickopt input { width: 100%; min-width: 0; }
+.sidebtn { white-space: nowrap; }
+details summary { cursor: pointer; color: var(--accent); font-weight: 600; margin-top: 10px; }
+.gridwrap { overflow-x: auto; margin-top: 4px; }
+table.ordergrid { border-collapse: separate; border-spacing: 3px; }
+table.ordergrid th { font-size: 12px; color: var(--muted); font-weight: 600; text-align: left; white-space: nowrap; padding-right: 4px; }
+table.ordergrid td { min-width: 40px; text-align: center; border: 1px solid var(--line); border-radius: 6px; padding: 3px 4px; background: var(--card); }
+table.ordergrid td b { display: block; font-size: 15px; }
+table.ordergrid td span { display: block; font-size: 10px; color: var(--muted); }
+table.ordergrid td.first { background: var(--accent-soft); border-color: var(--accent); }
 .walk-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .walk-item span.n { width: 28px; text-align: right; color: var(--muted); }
 .walk-item span.name { flex: 1; }
@@ -396,6 +409,12 @@ function rowsToLines(rows, format) {
   return { lines, warnings, mode, hasBin };
 }
 
+/** A shelf's boxes from left to right. Boxes are typed in number order (A1-A50);
+    shelf.rtl means the numbers start at the right-hand end. */
+function shelfBoxes(sh) {
+  const r = expandBoxes(sh.boxes);
+  return { boxes: sh.rtl ? r.boxes.slice().reverse() : r.boxes, errors: r.errors, first: r.boxes[0] };
+}
 /** Map every box code to its place in the walk. Returns {locate, problems, size}. */
 function buildLocator(settings) {
   const map = new Map(), problems = [];
@@ -405,18 +424,20 @@ function buildLocator(settings) {
     const S = u.shelves.length;
     const block = Math.max(1, parseInt(u.block, 10) || 5);
     u.shelves.forEach((sh, s) => {
-      const { boxes, errors } = expandBoxes(sh.boxes);
+      const { boxes, errors } = shelfBoxes(sh); // left to right, as they really stand
       errors.forEach(e => problems.push(`${u.name}, shelf ${s + 1}: ${e}`));
       const L = boxes.length;
       boxes.forEach((code, p) => {
         if (map.has(code)) { const o = map.get(code); problems.push(`Box ${code} is on both "${o.unitName}" shelf ${o.shelf} and "${u.name}" shelf ${s + 1}.`); return; }
-        const x = u.dir === "rtl" ? L - 1 - p : p;
+        const x = u.dir === "rtl" ? L - 1 - p : p; // how far from the end you start at
         let k;
         switch (u.pattern) {
-          case "rows-up": k = [S - 1 - s, x]; break;
-          case "columns": k = [x, s]; break;
-          case "blocks": k = [Math.floor(x / block), s, x]; break;
-          default: k = [s, x]; // rows-down
+          case "rows-up": { const r = S - 1 - s; k = [r, u.zigzag && r % 2 ? -x : x]; break; }
+          case "columns": k = [x, u.zigzag && x % 2 ? -s : s]; break;
+          // sections of `block` boxes, counted from the end you start at; inside a section,
+          // go the same way you're walking (50, 49, 48) or the opposite way (48, 49, 50)
+          case "blocks": k = [Math.floor(x / block), s, u.inner === "reverse" ? -x : x]; break;
+          default: k = [s, u.zigzag && s % 2 ? -x : x]; // rows-down
         }
         map.set(code, { unitId: u.id, unitName: u.name, shelf: s + 1, shelves: S, pos: p + 1, key: [wi, ...k] });
       });
@@ -608,6 +629,8 @@ function fixSettings(s) {
     u.shelves = (u.shelves || []).map(sh => sh.boxes !== undefined ? sh
       : { boxes: sh.start === sh.end ? `${sh.start ?? ""}` : `${sh.start ?? ""}-${sh.end ?? ""}` }); // old number ranges
     u.pattern = u.pattern || "rows-down"; u.dir = u.dir || "ltr"; u.block = u.block || 5;
+    u.inner = u.inner === "reverse" ? "reverse" : "same"; u.zigzag = !!u.zigzag;
+    u.shelves.forEach(sh => { sh.rtl = !!sh.rtl; });
   });
   const ids = new Set(s.units.map(u => u.id));
   s.walk = (s.walk || []).filter(id => ids.has(id));
@@ -1227,9 +1250,40 @@ $("pdfUnpack").onclick = unpackPdf;
 const PATTERNS = [
   ["rows-down", "Shelf by shelf, top shelf first"],
   ["rows-up", "Shelf by shelf, bottom shelf first"],
-  ["columns", "Up and down: one box at a time, all shelves top to bottom"],
-  ["blocks", "Sections: a few boxes on every shelf, then move along"],
+  ["columns", "Up and down: one box across at a time"],
+  ["blocks", "Sections: a few boxes on each shelf, then the shelf below"],
 ];
+/** The picking controls for one unit (or for "every unit"). */
+function pickingControls(u, onChange) {
+  const sel = (label, key, options) => h("label", { class: "pickopt" }, h("span", null, label),
+    h("select", { onchange: e => { u[key] = key === "zigzag" ? e.target.value === "1" : e.target.value; onChange(key); } },
+      options.map(([v, t]) => h("option", { value: v, selected: String(key === "zigzag" ? (u.zigzag ? "1" : "0") : u[key]) === v }, t))));
+  return h("div", { class: "pickopts" },
+    sel("Start from", "dir", [["ltr", "the left end"], ["rtl", "the right end"]]),
+    sel("Order", "pattern", PATTERNS),
+    u.pattern === "blocks" ? h("label", { class: "pickopt" }, h("span", null, "Boxes per section"),
+      h("input", { type: "number", min: 1, value: u.block, inputmode: "numeric", oninput: e => { u.block = parseInt(e.target.value, 10) || 1; onChange("block"); } })) : null,
+    u.pattern === "blocks" ? sel("Inside each section", "inner", [["same", "same way you're walking (50, 49, 48)"], ["reverse", "the other way (48, 49, 50)"]].map(([v, t]) =>
+      [v, u.dir === "rtl" ? t : t.replace("50, 49, 48", "1, 2, 3").replace("48, 49, 50", "3, 2, 1")])) : null,
+    u.pattern === "columns" ? sel("Each column", "zigzag", [["0", "top to bottom every time"], ["1", "zigzag: down, then up the next"]]) : null,
+    u.pattern === "rows-down" || u.pattern === "rows-up" ? sel("Each shelf", "zigzag", [["0", "same direction every shelf"], ["1", "zigzag: back and forth"]]) : null);
+}
+/** Grid of a unit's boxes as they stand, each with its turn in the picking order. */
+function pickingOrderGrid(u) {
+  const loc = buildLocator({ units: [u], walk: [u.id] });
+  const rows = u.shelves.map(sh => shelfBoxes(sh).boxes);
+  const codes = [...new Set(rows.flat())].filter(c => loc.locate(c));
+  if (!codes.length) return h("p", { class: "small muted" }, "Add some boxes to see the order.");
+  if (codes.length > 600) return h("p", { class: "small muted" }, "Too many boxes to draw here (over 600).");
+  codes.sort((a, b) => compareKeys(loc.locate(a).key, loc.locate(b).key));
+  const turn = new Map(codes.map((c, i) => [c, i + 1]));
+  return h("div", null,
+    h("div", { class: "small muted", style: `text-align:${u.dir === "rtl" ? "right" : "left"}` }, u.dir === "rtl" ? "start here ◀" : "▶ start here"),
+    h("div", { class: "gridwrap" }, h("table", { class: "ordergrid" }, rows.map((row, si) => h("tr", null,
+      h("th", null, `Shelf ${si + 1}`),
+      row.map(c => h("td", { class: turn.get(c) <= 3 ? "first" : "" }, h("b", null, turn.get(c) || "–"), h("span", null, c))))))),
+    h("p", { class: "small muted", style: "margin:4px 0 0" }, "Big number = the turn when picking. Small = the box."));
+}
 let view = "home";
 $("navBtn").onclick = () => {
   view = view === "home" ? "settings" : "home";
@@ -1244,7 +1298,7 @@ function numInput(value, onset) {
   return h("input", { type: "number", value: value ?? "", inputmode: "numeric", min: 1,
     oninput: e => { onset(e.target.value === "" ? "" : parseInt(e.target.value, 10)); changed(false); } });
 }
-const quick = { style: "aisle", aisles: 2, perAisle: 2, units: 4, shelves: "3, 2, 4, 3", per: 10, first: 1 };
+const quick = { rtl: false, style: "aisle", aisles: 2, perAisle: 2, units: 4, shelves: "3, 2, 4, 3", per: 10, first: 1 };
 
 function renderSettings() {
   const v = $("settingsView");
@@ -1274,6 +1328,9 @@ function renderSettings() {
       h("p", { class: "small muted", style: "margin:10px 0 0" }, quick.style === "aisle"
         ? "Each aisle counts its boxes from 1: top shelf left to right, then the next shelf down, then the next unit. If the real numbers run differently, fix those shelves below."
         : quick.style === "shelf" ? "Top shelf is A, the next B… (1A 2A 3A on top, 1B 2B 3B below)." : "Numbers keep counting: 1–10 on the top shelf, 11–20 below…"),
+      h("label", { style: "display:block;margin-top:10px" }, "Numbers start on the ",
+        h("select", { id: "qRtl", onchange: e => { quick.rtl = e.target.value === "1"; } },
+          [["0", "left (A1 at the left end)"], ["1", "right (A1 at the right end)"]].map(([v, t]) => h("option", { value: v, selected: (quick.rtl ? "1" : "0") === v }, t)))),
       h("div", { class: "row", style: "margin-top:10px" },
         h("button", { class: "btn", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace your whole map?", () => {
           const n = quick.style === "aisle" ? Math.max(1, quick.aisles | 0) * Math.max(1, quick.perAisle | 0) : Math.max(1, quick.units | 0);
@@ -1283,14 +1340,16 @@ function renderSettings() {
           settings.units = quick.style === "aisle"
             ? makeAisleUnits(Math.max(1, quick.aisles | 0), Math.max(1, quick.perAisle | 0), shelvesPer, per)
             : makeUnits(shelvesPer, per, quick.first | 0, quick.style === "shelf");
+          settings.units.forEach(u => u.shelves.forEach(sh => { sh.rtl = quick.rtl; }));
           settings.walk = settings.units.map(u => u.id); changed(true); toast("Map built.");
         }) }, "Build this map"))),
+    allUnitsCard(),
     h("section", { class: "card" },
       h("h2", null, "Your shelving units"),
       h("div", { class: "row", style: "margin-bottom:8px" },
         h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace your shelf map?", () => { if (buildMapFromBins()) renderSettings(); }) }, "Make a map from my bins"),
         h("span", { class: "small muted" }, "One unit per aisle, from the bins in your inventory and orders.")),
-      h("p", { class: "small muted" }, "For each shelf, type its boxes from left to right. Shelf 1 is the top shelf. Use a dash for a run (A1-A10), or list them with commas (A1, A2, A5). Then choose how to walk that unit."),
+      h("p", { class: "small muted" }, "Shelf 1 is the top shelf. Use a dash for a run (A1-A10), or list boxes with commas (A1, A2, A5)."),
       h("div", { id: "checks" }),
       settings.units.map((u, ui) => unitCard(u, ui)),
       h("button", { class: "btn secondary", type: "button", onclick: () => {
@@ -1352,35 +1411,60 @@ function showAppLinks() {
 }
 
 function unitCard(u, ui) {
+  const grid = h("div", { class: "gridholder" });
+  const refreshGrid = () => { if (grid.dataset.open) grid.replaceChildren(pickingOrderGrid(u)); };
   return h("div", { class: "unit" },
     h("div", { class: "unit-top" },
       h("input", { type: "text", value: u.name, "aria-label": "Unit name", style: "font-weight:700;max-width:220px",
         onchange: e => { u.name = e.target.value.trim() || `Unit ${ui + 1}`; changed(true); } }),
-      h("span", { class: "small muted" }, `${u.shelves.length} shelf${u.shelves.length === 1 ? "" : "s"}`),
+      h("span", { class: "small muted" }, `${u.shelves.length} ${u.shelves.length === 1 ? "shelf" : "shelves"}`),
       h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Delete?", () => {
         settings.units.splice(ui, 1); settings.walk = settings.walk.filter(id => id !== u.id); changed(true);
       }) }, "Delete unit")),
-    h("div", { class: "row", style: "margin:10px 0" },
-      h("select", { "aria-label": "How to walk this unit", onchange: e => { u.pattern = e.target.value; changed(true); } },
-        PATTERNS.map(([val, t]) => h("option", { value: val, selected: u.pattern === val }, t))),
-      u.pattern === "blocks" ? h("label", null, "boxes per section ", numInput(u.block, x => u.block = x)) : null,
-      h("select", { "aria-label": "Direction", onchange: e => { u.dir = e.target.value; changed(false); } },
-        [["ltr", "Left to right"], ["rtl", "Right to left"]].map(([val, t]) => h("option", { value: val, selected: u.dir === val }, t)))),
+    h("div", { class: "sub" }, "Shelves (how they really are)"),
+    h("p", { class: "small muted", style: "margin:0 0 4px" }, "Type each shelf's boxes in number order, like A1-A50. Tap the arrow to say which end the first number is on."),
     u.shelves.map((s, si) => {
       const count = h("span", { class: "small muted" });
-      const showCount = () => { const r = expandBoxes(s.boxes); count.textContent = r.errors.length ? "check this" : `${r.boxes.length} box${r.boxes.length === 1 ? "" : "es"}`; };
+      const side = h("button", { class: "btn secondary small sidebtn", type: "button" });
+      const showSide = () => { const f = shelfBoxes(s).first || "1st box"; side.textContent = s.rtl ? `◀ ${f} on the right` : `${f} on the left ▶`; };
+      side.onclick = () => { s.rtl = !s.rtl; showSide(); changed(false); refreshGrid(); };
+      const showCount = () => { const r = expandBoxes(s.boxes); count.textContent = r.errors.length ? "check this" : `${r.boxes.length} box${r.boxes.length === 1 ? "" : "es"}`; showSide(); };
       showCount();
       return h("div", { class: "shelf-row" },
         h("span", { class: "lbl" }, si === 0 ? "Shelf 1 (top)" : si === u.shelves.length - 1 ? `Shelf ${si + 1} (bottom)` : `Shelf ${si + 1}`),
-        h("input", { type: "text", value: s.boxes, placeholder: "A1-A10", "aria-label": `Boxes on shelf ${si + 1}`, style: "flex:1;min-width:140px",
-          oninput: e => { s.boxes = e.target.value; showCount(); changed(false); } }),
-        count,
+        h("input", { type: "text", value: s.boxes, placeholder: "A1-A10", "aria-label": `Boxes on shelf ${si + 1}`, style: "flex:1;min-width:120px",
+          oninput: e => { s.boxes = e.target.value; showCount(); changed(false); refreshGrid(); } }),
+        side, count,
         h("button", { class: "btn secondary small", type: "button", "aria-label": "Remove shelf", onclick: () => { u.shelves.splice(si, 1); changed(true); } }, "✕"));
     }),
-    h("button", { class: "btn secondary small", type: "button", style: "margin-top:6px", onclick: () => {
-      const last = u.shelves[u.shelves.length - 1];
-      u.shelves.push({ boxes: last ? guessNextShelf(last.boxes) : "" }); changed(true);
-    } }, "+ Add shelf at the bottom"));
+    h("div", { class: "row", style: "margin-top:6px" },
+      h("button", { class: "btn secondary small", type: "button", onclick: () => {
+        const last = u.shelves[u.shelves.length - 1];
+        u.shelves.push({ boxes: last ? guessNextShelf(last.boxes) : "", rtl: last ? last.rtl : false }); changed(true);
+      } }, "+ Add shelf at the bottom"),
+      h("button", { class: "btn secondary small", type: "button", onclick: () => { u.shelves.forEach(sh => sh.rtl = false); changed(true); } }, "All start on the left"),
+      h("button", { class: "btn secondary small", type: "button", onclick: () => { u.shelves.forEach(sh => sh.rtl = true); changed(true); } }, "All start on the right")),
+    h("div", { class: "sub" }, "Picking order"),
+    pickingControls(u, key => { if (key === "pattern" || key === "dir") changed(true); else { changed(false); refreshGrid(); } }),
+    h("details", { ontoggle: e => { if (e.target.open) { grid.dataset.open = "1"; refreshGrid(); } else delete grid.dataset.open; } },
+      h("summary", null, "Show the picking order"), grid));
+}
+
+/** One set of picking choices that can be copied to every unit. */
+const allPick = { dir: "ltr", pattern: "rows-down", block: 3, inner: "same", zigzag: false };
+function allUnitsCard() {
+  const box = h("div");
+  const draw = () => box.replaceChildren(
+    pickingControls(allPick, () => draw()),
+    h("button", { class: "btn", type: "button", style: "margin-top:8px", onclick: e => tapTwice(e.currentTarget, "Change every unit?", () => {
+      settings.units.forEach(u => Object.assign(u, { dir: allPick.dir, pattern: allPick.pattern, block: allPick.block, inner: allPick.inner, zigzag: allPick.zigzag }));
+      changed(true); toast("Picking order set for every unit.");
+    }) }, "Use for every unit"));
+  draw();
+  return h("section", { class: "card" },
+    h("h2", null, "Picking order for every unit"),
+    h("p", { class: "small muted" }, "Set it once here and copy it to every shelving unit. You can still change a single unit below."),
+    box);
 }
 
 function renderChecks() {
