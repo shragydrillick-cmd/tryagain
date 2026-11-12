@@ -97,6 +97,16 @@ Quick setup can build an aisle-style map (A1, A2… B1, B2…) in one go.
 inventory and orders: one unit per aisle, boxes in number order. Bins that aren't
 on the map yet are marked "not on map" and still listed by aisle and number.
 
+## The list is remembered
+
+The current list stays on the phone (or computer) until it's cleared: the orders,
+every tick on the pick and unpack lists, and where you were in step by step
+(including skipped items). Close the app or the browser and open it again, and it
+says "Picked up where you left off" and carries on from the same step.
+**✕ Clear list & start new** (tap twice) wipes it, ready for the next orders.
+Choosing new order files also replaces it. If the shelf map changes so the pick
+order is different, the orders are kept but the ticks start again.
+
 ## Settings: Map and Order
 
 Settings opens with two buttons:

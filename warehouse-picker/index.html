@@ -233,7 +233,8 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
 
   <section id="results" class="card hidden">
     <h2>2. Your lists</h2>
-    <p class="muted small" id="fileName"></p>
+    <div class="row no-print" style="justify-content:space-between;align-items:center"><p class="muted small" id="fileName" style="margin:0"></p>
+      <button class="btn secondary small" id="clearBtn" type="button">&#10005; Clear list &amp; start new</button></div>
     <div class="stats" id="stats"></div>
     <div id="warnings"></div>
     <div id="review"></div>
@@ -962,16 +963,69 @@ const STORE_KEY = "pick-and-sort-settings-v2";
    kept in a file on the phone, which stays until the app is uninstalled. */
 const nativeApp = window.NativeApp || window.AndroidApp;
 const inApp = !!nativeApp;
+let nativeList = null; // the list of orders as last kept in the app's own file (see saveList)
 function loadSettings() {
-  try { const raw = inApp && nativeApp.readSettings(); if (raw) return fixSettings(JSON.parse(raw)); } catch (e) {}
+  try { const raw = inApp && nativeApp.readSettings(); if (raw) { const o = JSON.parse(raw); nativeList = o._list || null; delete o._list; return fixSettings(o); } } catch (e) {}
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) return fixSettings(JSON.parse(raw)); } catch (e) {}
   return defaultSettings();
 }
 function saveSettings() {
   const json = JSON.stringify(settings);
   try { localStorage.setItem(STORE_KEY, json); } catch (e) {}
-  try { if (inApp) nativeApp.writeSettings(json); } catch (e) {}
+  writeNative();
 }
+/** In the apps, the settings file also keeps the current list, so it survives the app being closed. */
+function writeNative() {
+  try { if (inApp) nativeApp.writeSettings(JSON.stringify(savedList ? Object.assign({}, settings, { _list: savedList }) : settings)); } catch (e) {}
+}
+
+/* ---------- the current list is remembered: orders, ticks and where you are in step by step ---------- */
+const LIST_KEY = "pick-and-sort-list-v1";
+let savedList = null, saveTimer = null;
+const planSig = () => (plan ? plan.picks.map(p => `${p.box}|${p.name}|${p.details}|${p.qty}`).join("\n") : "");
+function saveList() {
+  clearTimeout(saveTimer);
+  if (!current || !plan) return;
+  const open = !$("stepper").classList.contains("hidden");
+  savedList = { savedAt: Date.now(), name: current.name, warnings: current.warnings || [],
+    openChecks: (current.review || []).filter(r => !r.done).length + (current.openChecks || 0),
+    lines: current.lines.map(l => { const o = {}; for (const k in l) if (k !== "slip" && typeof l[k] !== "function" && typeof l[k] !== "object") o[k] = l[k]; return o; }),
+    sig: planSig(), picked: [...pickedDone], unpacked: [...unpackDone],
+    stepper: open ? { mode: stepMode, seq, stepAt, skipped: [...skipped] } : null };
+  try { localStorage.setItem(LIST_KEY, JSON.stringify(savedList)); } catch (e) {}
+  writeNative();
+}
+const saveListSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveList, 400); };
+function clearList() {
+  current = null; plan = null; pickedDone = new Set(); unpackDone = new Set(); savedList = null; builtFor = null;
+  try { localStorage.removeItem(LIST_KEY); } catch (e) {}
+  writeNative();
+  $("results").classList.add("hidden"); $("fileInput").value = ""; $("loadMsg").replaceChildren();
+  window.scrollTo(0, 0); toast("Cleared. Add the new orders.");
+}
+function restoreList() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(LIST_KEY) || "null"); } catch (e) {}
+  if (nativeList && (!s || nativeList.savedAt > s.savedAt)) s = nativeList;
+  if (!s || !s.lines || !s.lines.length) return;
+  savedList = s;
+  current = { lines: s.lines, warnings: s.warnings || [], name: s.name, src: null, restoredAt: s.savedAt, openChecks: s.openChecks || 0 };
+  rebuild();
+  if (s.sig !== planSig()) return; // the map changed since: the ticks may not fit any more
+  pickedDone = new Set(s.picked || []); unpackDone = new Set(s.unpacked || []);
+  renderPick(); renderUnpack();
+  const st = s.stepper;
+  if (st) {
+    stepMode = st.mode; stepItems = st.mode === "pick" ? boxGroups() : plan.unpack;
+    if (st.seq.length !== stepItems.length) return;
+    seq = st.seq; stepAt = Math.min(st.stepAt, seq.length - 1); skipped = new Set(st.skipped || []); stepView = "step";
+    $("stepper").classList.remove("hidden"); document.body.style.overflow = "hidden"; showStep();
+  }
+}
+document.addEventListener("click", saveListSoon, true);
+document.addEventListener("change", saveListSoon, true);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveList(); });
+window.addEventListener("pagehide", saveList);
 
 /* =====================================================================
    SCREEN CODE
@@ -1240,10 +1294,13 @@ function reviewCard(r) {
 
 /* ---------- results ---------- */
 let pickedDone = new Set(), unpackDone = new Set(); // ticked lines (by step number)
+let builtFor = null; // the list the ticks belong to
 function rebuild() {
   if (!current) return;
+  const oldSig = planSig();
   plan = makePlan(current.lines, settings);
-  pickedDone = new Set(); unpackDone = new Set();
+  if (builtFor !== current || planSig() !== oldSig) { pickedDone = new Set(); unpackDone = new Set(); } // a new list, or the order changed
+  builtFor = current;
   $("results").classList.remove("hidden");
   $("fileName").textContent = current.name;
   $("stats").replaceChildren(
@@ -1268,8 +1325,11 @@ function rebuild() {
   if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.slips
     ? current.warnings.map(t => h("div", null, "• " + t))
     : [current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""]));
+  if (current.restoredAt) w.prepend(h("div", { class: "notice good" }, `Picked up where you left off (list from ${new Date(current.restoredAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}).`,
+    current.openChecks ? ` ${current.openChecks} slip${current.openChecks === 1 ? " still needed" : "s still needed"} checking when it was saved: to check ${current.openChecks === 1 ? "it" : "them"}, choose the PDFs again.` : ""));
   renderReview();
   renderPick(); renderUnpack(); renderKey();
+  saveListSoon();
 }
 
 /** Text with the "difference" words highlighted. */
@@ -2605,6 +2665,8 @@ window.appBack = () => {
 
 applyTheme();
 showInvStatus();
+$("clearBtn").onclick = e => tapTwice(e.currentTarget, "Clear everything?", clearList);
+restoreList();
 </script>
 </body>
 </html>
