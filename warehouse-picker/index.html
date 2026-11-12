@@ -173,9 +173,10 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
       <p class="small muted" style="margin-bottom:0"><button class="link" id="invTemplateBtn" type="button">Download an inventory template</button></p>
     </div>
     <h3>Orders</h3>
-    <p class="muted small">A spreadsheet (Excel or CSV) with one line per item: <b>Order</b>, <b>Box</b> (like A1 = aisle A, box 1), <b>Item</b> (what it is), and optional <b>Details</b> and <b>Qty</b>. Any other columns are shown as details.</p>
+    <p class="muted small"><b>Packing slips (PDF):</b> choose the PDF with all the slips. The app reads each slip's order number, items, bins and quantities, and checks them against "Total items".</p>
+    <p class="muted small">Or a spreadsheet (Excel or CSV) with one line per item: <b>Order</b>, <b>Box</b> (like A1 = aisle A, box 1), <b>Item</b> (what it is), and optional <b>Details</b> and <b>Qty</b>. Any other columns are shown as details.</p>
     <div class="row">
-      <label class="btn">Choose file<input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" hidden></label>
+      <label class="btn">Choose file<input id="fileInput" type="file" accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls,text/csv,application/pdf" hidden></label>
       <button class="btn secondary" id="pasteToggle" type="button">Paste instead</button>
       <button class="btn secondary" id="exampleBtn" type="button">Try an example</button>
     </div>
@@ -365,6 +366,155 @@ function applyInventory(lines, inventory) {
     }
   });
   return [...missing];
+}
+
+/* ---------- packing slips (PDF) ----------
+   Each page's words come with their position. On each slip: "Order #53625", a header row
+   with "Bin" and "Quantity", then items (name lines, SKU, barcode) with the bin and the
+   quantity in those columns, then "Total items: N", which is used to check the reading. */
+function textLines(words) {
+  // words: [{str, x, y, w}] in PDF points (y grows upwards) -> lines top to bottom
+  const sorted = words.filter(w => w.str.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
+  const lines = [];
+  sorted.forEach(w => {
+    const line = lines.find(l => Math.abs(l.y - w.y) < 3);
+    if (line) line.parts.push(w); else lines.push({ y: w.y, parts: [w] });
+  });
+  lines.forEach(l => {
+    l.parts.sort((a, b) => a.x - b.x);
+    // join words that touch into phrases, keeping their left x
+    const phrases = [];
+    l.parts.forEach(w => {
+      const last = phrases[phrases.length - 1];
+      if (last && w.x - (last.x + last.w) < 12) { last.str += (w.x - (last.x + last.w) > 1 ? " " : "") + w.str; last.w = w.x + w.w - last.x; }
+      else phrases.push({ str: w.str, x: w.x, w: w.w });
+    });
+    l.phrases = phrases.map(p => ({ ...p, str: p.str.replace(/\s+/g, " ").trim() })).filter(p => p.str);
+    l.text = l.phrases.map(p => p.str).join(" ");
+  });
+  return lines.sort((a, b) => b.y - a.y);
+}
+const isBinText = t => /^[A-Z]{1,3}[- ]?\d{1,5}[A-Z]?$/i.test(t);
+/** pages: [[{str, x, y, w}]] -> {orders: [{order, items: [{name, details, sku, bin, qty}], total}], warnings} */
+function parseSlips(pages) {
+  const orders = [], warnings = [];
+  let cur = null, cols = null;
+  pages.forEach((words, pi) => {
+    const lines = textLines(words);
+    let inItems = false;
+    const left = [], bins = [], qtys = [], heads = { bin: null, qty: null };
+    const finishItems = () => {
+      if (!cur || (!bins.length && !qtys.length)) { left.length = 0; bins.length = 0; qtys.length = 0; return; }
+      // line height = the usual gap between the item text lines
+      const gaps = left.slice(1).map((l, i) => left[i].y - l.y).filter(g => g > 2).sort((a, b) => a - b);
+      const lineH = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 13;
+      // pair each bin with the quantity next to it (they're often not at exactly the same height)
+      const marks = bins.map(b => ({ y: b.y, bin: b.str, qty: null }));
+      qtys.forEach(q => {
+        let best = null;
+        marks.forEach(m => { const d = Math.abs(m.y - q.y); if (m.qty == null && d < lineH * 1.5 && (!best || d < Math.abs(best.y - q.y))) best = m; });
+        if (best) { best.qty = q.n; best.y = Math.max(best.y, q.y); } else marks.push({ y: q.y, bin: "", qty: q.n });
+      });
+      marks.sort((a, b) => b.y - a.y);
+      // each item's text starts about a line above its bin/quantity and runs down to the next item
+      const groups = marks.map(m => ({ m, lines: [] }));
+      left.forEach(l => {
+        let gi = 0;
+        groups.forEach((g, i) => { if (g.m.y >= l.y - lineH * 1.2) gi = i; });
+        groups[gi].lines.push(l.text);
+      });
+      groups.forEach(g => {
+        // text lines, top to bottom: the name (it may wrap), then the SKU, then the barcode
+        const rest = g.lines.filter(Boolean);
+        let barcode = "", sku = "";
+        if (rest.length > 1 && /^\d{8,14}$/.test(rest[rest.length - 1].replace(/\s/g, ""))) barcode = rest.pop().replace(/\s/g, "");
+        const last = rest[rest.length - 1] || "";
+        const letters = last.replace(/[^A-Za-z]/g, "").length, digits = last.replace(/\D/g, "").length;
+        // a code like BO9019 (2+ letters and 2+ digits, no spaces); a size like 3-6M or 2XL stays in the name
+        if (rest.length > 1 && /^[A-Za-z0-9._\/-]{3,30}$/.test(last) && ((letters >= 2 && digits >= 2) || (barcode && /^\d{3,12}$/.test(last)))) sku = rest.pop();
+        const nameText = rest.join(" ").replace(/\s+/g, " ").trim();
+        const cut = nameText.lastIndexOf(" - ");
+        cur.items.push({
+          name: cut > 0 ? nameText.slice(0, cut).trim() : nameText,
+          details: cut > 0 ? nameText.slice(cut + 3).trim() : "",
+          sku, barcode,
+          bin: g.m.bin ? normBox(g.m.bin) : "", qty: g.m.qty == null ? 1 : g.m.qty,
+        });
+      });
+      left.length = 0; bins.length = 0; qtys.length = 0;
+    };
+    lines.forEach(l => {
+      const om = l.text.match(/order\s*(?:#|no\.?|number)\s*:?\s*#?\s*([A-Za-z0-9-]+)/i);
+      if (om && cur && cur.order === om[1] && cur.total == null) { finishItems(); return; } // same slip, next page
+      if (om && !inItems) {
+        finishItems();
+        cur = { order: om[1], items: [], total: null, page: pi + 1 };
+        orders.push(cur); cols = null;
+        return;
+      }
+      // the "Bin" and "Quantity" headings: on the same line or a few points apart
+      const binP = l.phrases.find(p => /^(bin|location|loc\.?)$/i.test(p.str));
+      const qtyP = l.phrases.find(p => /^(qty|quantity|quant\.?)$/i.test(p.str));
+      if (binP) heads.bin = { x: binP.x + binP.w / 2, y: l.y };
+      if (qtyP) heads.qty = { x: qtyP.x + qtyP.w / 2, y: l.y };
+      if ((binP || qtyP) && heads.bin && heads.qty && Math.abs(heads.bin.y - heads.qty.y) < 20) {
+        cols = { bin: heads.bin.x, qty: heads.qty.x }; heads.bin = heads.qty = null; inItems = true; return;
+      }
+      if (binP || qtyP) return;
+      const tm = l.text.match(/total\s+items\s*:?\s*(\d+)/i);
+      if (tm) { finishItems(); if (cur) cur.total = parseInt(tm[1], 10); inItems = false; return; }
+      if (!cols || !cur) return;
+      if (!inItems && pi + 1 > cur.page && !om) inItems = true; // slip carries on onto the next page
+      if (!inItems) return;
+      if (/^items$/i.test(l.text)) return;
+      const edge = Math.min(cols.bin, cols.qty) - 40;
+      const binHere = l.phrases.find(p => p.x >= edge && Math.abs(p.x + p.w / 2 - cols.bin) < 45 && isBinText(p.str));
+      const qtyHere = l.phrases.find(p => p.x >= edge && Math.abs(p.x + p.w / 2 - cols.qty) < 45 && /^\d{1,4}$/.test(p.str));
+      const text = l.phrases.filter(p => p.x < edge).map(p => p.str).join(" ").trim();
+      if (binHere) bins.push({ y: l.y, str: binHere.str });
+      if (qtyHere) qtys.push({ y: l.y, n: parseInt(qtyHere.str, 10) });
+      if (text) left.push({ y: l.y, text });
+    });
+    finishItems();
+  });
+  // check every slip against its "Total items"
+  orders.forEach(o => {
+    const got = o.items.reduce((a, it) => a + it.qty, 0);
+    if (o.total != null && got !== o.total) warnings.push(`Order ${o.order}: read ${got} item${got === 1 ? "" : "s"} but the slip says Total items: ${o.total}. Check this slip by hand.`);
+    if (o.total == null) warnings.push(`Order ${o.order}: couldn't find "Total items" to check against.`);
+    o.items.filter(it => !it.bin).forEach(it => warnings.push(`Order ${o.order}: no bin found for ${it.name || it.sku}.`));
+  });
+  return { orders: orders.filter(o => o.items.length), warnings, checked: orders.filter(o => o.total != null && o.items.reduce((a, it) => a + it.qty, 0) === o.total).length, all: orders.length };
+}
+/** Turn read slips into order lines. Items without a bin use the inventory (by SKU) if there is one. */
+function slipsToLines(parsed) {
+  const lines = [];
+  parsed.orders.forEach(o => o.items.forEach(it => {
+    lines.push({ order: o.order, box: it.bin || "?", code: it.sku || it.barcode, name: it.name, details: it.details, qty: it.qty });
+  }));
+  return lines;
+}
+let pdfjsReady = null;
+function loadScript(src) {
+  return new Promise((ok, fail) => { const el = document.createElement("script"); el.src = src; el.onload = ok; el.onerror = () => fail(new Error("Couldn't load the PDF reader. Connect to the internet once and try again.")); document.head.append(el); });
+}
+/** pdf.js is loaded only when a PDF is opened; its worker runs on the page itself. */
+function loadPdfJs() {
+  if (!pdfjsReady) pdfjsReady = loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js")
+    .then(() => loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"))
+    .catch(e => { pdfjsReady = null; throw e; });
+  return pdfjsReady;
+}
+async function pdfWords(buffer) {
+  await loadPdfJs();
+  const pdf = await window.pdfjsLib.getDocument({ data: buffer, isEvalSupported: false }).promise;
+  const pages = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const tc = await page.getTextContent();
+    pages.push(tc.items.filter(i => i.str != null).map(i => ({ str: i.str, x: i.transform[4], y: i.transform[5], w: i.width || 0 })));
+  }
+  return pages;
 }
 
 /** Turn rows into order lines: [{order, box, code, name, details, qty}] */
@@ -755,6 +905,21 @@ function useRows(rows, name) {
   const useInv = !!(inv && inv.rows && inv.rows.length && !r.hasBin);
   const missing = useInv ? applyInventory(r.lines, inv) : [];
   current = { lines: r.lines, warnings: r.warnings, name, src: rows, usedInventory: useInv, missing };
+  showResults();
+}
+/** Packing slips: read, check, and use. */
+function useSlips(parsed, name) {
+  if (!parsed.orders.length) { showLoadMsg("Couldn't find any slips in that PDF (looking for \"Order #\", a Bin and Quantity column, and \"Total items\")."); return; }
+  const lines = slipsToLines(parsed);
+  const inv = settings.inventory, noBin = lines.filter(l => l.box === "?");
+  let missing = [];
+  if (noBin.length && inv && inv.rows && inv.rows.length) { // fill missing bins from the inventory by SKU
+    missing = applyInventory(noBin, inv);
+  }
+  current = { lines, warnings: parsed.warnings, name, src: null, slips: { all: parsed.all, checked: parsed.checked }, usedInventory: false, missing };
+  showResults();
+}
+function showResults() {
   showLoadMsg("");
   rebuild();
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -772,7 +937,12 @@ async function readTable(f) {
 $("fileInput").addEventListener("change", async e => {
   const f = e.target.files[0]; e.target.value = "";
   if (!f) return;
-  try { useRows(await readTable(f), f.name); } catch (err) { showLoadMsg("Couldn't read that file: " + err.message); }
+  try {
+    if (/\.pdf$/i.test(f.name) || f.type === "application/pdf") {
+      showLoadMsg("Reading the packing slips…", "good");
+      useSlips(parseSlips(await pdfWords(await f.arrayBuffer())), f.name);
+    } else useRows(await readTable(f), f.name);
+  } catch (err) { showLoadMsg("Couldn't read that file: " + err.message); }
 });
 
 /* ---------- inventory (item number -> bin), kept with the settings on this phone ---------- */
@@ -865,6 +1035,12 @@ function rebuild() {
     h("div", { class: "stat" }, h("b", null, plan.totalUnits), "items to pick"),
     h("div", { class: "stat" }, h("b", null, new Set(plan.picks.map(p => p.box)).size), "boxes to visit"));
   const w = $("warnings"); w.replaceChildren();
+  if (current.slips) {
+    const sl = current.slips, ok = sl.checked === sl.all;
+    w.append(h("div", { class: `notice ${ok ? "good" : "warn"}` }, ok
+      ? `✓ Read ${sl.all} packing slip${sl.all === 1 ? "" : "s"}. Every slip's items add up to its "Total items".`
+      : `Read ${sl.all} packing slips; ${sl.checked} add up to their "Total items". Check the ones listed below.`));
+  }
   if (current.usedInventory) w.append(h("div", { class: "notice good" }, `Bins looked up in your inventory (${settings.inventory.name}).`));
   if (current.missing && current.missing.length) w.append(h("div", { class: "notice warn" },
     `${current.missing.length} item number(s) aren't in your inventory, so they're listed at the end with bin "?": ${current.missing.slice(0, 12).join(", ")}${current.missing.length > 12 ? "…" : ""}.`));
@@ -872,7 +1048,9 @@ function rebuild() {
   if (unknownBins.length) w.append(h("div", { class: "notice warn" },
     h("span", null, `${unknownBins.length} box number(s) aren't on your shelf map yet, so they're listed by aisle and number: ${unknownBins.slice(0, 12).join(", ")}${unknownBins.length > 12 ? "…" : ""}. `),
     h("button", { class: "btn small", type: "button", style: "margin-top:6px", onclick: e => tapTwice(e.currentTarget, "Replace your shelf map?", () => { if (buildMapFromBins()) rebuild(); }) }, "Make a map from my bins")));
-  if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""));
+  if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.slips
+    ? current.warnings.map(t => h("div", null, "• " + t))
+    : [current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""]));
   renderPick(); renderUnpack(); renderKey();
 }
 

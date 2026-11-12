@@ -54,6 +54,7 @@ tasks.register('copyWebApp', Copy) {
     filter { String line ->
         line.replace('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'vendor/jspdf.umd.min.js')
             .replace('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'vendor/xlsx.full.min.js')
+            .replace('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/', 'vendor/')
     }
 }
 preBuild.dependsOn copyWebApp

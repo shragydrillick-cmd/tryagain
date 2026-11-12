@@ -26,6 +26,18 @@ need an account, Claude, or a server.
 3. Download the two PDFs, print them, or use **Unpack step by step** on a
    phone or tablet.
 
+## Packing slips (PDF)
+
+The quickest way: choose the PDF with all the packing slips. For each slip the
+app reads the **order number**, every item's **name** (the part after the last
+" - " is kept as the colour/size), **SKU**, **barcode**, **Bin** and **Quantity**,
+and checks the count against the slip's **"Total items"**. Any slip that doesn't
+add up is named so it can be checked by hand. Slips that run onto a second page
+are joined up. Addresses and phone numbers are ignored, and nothing leaves the
+phone. If a slip has no bin for an item, the inventory (by SKU) fills it in.
+
+`tests/slip-reading.test.js` checks this against 60 test slips in five layouts.
+
 ## The orders file
 
 One line per item works best:

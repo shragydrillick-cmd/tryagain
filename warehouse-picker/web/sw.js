@@ -2,7 +2,7 @@
    __VERSION__ changes with every new build; the phone then picks up the new
    version in the background and uses it the next time the app is opened. */
 const CACHE = "pick-and-sort-__VERSION__";
-const FILES = ["./", "index.html", "manifest.webmanifest", "vendor/jspdf.umd.min.js", "vendor/xlsx.full.min.js",
+const FILES = ["./", "index.html", "manifest.webmanifest", "vendor/jspdf.umd.min.js", "vendor/xlsx.full.min.js", "vendor/pdf.min.js", "vendor/pdf.worker.min.js",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
