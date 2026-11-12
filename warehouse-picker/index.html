@@ -631,18 +631,18 @@ function renderPick() {
     }
     g.items.forEach((p, i) => {
       const tr = h("tr", { class: pickedDone.has(p.step) ? "done" : "" },
+        i === 0 ? h("td", { class: "box" + (g.items.length > 1 ? " multi" : ""), rowspan: g.items.length }, g.box,
+          h("span", { class: "where" }, g.loc ? `shelf ${g.loc.shelf} of ${g.loc.shelves}` : "find by hand")) : null,
         h("td", null, h("input", { type: "checkbox", "aria-label": `Picked ${itemName(p)}`, checked: pickedDone.has(p.step),
           onchange: e => { e.target.checked ? pickedDone.add(p.step) : pickedDone.delete(p.step); tr.className = e.target.checked ? "done" : ""; } })),
         h("td", { class: "big" }, `${p.qty}×`),
-        i === 0 ? h("td", { class: "box" + (g.items.length > 1 ? " multi" : ""), rowspan: g.items.length }, g.box,
-          h("span", { class: "where" }, g.loc ? `shelf ${g.loc.shelf} of ${g.loc.shelves}` : "find by hand")) : null,
         itemCell(p, null));
       tb.append(tr);
     });
   });
   $("tab-pick").replaceChildren(
     h("p", { class: "small muted" }, "Walk the shelves top to bottom of this list. Tick items off as they go in the cart. When a box holds more than one item, the words that tell them apart are highlighted."),
-    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Take"), h("th", { style: "text-align:center" }, "Box"), h("th", null, "Item"))), tb));
+    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", { style: "text-align:center" }, "Box"), h("th", null, ""), h("th", null, "Take"), h("th", null, "Item"))), tb));
 }
 
 function renderUnpack() {
@@ -798,7 +798,7 @@ function drawItemBlock(doc, b, x, y) {
 function pickPdf() {
   const doc = newDoc(); if (!doc) return;
   let y = docHeader(doc, "PICK LIST", `${stamp()} · go top to bottom, tick each box`);
-  const X = { take: M + 28, boxL: M + 70, boxW: 92, item: M + 172 }, itemW = PW - M - (M + 172) - 4;
+  const X = { boxL: M, boxW: 92, check: M + 102, take: M + 124, item: M + 176 }, itemW = PW - M - (M + 176) - 4;
   const colHead = () => {
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(110);
     doc.text("TAKE", X.take, y); doc.text("BOX", X.boxL + X.boxW / 2, y, { align: "center" }); doc.text("ITEM", X.item, y);
@@ -828,12 +828,12 @@ function pickPdf() {
     doc.setTextColor(0);
     g.items.forEach((p, i) => {
       const rowH = rowHs[i];
-      doc.setDrawColor(60); doc.setLineWidth(1); doc.rect(M + 4, y + 8, 14, 14, "S");
+      doc.setDrawColor(60); doc.setLineWidth(1); doc.rect(X.check, y + 8, 14, 14, "S");
       doc.setFont("helvetica", "bold"); doc.setFontSize(16);
       doc.text(`${p.qty} x`, X.take, y + 20);
       drawItemBlock(doc, blocks[i], X.item, y + 5);
       doc.setDrawColor(215); doc.setLineWidth(0.5);
-      if (i < g.items.length - 1) { doc.line(M, y + rowH, X.boxL - 2, y + rowH); doc.line(X.boxL + X.boxW + 2, y + rowH, PW - M, y + rowH); }
+      if (i < g.items.length - 1) doc.line(X.boxL + X.boxW + 2, y + rowH, PW - M, y + rowH);
       else doc.line(M, y + rowH, PW - M, y + rowH);
       y += rowH;
     });
