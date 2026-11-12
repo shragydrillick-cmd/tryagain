@@ -132,6 +132,42 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
             print("SELFTEST RESULT \(r)")
             let ok = r.contains("\"native\":true") && r.contains("\"libs\":true") && r.contains("\"orders\":5") && r.contains("\"unpack\":13")
             print(ok ? "SELFTEST OK" : "SELFTEST FAIL unexpected result")
+            self.selfTestPackingSlip()
+        }
+    }
+
+    /// Reads a packing slip laid out like the real ones (A4, bin and quantity beside the
+    /// second line of the name, "Product - Colour - Size") with Safari's engine on the phone.
+    private func selfTestPackingSlip() {
+        let js = """
+        const doc = new jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text('Order #53796', 465, 60);
+        doc.setFontSize(14); doc.text('MOONLIGHT', 50, 95);
+        doc.setFontSize(10); doc.text('Items', 50, 320); doc.text('Bin', 394, 320); doc.text('Quantity', 475, 320);
+        doc.setFont('helvetica', 'normal');
+        const item = (y, lines, bin, qty) => { lines.forEach((t, i) => doc.text(t, 94, y + i * 15)); doc.text(bin, 392, y + 23); doc.text(qty, 494, y + 23); };
+        item(346, ['Lil Legs Limited Capsule Toddler Sweatshirt', 'Set - Deep Red - 2T', 'LL2207-2T', '735380754426'], 'C87', '1');
+        item(424, ['Bebe Organic Cuddle Horse Blanket - Faded', 'Blue', 'BO9019', '4741631147998'], 'A52', '2');
+        item(502, ['Bib', 'BB100', '4741631100103'], 'B3', '1');
+        doc.setFont('helvetica', 'bold'); doc.text('Total items: 4', 471, 590);
+        const r = parseSlips(await pdfWords(doc.output('arraybuffer')));
+        return JSON.stringify(r.orders.map(o => ({ order: o.order, total: o.total, unsure: !!o.unsure,
+          items: o.items.map(i => [i.name, i.details, i.sku, i.barcode, i.bin, i.qty].join('|')) })));
+        """
+        webView.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .failure(let error): print("SELFTEST PDF FAIL \(error)")
+            case .success(let value):
+                let r = (value as? String) ?? ""
+                print("SELFTEST PDF RESULT \(r)")
+                let want = [
+                    "\"order\":\"53796\"", "\"total\":4", "\"unsure\":false",
+                    "Lil Legs Limited Capsule Toddler Sweatshirt Set|Deep Red - 2T|LL2207-2T|735380754426|C87|1",
+                    "Bebe Organic Cuddle Horse Blanket|Faded Blue|BO9019|4741631147998|A52|2",
+                    "Bib||BB100|4741631100103|B3|1",
+                ]
+                print(want.allSatisfy { r.contains($0) } ? "SELFTEST PDF OK" : "SELFTEST PDF FAIL wrong reading")
+            }
         }
     }
 }

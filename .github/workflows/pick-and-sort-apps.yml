@@ -84,7 +84,7 @@ jobs:
             xcrun simctl terminate "$DEVICE" com.picksort.app 2>/dev/null || true
             xcrun simctl launch --console-pty "$DEVICE" com.picksort.app -selftest > console.log 2>&1 &
             PID=$!
-            for i in $(seq 1 45); do grep -q "SELFTEST OK\|SELFTEST FAIL" console.log && break; sleep 2; done
+            for i in $(seq 1 60); do grep -q "SELFTEST PDF OK\|SELFTEST PDF FAIL\|SELFTEST FAIL" console.log && break; sleep 2; done
             sleep 4
             kill $PID 2>/dev/null || true
             grep -q "SELFTEST OK\|SELFTEST FAIL" console.log && break
@@ -97,6 +97,7 @@ jobs:
           grep -q "SELFTEST-FILE pick-list" console.log
           grep -q "SELFTEST-FILE unpack-list" console.log
           grep -q "SELFTEST-SETTINGS" console.log
+          grep -q "SELFTEST PDF OK" console.log # a packing slip read with Safari's engine on the iPhone
 
       - uses: actions/upload-artifact@v4
         with:
