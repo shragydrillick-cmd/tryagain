@@ -32,11 +32,12 @@ One line per item works best:
 
 | Order | Box | Item             | Details | Qty |
 |-------|-----|------------------|---------|-----|
-| 10452 | 1A  | Blue ceramic mug | 12 oz   | 1   |
-| 10452 | 3B  | Notebook         | Lined   | 2   |
-| 10452 | 1A  | Mug coaster      | Cork    | 1   |
+| 10452 | A3  | Blue ceramic mug | 12 oz   | 1   |
+| 10452 | A14 | Notebook         | Lined   | 2   |
+| 10452 | A3  | Mug coaster      | Cork    | 1   |
 
-- **Box** is the number on the shelf box (like 1A). It decides the walking order.
+- **Box** is the code on the shelf box: aisle letter + box number (A1 = aisle A, box 1).
+  It decides the walking order. `a1`, `A-1` and `A01` all count as A1.
 - **Item** and **Details** say what to take from the box. Any other columns
   (color, size…) are shown as details too. A box can hold more than one kind of
   item; each gets its own line.
@@ -53,8 +54,8 @@ See `example-orders.csv`.
 ## The shelf map
 
 Each shelving unit can have its own number of shelves. For each shelf, type its
-boxes from left to right: a run like `1A-10A` or `1-25`, or a list like
-`1A, 2A, 5A`.
+boxes from left to right: a run like `A1-A10`, or a list like `A1, A2, A5`.
+Quick setup can build an aisle-style map (A1, A2… B1, B2…) in one go.
 
 ## Ways to walk a shelving unit
 

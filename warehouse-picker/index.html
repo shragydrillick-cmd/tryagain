@@ -147,14 +147,14 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 <main id="homeView">
   <section class="card no-print">
     <h2>1. Add your orders file</h2>
-    <p class="muted small">A spreadsheet (Excel or CSV) with one line per item: <b>Order</b>, <b>Box</b> (the shelf number, like 1A), <b>Item</b> (what it is), and optional <b>Details</b> and <b>Qty</b>. Any other columns are shown as details.</p>
+    <p class="muted small">A spreadsheet (Excel or CSV) with one line per item: <b>Order</b>, <b>Box</b> (like A1 = aisle A, box 1), <b>Item</b> (what it is), and optional <b>Details</b> and <b>Qty</b>. Any other columns are shown as details.</p>
     <div class="row">
       <label class="btn">Choose file<input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" hidden></label>
       <button class="btn secondary" id="pasteToggle" type="button">Paste instead</button>
       <button class="btn secondary" id="exampleBtn" type="button">Try an example</button>
     </div>
     <div id="pasteBox" class="hidden" style="margin-top:12px">
-      <textarea id="pasteText" placeholder="Order,Box,Item,Details,Qty&#10;10452,1A,Blue mug,12 oz,1&#10;10452,3B,Notebook,Lined A5,2"></textarea>
+      <textarea id="pasteText" placeholder="Order,Box,Item,Details,Qty&#10;10452,A3,Blue mug,12 oz,1&#10;10452,A14,Notebook,Lined A5,2"></textarea>
       <div class="row" style="margin-top:8px"><button class="btn" id="pasteGo" type="button">Use this</button></div>
     </div>
     <p class="small muted" style="margin-bottom:0">
@@ -251,9 +251,11 @@ function parseDelimited(text) {
 }
 
 const clean = v => String(v == null ? "" : v).trim();
-/** Box codes: "#01a " -> "1A". Leading zeros and spaces don't matter. */
+/** Box codes: "#a01 " / "A-1" -> "A1". Leading zeros, spaces and dashes don't matter. */
 function normBox(v) {
-  return clean(v).replace(/^#\s*/, "").replace(/\s+/g, "").toUpperCase().replace(/\d+/g, d => String(parseInt(d, 10)));
+  return clean(v).replace(/^#\s*/, "").replace(/\s+/g, "").toUpperCase()
+    .replace(/([A-Z])[-_.]+(?=\d)|(\d)[-_.]+(?=[A-Z])/g, "$1$2") // A-1 / A_1 -> A1, 1-A -> 1A
+    .replace(/\d+/g, d => String(parseInt(d, 10)));
 }
 const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
 
@@ -458,6 +460,24 @@ function makeUnits(shelvesPer, perShelf, firstNumber, letters) {
   });
   return units;
 }
+/**
+ * Aisle-style map: the letter is the aisle, the number is the box (A1 = aisle A, box 1).
+ * Each aisle's boxes count up from 1: top shelf of its first unit left to right, then the
+ * next shelf down, then the next unit. shelvesPer: one entry per unit, across all aisles.
+ */
+function makeAisleUnits(aisles, unitsPerAisle, shelvesPer, perShelf) {
+  const units = []; let k = 0;
+  for (let a = 0; a < aisles; a++) {
+    const L = a < 26 ? String.fromCharCode(65 + a) : String.fromCharCode(65 + Math.floor(a / 26) - 1) + String.fromCharCode(65 + (a % 26));
+    let n = 1;
+    for (let u = 0; u < unitsPerAisle; u++, k++) {
+      const shelves = [];
+      for (let s = 0; s < shelvesPer[k]; s++) { shelves.push({ boxes: `${L}${n}-${L}${n + perShelf - 1}` }); n += perShelf; }
+      units.push({ id: nextId++, name: unitsPerAisle > 1 ? `Aisle ${L} · unit ${u + 1}` : `Aisle ${L}`, shelves, pattern: "rows-down", block: 5, dir: "ltr" });
+    }
+  }
+  return units;
+}
 /** Suggest the next shelf below, from the one above: 1A-10A -> 1B-10B; 1-25 -> 26-50. */
 function guessNextShelf(text) {
   const m = String(text || "").replace(/\s+/g, "").toUpperCase().match(/^([A-Z]*)(\d+)([A-Z]?)-([A-Z]*)(\d+)([A-Z]?)$/);
@@ -468,7 +488,7 @@ function guessNextShelf(text) {
   return "";
 }
 function defaultSettings() {
-  const units = makeUnits([3, 2, 4, 3], 10, 1, true);
+  const units = makeAisleUnits(2, 2, [3, 2, 4, 3], 10);
   return { version: 2, units, walk: units.map(u => u.id), orderNumbering: "sorted", theme: "auto" };
 }
 function fixSettings(s) {
@@ -600,19 +620,19 @@ $("pasteGo").onclick = () => useRows(parseDelimited($("pasteText").value), "Past
 $("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name); };
 
 const EXAMPLE = `Order,Box,Item,Details,Qty
-10452,1A,Fleece blanket,"Blue, 50x60 in",1
-10452,3B,Notebook,"Lined, A5",2
-10449,1A,Fleece blanket,"Gray, 50x60 in",1
-10449,3B,Notebook,"Lined, A5",1
-10449,15A,Desk lamp,White,1
-10449,27C,Phone stand,Black,1
-10460,27C,Phone stand,Black,2
-10460,6A,Pen set,Black ink,1
-10451,22D,Cable ties,Pack of 50,1
-10451,1A,Fleece blanket,"Blue, 50x60 in",1
-10455,15A,Desk lamp,White,1
-10455,12B,Sticky notes,Yellow,1
-10455,29A,Water bottle,750 ml,1`;
+10452,A3,Fleece blanket,"Blue, 50x60 in",1
+10452,A14,Notebook,"Lined, A5",2
+10449,A3,Fleece blanket,"Gray, 50x60 in",1
+10449,A14,Notebook,"Lined, A5",1
+10449,A35,Desk lamp,White,1
+10449,B26,Phone stand,Black,1
+10460,B26,Phone stand,Black,2
+10460,A7,Pen set,Black ink,1
+10451,B33,Cable ties,Pack of 50,1
+10451,A3,Fleece blanket,"Blue, 50x60 in",1
+10455,A35,Desk lamp,White,1
+10455,A44,Sticky notes,Yellow,1
+10455,B5,Water bottle,750 ml,1`;
 $("exampleBtn").onclick = () => useRows(parseDelimited(EXAMPLE), "Example orders");
 $("templateBtn").onclick = () => download(new Blob(["Order,Box,Item,Details,Qty\n"], { type: "text/csv" }), "orders-template.csv");
 
@@ -1048,7 +1068,7 @@ function numInput(value, onset) {
   return h("input", { type: "number", value: value ?? "", inputmode: "numeric", min: 1,
     oninput: e => { onset(e.target.value === "" ? "" : parseInt(e.target.value, 10)); changed(false); } });
 }
-const quick = { units: 4, shelves: "3, 2, 4, 3", per: 10, first: 1, letters: true };
+const quick = { style: "aisle", aisles: 2, perAisle: 2, units: 4, shelves: "3, 2, 4, 3", per: 10, first: 1 };
 
 function renderSettings() {
   const v = $("settingsView");
@@ -1057,29 +1077,41 @@ function renderSettings() {
     h("section", { class: "card" },
       h("h2", null, "Quick setup"),
       h("p", { class: "small muted" }, "Builds a starting map. You can change any shelf afterwards."),
-      h("div", { class: "row" },
-        h("label", null, "Shelving units ", qIn("units", { type: "number", min: 1, id: "qUnits" })),
-        h("label", null, "Boxes per shelf ", qIn("per", { type: "number", min: 1, id: "qPer" })),
-        h("label", null, "First number ", qIn("first", { type: "number", id: "qFirst" }))),
+      h("label", { style: "display:block;margin-bottom:10px" }, "Box names ",
+        h("select", { id: "qStyle", onchange: e => { quick.style = e.target.value; renderSettings(); } },
+          [["aisle", "Aisle letter + box number (A1, A2… B1, B2…)"], ["shelf", "Number + shelf letter (1A, 2A… 1B, 2B…)"], ["plain", "Plain numbers (1, 2, 3…)"]]
+            .map(([v, t]) => h("option", { value: v, selected: quick.style === v }, t)))),
+      quick.style === "aisle"
+        ? h("div", { class: "row" },
+            h("label", null, "Aisles ", qIn("aisles", { type: "number", min: 1, id: "qAisles" })),
+            h("label", null, "Shelving units in each aisle ", qIn("perAisle", { type: "number", min: 1, id: "qPerAisle" })),
+            h("label", null, "Boxes per shelf ", qIn("per", { type: "number", min: 1, id: "qPer" })))
+        : h("div", { class: "row" },
+            h("label", null, "Shelving units ", qIn("units", { type: "number", min: 1, id: "qUnits" })),
+            h("label", null, "Boxes per shelf ", qIn("per", { type: "number", min: 1, id: "qPer" })),
+            h("label", null, "First number ", qIn("first", { type: "number", id: "qFirst" }))),
       h("label", { style: "display:block;margin-top:10px" }, "Shelves on each unit ",
         qIn("shelves", { type: "text", id: "qShelves", style: "width:160px" }),
-        h("div", { class: "small muted" }, "One number if they're all the same (4), or one per unit, top to bottom of the walking order (3, 2, 4).")),
-      h("div", { style: "margin-top:10px" },
-        h("label", { style: "display:block;padding:4px 0" }, h("input", { type: "radio", name: "qlet", checked: quick.letters, onchange: () => { quick.letters = true; } }),
-          " Shelf letters: top shelf A, next B… (1A 2A 3A on top, 1B 2B 3B below)"),
-        h("label", { style: "display:block;padding:4px 0" }, h("input", { type: "radio", name: "qlet", checked: !quick.letters, onchange: () => { quick.letters = false; } }),
-          " Plain numbers that keep counting (1–10 on top, 11–20 below)")),
+        h("div", { class: "small muted" }, quick.style === "aisle"
+          ? "One number if they're all the same (4), or one per shelving unit in order: aisle A's units, then aisle B's… (3, 2, 4, 3)."
+          : "One number if they're all the same (4), or one per unit, in walking order (3, 2, 4).")),
+      h("p", { class: "small muted", style: "margin:10px 0 0" }, quick.style === "aisle"
+        ? "Each aisle counts its boxes from 1: top shelf left to right, then the next shelf down, then the next unit. If the real numbers run differently, fix those shelves below."
+        : quick.style === "shelf" ? "Top shelf is A, the next B… (1A 2A 3A on top, 1B 2B 3B below)." : "Numbers keep counting: 1–10 on the top shelf, 11–20 below…"),
       h("div", { class: "row", style: "margin-top:10px" },
         h("button", { class: "btn", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace your whole map?", () => {
-          const n = Math.max(1, quick.units | 0);
+          const n = quick.style === "aisle" ? Math.max(1, quick.aisles | 0) * Math.max(1, quick.perAisle | 0) : Math.max(1, quick.units | 0);
           const list = String(quick.shelves).split(/[^\d]+/).filter(Boolean).map(x => Math.max(1, parseInt(x, 10)));
           const shelvesPer = Array.from({ length: n }, (_, i) => list.length ? (list[i] ?? list[list.length - 1]) : 4);
-          settings.units = makeUnits(shelvesPer, Math.max(1, quick.per | 0), quick.first | 0, quick.letters);
+          const per = Math.max(1, quick.per | 0);
+          settings.units = quick.style === "aisle"
+            ? makeAisleUnits(Math.max(1, quick.aisles | 0), Math.max(1, quick.perAisle | 0), shelvesPer, per)
+            : makeUnits(shelvesPer, per, quick.first | 0, quick.style === "shelf");
           settings.walk = settings.units.map(u => u.id); changed(true); toast("Map built.");
         }) }, "Build this map"))),
     h("section", { class: "card" },
       h("h2", null, "Your shelving units"),
-      h("p", { class: "small muted" }, "For each shelf, type its boxes from left to right. Shelf 1 is the top shelf. Use a dash for a run (1A-10A or 1-25), or list them with commas (1A, 2A, 5A). Then choose how to walk that unit."),
+      h("p", { class: "small muted" }, "For each shelf, type its boxes from left to right. Shelf 1 is the top shelf. Use a dash for a run (A1-A10), or list them with commas (A1, A2, A5). Then choose how to walk that unit."),
       h("div", { id: "checks" }),
       settings.units.map((u, ui) => unitCard(u, ui)),
       h("button", { class: "btn secondary", type: "button", onclick: () => {
@@ -1106,7 +1138,7 @@ function renderSettings() {
     h("section", { class: "card" },
       h("h2", null, "Find a box"),
       h("p", { class: "small muted" }, "Type a box number to see where your map puts it."),
-      h("div", { class: "row" }, h("input", { type: "text", id: "probe", placeholder: "e.g. 12B", style: "width:120px", oninput: renderChecks }), h("span", { id: "probeOut" }))),
+      h("div", { class: "row" }, h("input", { type: "text", id: "probe", placeholder: "e.g. A14", style: "width:120px", oninput: renderChecks }), h("span", { id: "probeOut" }))),
     ...(!inApp && !inClaude ? [h("section", { class: "card" },
       h("h2", null, "Get the app"),
       h("p", { class: "small muted" }, "iPhone or iPad: open this page in Safari, tap Share, then Add to Home Screen. It then opens like an app and works without internet."),
@@ -1161,7 +1193,7 @@ function unitCard(u, ui) {
       showCount();
       return h("div", { class: "shelf-row" },
         h("span", { class: "lbl" }, si === 0 ? "Shelf 1 (top)" : si === u.shelves.length - 1 ? `Shelf ${si + 1} (bottom)` : `Shelf ${si + 1}`),
-        h("input", { type: "text", value: s.boxes, placeholder: "1A-10A", "aria-label": `Boxes on shelf ${si + 1}`, style: "flex:1;min-width:140px",
+        h("input", { type: "text", value: s.boxes, placeholder: "A1-A10", "aria-label": `Boxes on shelf ${si + 1}`, style: "flex:1;min-width:140px",
           oninput: e => { s.boxes = e.target.value; showCount(); changed(false); } }),
         count,
         h("button", { class: "btn secondary small", type: "button", "aria-label": "Remove shelf", onclick: () => { u.shelves.splice(si, 1); changed(true); } }, "✕"));
