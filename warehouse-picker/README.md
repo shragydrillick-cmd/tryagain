@@ -71,3 +71,38 @@ in any order.
 The page loads two free helper libraries the first time (for making PDFs and
 for reading Excel files). After that the browser usually caches them. CSV
 files and the Print button work without them.
+
+## Android app (APK)
+
+`android/` is a small Android app that shows this same page, built in, with no
+internet needed and no internet permission. Everything stays on the phone:
+
+- The shelf setup is saved in a file inside the app's private storage. It stays
+  through restarts and app updates. It's only removed if the app is uninstalled
+  or its data is cleared in Android settings. "Settings → Save settings file"
+  makes a backup copy.
+- PDFs are saved to **Downloads › Pick and Sort** (Android 10+) and opened in the
+  phone's PDF viewer, where they can be printed or shared.
+- Works on Android 8.0 and newer.
+
+### Building it
+
+Needs Java 17+ and the Android SDK (platform 35, build-tools 35).
+
+1. Put the signing key details in `android/keystore.properties` (never commit it):
+
+   ```
+   storeFile=/path/to/pick-and-sort.jks
+   storePassword=...
+   keyAlias=picksort
+   keyPassword=...
+   ```
+
+2. `cd android && ./gradlew assembleRelease`
+3. The app is at `android/app/build/outputs/apk/release/app-release.apk`.
+
+The build copies `../index.html` into the app automatically, so changes to the
+page show up in the next build. **Always sign updates with the same key**:
+Android refuses an update signed with a different key, and the only way round
+that is uninstalling, which erases the saved shelf setup. For an update, also
+raise `versionCode` in `android/app/build.gradle`.

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A checklist: three ticked boxes with lines. Drawn inside the icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:fillColor="#00000000"
+        android:pathData="M35,35h10v10h-10z M35,49h10v10h-10z M35,63h10v10h-10z" />
+    <path android:strokeColor="#FFE27A" android:strokeWidth="3" android:fillColor="#00000000"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M37,40l2.5,2.5l4.5,-5 M37,54l2.5,2.5l4.5,-5" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="4" android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M52,40h22 M52,54h22 M52,68h16" />
+</vector>

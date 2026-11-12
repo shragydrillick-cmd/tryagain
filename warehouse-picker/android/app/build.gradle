@@ -1,0 +1,63 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Signing key details live in android/keystore.properties, which is never committed.
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) { keystorePropsFile.withInputStream { keystoreProps.load(it) } }
+
+android {
+    namespace 'com.picksort.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.picksort.app'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (keystorePropsFile.exists()) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // The page itself comes from warehouse-picker/index.html (the same file as the web version).
+    sourceSets.main.assets.srcDirs += "$buildDir/generated/webapp"
+}
+
+// Copy the web page into the app, pointing it at the bundled libraries instead of the internet.
+tasks.register('copyWebApp', Copy) {
+    from(rootProject.file('../index.html'))
+    into("$buildDir/generated/webapp/www")
+    filter { String line ->
+        line.replace('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'vendor/jspdf.umd.min.js')
+            .replace('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'vendor/xlsx.full.min.js')
+    }
+}
+preBuild.dependsOn copyWebApp
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+    implementation 'androidx.core:core:1.13.1'
+}

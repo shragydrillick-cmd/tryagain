@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's own phone backup / phone-to-phone transfer may include the saved shelf setup (Android 12+). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="settings.json" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="settings.json" />
+    </device-transfer>
+</data-extraction-rules>
