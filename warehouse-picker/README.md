@@ -79,9 +79,20 @@ on the map yet are marked "not on map" and still listed by aisle and number.
 
 ## Setting up the shelves and the picking order
 
-**Shelves (how they really are).** For each shelf, type its boxes in number
-order (`A1-A50`) and tap the arrow to say which end the first number is on
-(**A1 on the left** or **A1 on the right**). Each shelf can be different.
+**Aisles (how they really are).** Each aisle is one shelving unit with one
+letter, and its boxes are numbered across all its shelves (A1–A10 on the top
+shelf, A11–A20 on the next…). For each aisle fill in:
+
+- **Aisle letter**, **Shelves**, **Boxes per shelf** (one number, or one per
+  shelf from the top when they differ: `10, 10, 12, 8`), **First number**
+- **Numbers run** left → right or right → left
+- **Numbering starts on** the top shelf or the bottom shelf
+
+The app works out every shelf's boxes and shows them ("A1 – A50"). **Quick
+setup** makes several aisles (A, B, C…) the same way in one go; **Make a map
+from my bins** fills in each aisle's first and last box from your files. For an
+odd aisle, "Edit the shelves one by one" lets you type each shelf's boxes and
+which end its first number is on.
 
 **Picking order (per unit, or once for every unit):**
 
