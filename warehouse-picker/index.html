@@ -65,6 +65,13 @@ textarea { width: 100%; min-height: 140px; font-family: ui-monospace, Menlo, Con
 .notice { border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: 15px; }
 .notice.warn { background: var(--warn-soft); color: var(--warn); }
 .notice.good { background: var(--good-soft); color: var(--good); }
+.notice.bad { background: var(--warn-soft); color: var(--danger); border: 1px solid var(--danger); font-weight: 700; }
+.reviewcard { border: 2px solid var(--warn); border-radius: 12px; padding: 12px; margin: 10px 0; background: var(--card); }
+.reviewcard ul.probs { margin: 6px 0; padding-left: 20px; color: var(--danger); font-size: 15px; }
+.fixrow { display: grid; grid-template-columns: 1fr 1fr 64px 56px auto; gap: 6px; margin: 4px 0; align-items: center; }
+.fixrow input { min-width: 0; width: 100%; padding: 6px; }
+.fixrow input.missing { border: 2px solid var(--danger); background: var(--warn-soft); }
+@media (max-width: 480px) { .fixrow { grid-template-columns: 1fr 64px 56px auto; } .fixrow .fixdet { grid-column: 1 / 2; grid-row: 2; } }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 8px 0 12px; }
 .stat { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; }
 .stat b { display: block; font-size: 24px; }
@@ -201,6 +208,7 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
     <p class="muted small" id="fileName"></p>
     <div class="stats" id="stats"></div>
     <div id="warnings"></div>
+    <div id="review"></div>
     <div class="no-print" style="margin-bottom:6px">
       <div class="grp"><b>Pick</b>
         <button class="btn" id="pdfPick" type="button">&#11015; PDF</button>
@@ -438,7 +446,7 @@ function parseSlips(pages) {
           name: cut > 0 ? nameText.slice(0, cut).trim() : nameText,
           details: cut > 0 ? nameText.slice(cut + 3).trim() : "",
           sku, barcode,
-          bin: g.m.bin ? normBox(g.m.bin) : "", qty: g.m.qty == null ? 1 : g.m.qty,
+          bin: g.m.bin ? normBox(g.m.bin) : "", qty: g.m.qty == null ? 1 : g.m.qty, qtyMissing: g.m.qty == null,
         });
       });
       left.length = 0; bins.length = 0; qtys.length = 0;
@@ -458,13 +466,16 @@ function parseSlips(pages) {
       if (binP) heads.bin = { x: binP.x + binP.w / 2, y: l.y };
       if (qtyP) heads.qty = { x: qtyP.x + qtyP.w / 2, y: l.y };
       if ((binP || qtyP) && heads.bin && heads.qty && Math.abs(heads.bin.y - heads.qty.y) < 20) {
-        cols = { bin: heads.bin.x, qty: heads.qty.x }; heads.bin = heads.qty = null; inItems = true; return;
+        cols = { bin: heads.bin.x, qty: heads.qty.x }; heads.bin = heads.qty = null; inItems = true;
+        if (!cur || cur.total != null) { cur = { order: "", items: [], total: null, page: pi + 1, noNumber: true }; orders.push(cur); } // a new slip without an order number
+        return;
       }
       if (binP || qtyP) return;
       const tm = l.text.match(/total\s+items\s*:?\s*(\d+)/i);
       if (tm) { finishItems(); if (cur) cur.total = parseInt(tm[1], 10); inItems = false; return; }
-      if (!cols || !cur) return;
-      if (!inItems && pi + 1 > cur.page && !om) inItems = true; // slip carries on onto the next page
+      if (!cols) return;
+      if (!cur || cur.total != null) { if (!inItems) return; cur = { order: "", items: [], total: null, page: pi + 1, noNumber: true }; orders.push(cur); } // items but no order number
+      if (!inItems && pi + 1 > cur.page && !om && cur.total == null) inItems = true; // slip carries on onto the next page
       if (!inItems) return;
       if (/^items$/i.test(l.text)) return;
       const edge = Math.min(cols.bin, cols.qty) - 40;
@@ -477,22 +488,37 @@ function parseSlips(pages) {
     });
     finishItems();
   });
-  // check every slip against its "Total items"
-  orders.forEach(o => {
-    const got = o.items.reduce((a, it) => a + it.qty, 0);
-    if (o.total != null && got !== o.total) warnings.push(`Order ${o.order}: read ${got} item${got === 1 ? "" : "s"} but the slip says Total items: ${o.total}. Check this slip by hand.`);
-    if (o.total == null) warnings.push(`Order ${o.order}: couldn't find "Total items" to check against.`);
-    o.items.filter(it => !it.bin).forEach(it => warnings.push(`Order ${o.order}: no bin found for ${it.name || it.sku}.`));
-  });
-  return { orders: orders.filter(o => o.items.length), warnings, checked: orders.filter(o => o.total != null && o.items.reduce((a, it) => a + it.qty, 0) === o.total).length, all: orders.length };
+  // the same order printed twice? keep the first, and ask about the copy
+  const seen = new Map();
+  orders.forEach(o => { if (!o.order) return; if (seen.has(o.order)) o.dupOf = seen.get(o.order); else seen.set(o.order, o); });
+  const kept = orders.filter(o => o.items.length || o.total != null);
+  return { orders: kept, warnings, pages: pages.length, all: kept.filter(o => !o.dupOf).length,
+    checked: kept.filter(o => !o.dupOf && o.total != null && o.items.reduce((a, it) => a + it.qty, 0) === o.total).length };
 }
 /** Turn read slips into order lines. Items without a bin use the inventory (by SKU) if there is one. */
 function slipsToLines(parsed) {
   const lines = [];
   parsed.orders.forEach(o => o.items.forEach(it => {
-    lines.push({ order: o.order, box: it.bin || "?", code: it.sku || it.barcode, name: it.name, details: it.details, qty: it.qty });
+    lines.push({ order: o.order, box: it.bin || "?", code: it.sku || it.barcode, name: it.name, details: it.details, qty: it.qty,
+      qtyMissing: !!it.qtyMissing, slip: o });
   }));
   return lines;
+}
+/** Everything about one slip that needs a person to look at it ([] = all fine). */
+function slipProblems(o, lines) {
+  const out = [];
+  if (o.dupOf) out.push(`This order is in the files twice. Only the first copy is used, unless you keep both.`);
+  if (!o.order) out.push(`No order number found (page ${o.page}). Type it in.`);
+  const got = lines.reduce((a, l) => a + (Number(l.qty) || 0), 0);
+  if (o.total == null) out.push(`No "Total items" found on the slip, so the count couldn't be checked.`);
+  else if (got !== o.total) out.push(`Read ${got} item${got === 1 ? "" : "s"}, but the slip says Total items: ${o.total}.`);
+  lines.forEach(l => {
+    const what = l.name || l.code || "an item";
+    if (!l.name) out.push(`An item has no name${l.code ? ` (code ${l.code})` : ""}.`);
+    if (!l.box || l.box === "?") out.push(`No bin for ${what}.`);
+    if (l.qtyMissing) out.push(`No quantity found for ${what}; it's set to 1.`);
+  });
+  return out;
 }
 let pdfjsReady = null;
 function loadScript(src) {
@@ -916,7 +942,14 @@ function useSlips(parsed, name) {
   if (noBin.length && inv && inv.rows && inv.rows.length) { // fill missing bins from the inventory by SKU
     missing = applyInventory(noBin, inv);
   }
-  current = { lines, warnings: parsed.warnings, name, src: null, slips: { all: parsed.all, checked: parsed.checked }, usedInventory: false, missing };
+  // slips to check: anything missing, unsure, or not adding up
+  const review = parsed.orders.map(o => {
+    const ls = lines.filter(l => l.slip === o);
+    return slipProblems(o, ls).length ? { slip: o, done: false, keepBoth: false } : null;
+  }).filter(Boolean);
+  const dupLines = new Set(lines.filter(l => l.slip.dupOf)); // copies are left out until "keep both"
+  current = { lines: lines.filter(l => !dupLines.has(l)), parked: [...dupLines], warnings: parsed.warnings, name, src: null,
+    slips: { all: parsed.all, checked: parsed.checked, pages: parsed.pages }, review, usedInventory: false, missing };
   showResults();
 }
 function showResults() {
@@ -1029,6 +1062,63 @@ $("invExampleBtn").onclick = () => {
 };
 $("templateBtn").onclick = () => download(new Blob(["Order,Box,Item,Details,Qty\n"], { type: "text/csv" }), "orders-template.csv");
 
+/* ---------- checking slips the app wasn't sure about ---------- */
+function renderReview() {
+  const box = $("review"); box.replaceChildren();
+  const list = (current && current.review) || [];
+  if (!list.length) return;
+  const open = list.filter(r => !r.done);
+  box.append(h("h3", null, open.length ? "Check these" : "Checked"));
+  list.forEach(r => box.append(r.done ? h("div", { class: "small muted", style: "margin:4px 0" }, `✓ Order ${r.slip.order ? "#" + r.slip.order : "(page " + r.slip.page + ")"} checked`) : reviewCard(r)));
+}
+function reviewCard(r) {
+  const o = r.slip;
+  const lines = () => current.lines.filter(l => l.slip === o).concat(r.keepBoth ? [] : (current.parked || []).filter(l => l.slip === o));
+  const probs = h("ul", { class: "probs" });
+  const count = h("div", { class: "small", style: "margin:6px 0" });
+  const refresh = () => {
+    probs.replaceChildren(...slipProblems(o, lines()).map(t => h("li", null, t)));
+    const got = lines().reduce((a, l) => a + (Number(l.qty) || 0), 0);
+    count.textContent = o.total != null ? `Items now: ${got} of ${o.total}${got === o.total ? " ✓" : ""}` : `Items now: ${got}`;
+  };
+  const rows = h("div");
+  const drawRows = () => rows.replaceChildren(...lines().map(l => h("div", { class: "fixrow" },
+    h("input", { type: "text", value: l.name, placeholder: "Item name", "aria-label": "Item name", class: "fixname",
+      onchange: e => { l.name = e.target.value.trim(); refresh(); } }),
+    h("input", { type: "text", value: l.details || "", placeholder: "Colour / size", "aria-label": "Colour or size", class: "fixdet",
+      onchange: e => { l.details = e.target.value.trim(); } }),
+    h("input", { type: "text", value: l.box === "?" ? "" : l.box, placeholder: "Bin", "aria-label": "Bin", class: "fixbin" + (!l.box || l.box === "?" ? " missing" : ""),
+      onchange: e => { l.box = normBox(e.target.value) || "?"; e.target.classList.toggle("missing", l.box === "?"); refresh(); } }),
+    h("input", { type: "number", min: 0, value: l.qty, "aria-label": "Quantity", class: "fixqty" + (l.qtyMissing ? " missing" : ""),
+      onchange: e => { l.qty = Math.max(0, parseInt(e.target.value, 10) || 0); l.qtyMissing = false; e.target.classList.remove("missing"); refresh(); } }),
+    h("button", { class: "btn secondary small", type: "button", "aria-label": "Remove this item", onclick: () => {
+      current.lines = current.lines.filter(x => x !== l); if (current.parked) current.parked = current.parked.filter(x => x !== l); drawRows(); refresh(); } }, "✕"))));
+  drawRows(); refresh();
+  return h("div", { class: "reviewcard" },
+    h("div", { class: "row", style: "justify-content:space-between" },
+      o.order ? h("b", null, `Order #${o.order}`) : h("label", null, h("b", null, "Order # "),
+        h("input", { type: "text", placeholder: "type it", style: "width:120px", onchange: e => { o.order = e.target.value.trim(); lines().forEach(l => l.order = o.order); refresh(); } })),
+      h("span", { class: "small muted" }, `page ${o.page}`)),
+    probs,
+    o.dupOf ? h("div", { class: "row", style: "margin:6px 0" },
+      h("button", { class: "btn secondary small", type: "button", onclick: e => {
+        r.keepBoth = !r.keepBoth;
+        if (r.keepBoth) { current.lines.push(...current.parked.filter(l => l.slip === o)); current.parked = current.parked.filter(l => l.slip !== o); }
+        else { const back = current.lines.filter(l => l.slip === o); current.lines = current.lines.filter(l => l.slip !== o); current.parked.push(...back); }
+        e.currentTarget.textContent = r.keepBoth ? "Use it only once" : "It's really two orders: keep both";
+        drawRows(); refresh(); } }, "It's really two orders: keep both")) : null,
+    h("div", { class: "small muted" }, "Item · colour/size · bin · quantity"),
+    rows, count,
+    h("div", { class: "row" },
+      h("button", { class: "btn secondary small", type: "button", onclick: () => {
+        current.lines.push({ order: o.order, box: "?", code: "", name: "", details: "", qty: 1, slip: o });
+        drawRows(); refresh(); } }, "+ Add a missing item"),
+      h("button", { class: "btn small", type: "button", onclick: () => {
+        const left = slipProblems(o, lines()).filter(t => !/twice/.test(t) && !/couldn't be checked/.test(t));
+        if (left.length && !r.forceAsk) { r.forceAsk = true; toast("Still not complete. Tap Confirmed again if it's right as it is."); return; }
+        r.done = true; rebuild(); } }, "Confirmed ✓")));
+}
+
 /* ---------- results ---------- */
 let pickedDone = new Set(), unpackDone = new Set(); // ticked lines (by step number)
 function rebuild() {
@@ -1043,10 +1133,11 @@ function rebuild() {
     h("div", { class: "stat" }, h("b", null, new Set(plan.picks.map(p => p.box)).size), "boxes to visit"));
   const w = $("warnings"); w.replaceChildren();
   if (current.slips) {
-    const sl = current.slips, ok = sl.checked === sl.all;
-    w.append(h("div", { class: `notice ${ok ? "good" : "warn"}` }, ok
-      ? `✓ Read ${sl.all} packing slip${sl.all === 1 ? "" : "s"}. Every slip's items add up to its "Total items".`
-      : `Read ${sl.all} packing slips; ${sl.checked} add up to their "Total items". Check the ones listed below.`));
+    const sl = current.slips, open = (current.review || []).filter(r => !r.done).length;
+    w.append(h("div", { class: "notice good" }, `Read ${sl.all} packing slip${sl.all === 1 ? "" : "s"} from ${sl.pages} page${sl.pages === 1 ? "" : "s"}.`));
+    w.append(open
+      ? h("div", { class: "notice bad" }, `⚠ ${open} slip${open === 1 ? " needs" : "s need"} checking before you pick. See "Check these" below.`)
+      : h("div", { class: "notice good" }, (current.review || []).length ? "✓ Everything checked." : `✓ Every slip's items add up to its "Total items". Nothing missing.`));
   }
   if (current.usedInventory) w.append(h("div", { class: "notice good" }, `Bins looked up in your inventory (${settings.inventory.name}).`));
   if (current.missing && current.missing.length) w.append(h("div", { class: "notice warn" },
@@ -1058,6 +1149,7 @@ function rebuild() {
   if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.slips
     ? current.warnings.map(t => h("div", null, "• " + t))
     : [current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""]));
+  renderReview();
   renderPick(); renderUnpack(); renderKey();
 }
 
@@ -1098,7 +1190,7 @@ function renderPick() {
     g.items.forEach((p, i) => {
       const tr = h("tr", { class: pickedDone.has(p.step) ? "done" : "" },
         i === 0 ? h("td", { class: "box" + (g.items.length > 1 ? " multi" : ""), rowspan: g.items.length }, g.box,
-          h("span", { class: "where" }, g.loc ? shelfText(g.loc) : g.box === "?" ? "not in inventory" : "not on map")) : null,
+          h("span", { class: "where" }, g.loc ? shelfText(g.loc) : g.box === "?" ? (current.slips ? "no bin" : "not in inventory") : "not on map")) : null,
         h("td", null, h("input", { type: "checkbox", "aria-label": `Picked ${itemName(p)}`, checked: pickedDone.has(p.step),
           onchange: e => { e.target.checked ? pickedDone.add(p.step) : pickedDone.delete(p.step); tr.className = e.target.checked ? "done" : ""; } })),
         h("td", { class: "big" }, `${p.qty}×`),

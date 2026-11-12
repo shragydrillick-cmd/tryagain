@@ -8,3 +8,8 @@ quantity with what was printed. It prints `mistakes: 0` when everything matches.
 
     cd warehouse-picker && python3 -m http.server 8765 &
     node tests/slip-reading.test.js   # needs Playwright (npm i playwright)
+
+`check-these.test.js` makes slips with problems (wrong total, missing bin,
+missing quantity, no "Total items", an order printed twice, a page with no
+order number), checks each is flagged under "Check these", fixes them the way
+a person would, and checks the lists afterwards.
