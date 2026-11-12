@@ -1,0 +1,99 @@
+# Builds the Pick & Sort apps whenever warehouse-picker/ changes.
+#  - iOS: builds on a Mac, runs an automatic check in the iPhone simulator, and
+#    uploads an unsigned .ipa (to be signed with an Apple account to install).
+#  - Android: checks that the app builds. (The signed APK is built with the
+#    private signing key, which is not stored on GitHub.)
+name: Pick & Sort apps
+
+on:
+  push:
+    paths:
+      - "warehouse-picker/**"
+      - ".github/workflows/pick-and-sort-apps.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: warehouse-picker/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Copy the page into the app
+        run: ./prepare-web.sh
+
+      - name: Create the Xcode project
+        run: xcodegen generate
+
+      - name: Build for iPhone (unsigned)
+        run: |
+          xcodebuild -project PickAndSort.xcodeproj -scheme PickAndSort -configuration Release \
+            -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -n 30
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/PickAndSort.app Payload/
+          zip -qry PickAndSort-unsigned.ipa Payload
+          ls -la PickAndSort-unsigned.ipa
+
+      - name: Build for the iPhone simulator
+        run: |
+          xcodebuild -project PickAndSort.xcodeproj -scheme PickAndSort -configuration Debug \
+            -sdk iphonesimulator -derivedDataPath simbuild CODE_SIGNING_ALLOWED=NO build | tail -n 5
+
+      - name: Run the automatic check in the simulator
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)['devices']
+          print(next(x['udid'] for k, v in sorted(d.items(), reverse=True) if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          echo "Simulator: $DEVICE"
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl install "$DEVICE" simbuild/Build/Products/Debug-iphonesimulator/PickAndSort.app
+          xcrun simctl launch --console-pty "$DEVICE" com.picksort.app -selftest > console.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 60); do grep -q "SELFTEST OK\|SELFTEST FAIL" console.log && break; sleep 2; done
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot simulator.png || true
+          kill $PID 2>/dev/null || true
+          echo "----- app output -----"; grep SELFTEST console.log || cat console.log
+          grep -q "SELFTEST OK" console.log
+          grep -q "SELFTEST-FILE pick-list" console.log
+          grep -q "SELFTEST-FILE unpack-list" console.log
+          grep -q "SELFTEST-SETTINGS" console.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PickAndSort-iOS-unsigned
+          path: warehouse-picker/ios/PickAndSort-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iOS-simulator-screenshot
+          path: warehouse-picker/ios/simulator.png
+          if-no-files-found: ignore
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: warehouse-picker/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build (unsigned check)
+        run: ./gradlew assembleRelease --no-daemon

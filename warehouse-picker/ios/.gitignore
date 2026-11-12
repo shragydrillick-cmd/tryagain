@@ -1,0 +1,7 @@
+Resources/www/
+Sources/Info.plist
+*.xcodeproj/
+build/
+simbuild/
+Payload/
+*.ipa

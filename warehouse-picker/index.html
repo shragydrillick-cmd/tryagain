@@ -489,18 +489,19 @@ function fixSettings(s) {
   return s;
 }
 const STORE_KEY = "pick-and-sort-settings-v2";
-/* Inside the Android app, window.AndroidApp is the phone itself: settings are kept
-   in a file on the phone, which stays until the app is uninstalled. */
-const inApp = !!window.AndroidApp;
+/* Inside the Android or iPhone app, window.NativeApp is the phone itself: settings are
+   kept in a file on the phone, which stays until the app is uninstalled. */
+const nativeApp = window.NativeApp || window.AndroidApp;
+const inApp = !!nativeApp;
 function loadSettings() {
-  try { const raw = inApp && window.AndroidApp.readSettings(); if (raw) return fixSettings(JSON.parse(raw)); } catch (e) {}
+  try { const raw = inApp && nativeApp.readSettings(); if (raw) return fixSettings(JSON.parse(raw)); } catch (e) {}
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) return fixSettings(JSON.parse(raw)); } catch (e) {}
   return defaultSettings();
 }
 function saveSettings() {
   const json = JSON.stringify(settings);
   try { localStorage.setItem(STORE_KEY, json); } catch (e) {}
-  try { if (inApp) window.AndroidApp.writeSettings(json); } catch (e) {}
+  try { if (inApp) nativeApp.writeSettings(json); } catch (e) {}
 }
 
 /* =====================================================================
@@ -543,7 +544,7 @@ async function download(blob, name) {
   if (inApp) { // hand the file to the phone: it's saved to Downloads and opened
     const b64 = await new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.onerror = fail; r.readAsDataURL(blob); });
     const mime = /\.pdf$/i.test(name) ? "application/pdf" : /\.csv$/i.test(name) ? "text/csv" : /\.json$/i.test(name) ? "application/json" : "application/octet-stream";
-    try { window.AndroidApp.saveFile(name, mime, b64); } catch (e) { toast("Couldn't save the file: " + e.message); }
+    try { nativeApp.saveFile(name, mime, b64); } catch (e) { toast("Couldn't save the file: " + e.message); }
     return;
   }
   if (inClaude) {
