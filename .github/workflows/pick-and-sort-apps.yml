@@ -170,6 +170,12 @@ jobs:
           name: PickAndSort-Android
           path: warehouse-picker/web/dist
 
+      - name: Use the last signed APK if this build couldn't sign one
+        run: |
+          if [ ! -f warehouse-picker/web/dist/PickAndSort.apk ] && [ -f warehouse-picker/downloads/PickAndSort.apk ]; then
+            cp warehouse-picker/downloads/PickAndSort.apk warehouse-picker/web/dist/PickAndSort.apk
+          fi
+
       - name: Publish to the gh-pages branch
         working-directory: warehouse-picker/web/dist
         env:
