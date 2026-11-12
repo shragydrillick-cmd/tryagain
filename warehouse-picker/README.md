@@ -132,3 +132,21 @@ An iPhone only installs an app that's been signed with an Apple account:
 
 To build on a Mac yourself: `brew install xcodegen`, then in `ios/` run
 `./prepare-web.sh && xcodegen generate` and open `PickAndSort.xcodeproj` in Xcode.
+
+## Website you host yourself (installable, works offline)
+
+`web/build.sh` builds `web/dist/`: the same page plus what a phone needs to
+install it to the home screen and keep working with no internet (a manifest,
+icons and a service worker that stores the app on the device). Host `web/dist`
+on any free static host: GitHub Pages, Render, Netlify...
+
+- **iPhone:** open the link in Safari → Share → **Add to Home Screen**.
+- **Android:** open it in Chrome → menu → **Install app** / **Add to Home screen**.
+
+Data (shelf setup, orders) stays in that phone's storage; the website only
+delivers the app. On iPhone the home-screen app keeps its own storage, separate
+from Safari, so set it up (or load a settings file) after adding it. PDFs open
+the iPhone share menu (Save to Files, Print).
+
+Render: New → Static Site → this repo, build command
+`sh warehouse-picker/web/build.sh`, publish directory `warehouse-picker/web/dist`.

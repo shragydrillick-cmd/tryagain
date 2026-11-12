@@ -555,6 +555,16 @@ async function download(blob, name) {
       return;
     }
   }
+  // iPhone / iPad: the share menu (Save to Files, Print, AirDrop...) works where downloads don't.
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isIOS && navigator.canShare) {
+    const type = blob.type || (/\.pdf$/i.test(name) ? "application/pdf" : /\.csv$/i.test(name) ? "text/csv" : "application/json");
+    const file = new File([blob], name, { type });
+    if (navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); } catch (e) { if (e && e.name !== "AbortError") toast("Couldn't share the file."); }
+      return;
+    }
+  }
   const url = URL.createObjectURL(blob);
   const a = h("a", { href: url, download: name });
   document.body.append(a); a.click(); a.remove();
