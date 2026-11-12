@@ -115,6 +115,15 @@ Settings opens with two buttons:
   changes just that one box. Every shelf end has − / + to nudge it by one. Shelves of different lengths are
   worked out from the numbers (e.g. 33 boxes on each shelf but the bottom one has
   32, so it ends a column early), and the app notes which shelves are shorter.
+  It only asks about lengths when something is unusual: the last shelf in number
+  order ending early (1–5, 6–10, 11–14) is fine as it is; a shorter shelf
+  anywhere else gets "Is that right?"; a gap (1–5, then 7…) gets "Where is C6?".
+  **Wide boxes:** a box that takes up two spaces is allowed. When every shelf
+  reaches the end but there's one box fewer than that needs, the app asks
+  "Which box is the wide one?" (type it, e.g. C57, or tap "No box is wide"); when
+  a shelf has one box fewer it offers "No, one of its boxes is wide". The map
+  then shows that box two spaces wide (C57 ↔), and the picking order and the
+  picture of it follow.
 - **Order**: which aisle first, how to pick (for every aisle at once, or one
   aisle only), with a picture of the picking order.
 

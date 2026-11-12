@@ -327,20 +327,22 @@ const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeri
  * "1A-10A" -> 1A,2A..10A   "A1-A5" -> A1..A5   "1-25" -> 1..25   "1A, 3A, 7C" -> as written
  */
 function expandBoxes(text) {
-  const out = [], errors = [];
+  const out = [], errors = [], slots = []; // slots: the spaces in a row; null = the second space of a wide box
+  const push = c => { out.push(c); slots.push(c); };
   String(text || "").split(/[,;\n]+/).map(t => t.trim()).filter(Boolean).forEach(part => {
+    if (part === "_") { slots.push(null); return; }
     // a run (A1-A10), optionally every Nth number (C1-C46/5 = C1, C6, C11 … C46)
     const m = part.replace(/\s+/g, "").toUpperCase().match(/^([A-Z]*)(\d+)([A-Z]*)(?:-|–|TO)([A-Z]*)(\d+)([A-Z]*)(?:\/(\d+))?$/);
     if (m && m[1] === m[4] && m[3] === m[6]) {
       const a = parseInt(m[2], 10), b = parseInt(m[5], 10), by = Math.max(1, parseInt(m[7] || "1", 10)), step = b >= a ? by : -by;
       if (Math.abs(b - a) > 5000) { errors.push(`"${part}" is too long a range.`); return; }
       if ((b - a) % by) { errors.push(`"${part}": ${b} isn't reached counting by ${by} from ${a}.`); return; }
-      for (let n = a; ; n += step) { out.push(`${m[1]}${n}${m[3]}`); if (n === b) break; }
+      for (let n = a; ; n += step) { push(`${m[1]}${n}${m[3]}`); if (n === b) break; }
     } else if (m) {
       errors.push(`"${part}": both ends of a range need the same letters (like 1A-10A).`);
-    } else out.push(normBox(part));
+    } else push(normBox(part));
   });
-  return { boxes: out, errors };
+  return { boxes: out, slots, errors };
 }
 
 function findHeader(row) {
@@ -642,8 +644,10 @@ function rowsToLines(rows, format) {
 /** A shelf's boxes from left to right. Boxes are typed in number order (A1-A50);
     shelf.rtl means the numbers start at the right-hand end. */
 function shelfBoxes(sh) {
-  const r = expandBoxes(sh.boxes);
-  return { boxes: sh.rtl ? r.boxes.slice().reverse() : r.boxes, errors: r.errors, first: r.boxes[0] };
+  const r = expandBoxes(sh.boxes), cells = []; // a wide box is one cell two spaces wide
+  r.slots.forEach(c => { if (c == null) { if (cells.length) cells[cells.length - 1].span++; } else cells.push({ code: c, span: 1 }); });
+  if (sh.rtl) cells.reverse();
+  return { boxes: cells.map(c => c.code), cells, width: cells.reduce((a, c) => a + c.span, 0), errors: r.errors, first: r.boxes[0] };
 }
 /** Map every box code to its place in the walk. Returns {locate, problems, size}. */
 function buildLocator(settings) {
@@ -654,12 +658,13 @@ function buildLocator(settings) {
     const S = u.shelves.length;
     const block = Math.max(1, parseInt(u.block, 10) || 5);
     u.shelves.forEach((sh, s) => {
-      const { boxes, errors } = shelfBoxes(sh); // left to right, as they really stand
+      const { cells, width: L, errors } = shelfBoxes(sh); // left to right, as they really stand
       errors.forEach(e => problems.push(`${u.name}, shelf ${s + 1}: ${e}`));
-      const L = boxes.length;
-      boxes.forEach((code, p) => {
+      let col = 0;
+      cells.forEach(({ code, span }, p) => {
+        const p0 = col; col += span; // a wide box covers two spaces
         if (map.has(code)) { const o = map.get(code); problems.push(`Box ${code} is on both "${o.unitName}" shelf ${o.shelf} and "${u.name}" shelf ${s + 1}.`); return; }
-        const x = u.dir === "rtl" ? L - 1 - p : p; // how far from the end you start at
+        const x = u.dir === "rtl" ? L - p0 - span : p0; // how far from the end you start at
         let k;
         switch (u.pattern) {
           case "rows-up": { const r = S - 1 - s; k = [r, u.zigzag && r % 2 ? -x : x]; break; }
@@ -806,8 +811,13 @@ function aisleShelves(spec) {
     return ends.map(e => {
       const a = endNumber(e.first), b = endNumber(e.last);
       if (a == null) return { boxes: "", rtl: !!spec.rtl };
-      const rtl = e.rtl != null ? !!e.rtl : !!spec.rtl;
+      const rtl = e.rtl != null ? !!e.rtl : !!spec.rtl, w = endNumber(e.wide || "");
       if (b == null || b === a) return { boxes: `${L}${a}`, rtl };
+      if (by === 1 && w != null && w >= Math.min(a, b) && w <= Math.max(a, b)) { // a wide box: the space after it is empty
+        const lo = Math.min(a, b), hi = Math.max(a, b), list = [];
+        for (let x = lo; x <= hi; x++) { list.push(x); if (x === w) list.push(null); }
+        return { boxes: slotText(L, list), rtl: a > b ? !rtl : rtl };
+      }
       return { boxes: `${L}${a}-${L}${b}${by > 1 ? "/" + by : ""}`, rtl };
     });
   }
@@ -817,9 +827,15 @@ function aisleShelves(spec) {
   let n = specFirst(spec);
   if (spec.vertical) {
     // numbered down each column: 1 on the top (or bottom) shelf, 2 under (or above) it… then the next column
-    const nums = counts.map(() => []);
-    for (let c = 0; c < Math.max(...counts); c++) order.forEach(i => { if (c < counts[i]) nums[i].push(n++); });
-    nums.forEach((list, i) => { shelves[i].boxes = runText(L, list); });
+    // a wide box takes two spaces: the space after it has no number (spec.wide = {shelf: box number})
+    const nums = counts.map(() => []), wide = spec.wide || {}, skip = counts.map(() => -1);
+    for (let c = 0; c < Math.max(...counts); c++) order.forEach(i => {
+      if (c >= counts[i]) return;
+      if (skip[i] === c) { nums[i].push(null); return; }
+      if (wide[i] != null && +wide[i] === n) skip[i] = c + 1;
+      nums[i].push(n++);
+    });
+    nums.forEach((list, i) => { shelves[i].boxes = slotText(L, list); });
     return shelves;
   }
   order.forEach(i => { shelves[i].boxes = `${L}${n}-${L}${n + counts[i] - 1}`; n += counts[i]; });
@@ -831,6 +847,13 @@ function runText(L, list) {
   const d = list[1] - list[0];
   if (list.length > 2 && list.every((x, i) => i === 0 || x - list[i - 1] === d)) return `${L}${list[0]}-${L}${list[list.length - 1]}${d === 1 ? "" : "/" + d}`;
   return list.map(x => `${L}${x}`).join(", ");
+}
+/** Like runText, with "_" for the empty space after a wide box (null in the list). */
+function slotText(L, list) {
+  const parts = []; let seg = [];
+  list.forEach(x => { if (x == null) { if (seg.length) parts.push(runText(L, seg)); seg = []; parts.push("_"); } else seg.push(x); });
+  if (seg.length) parts.push(runText(L, seg));
+  return parts.join(", ");
 }
 /** Shelf text for people: "C1, C6, C11 … C46" rather than "C1-C46/5". */
 function prettyBoxes(text) {
@@ -1666,20 +1689,20 @@ function pickingControls(u, onChange) {
 /** Grid of a unit's boxes as they stand, each with its turn in the picking order. */
 function pickingOrderGrid(u) {
   const loc = buildLocator({ units: [u], walk: [u.id] });
-  const rows = u.shelves.map(sh => shelfBoxes(sh).boxes);
+  const cellRows = u.shelves.map(sh => shelfBoxes(sh).cells), rows = cellRows.map(r => r.map(c => c.code));
   const codes = [...new Set(rows.flat())].filter(c => loc.locate(c));
   if (!codes.length) return h("p", { class: "small muted" }, "Add some boxes to see the order.");
   if (codes.length > 600) return h("p", { class: "small muted" }, "Too many boxes to draw here (over 600).");
   codes.sort((a, b) => compareKeys(loc.locate(a).key, loc.locate(b).key));
   const turn = new Map(codes.map((c, i) => [c, i + 1]));
-  const widest = Math.max(...rows.map(r => r.length));
-  const pad = row => Array.from({ length: widest - row.length }, () => h("td", { class: "gap" })); // line shelves up on the starting side
+  const width = r => r.reduce((a, c) => a + c.span, 0), widest = Math.max(...cellRows.map(width));
+  const pad = row => Array.from({ length: widest - width(row) }, () => h("td", { class: "gap" })); // line shelves up on the starting side
   return h("div", null,
     h("div", { class: "small muted", style: `text-align:${u.dir === "rtl" ? "right" : "left"}` }, u.dir === "rtl" ? "start here ◀" : "▶ start here"),
-    h("div", { class: "gridwrap" }, h("table", { class: "ordergrid" }, rows.map((row, si) => h("tr", null,
+    h("div", { class: "gridwrap" }, h("table", { class: "ordergrid" }, cellRows.map((row, si) => h("tr", null,
       h("th", null, `Shelf ${si + 1}`),
       u.dir === "rtl" ? pad(row) : null,
-      row.map(c => h("td", { class: turn.get(c) <= 3 ? "first" : "" }, h("b", null, turn.get(c) || "–"), h("span", null, c))),
+      row.map(({ code: c, span }) => h("td", { class: turn.get(c) <= 3 ? "first" : "", colspan: span > 1 ? span : null }, h("b", null, turn.get(c) || "–"), h("span", null, span > 1 ? `${c} (wide)` : c))),
       u.dir === "rtl" ? null : pad(row))))),
     h("p", { class: "small muted", style: "margin:4px 0 0" }, "Big number = the turn when picking. Small = the box."));
 }
@@ -1931,6 +1954,9 @@ function backRow(label, page) {
   return h("button", { class: "link backlink", type: "button", onclick: () => go(page) }, `‹ ${label}`);
 }
 const shelfLabel = (i, S) => (i === 0 ? "Top shelf" : i === S - 1 ? "Bottom shelf" : `Shelf ${i + 1}`);
+/** "the top shelf", "shelf 3", "the bottom shelf" (for use inside a sentence) */
+const theShelf = (i, S) => (i === 0 || i === S - 1 ? "the " + shelfLabel(i, S).toLowerCase() : `shelf ${i + 1}`);
+const TheShelf = (i, S) => { const t = theShelf(i, S); return t[0].toUpperCase() + t.slice(1); };
 /** "Aisle C · 6 shelves high · C1 – C96 (96 boxes)" */
 function unitSummary(u) {
   const nums = u.shelves.flatMap(sh => expandBoxes(sh.boxes).boxes);
@@ -2001,6 +2027,7 @@ function blankDraft(base, letter) {
 /** What we know about an existing aisle, as answers to the questions. */
 function draftFromUnit(u) {
   const rows = u.shelves.map(sh => shelfBoxes(sh).boxes);
+  const wideCell = u.shelves.map(sh => shelfBoxes(sh).cells.find(x => x.span > 1)).find(Boolean), wideBox = wideCell ? wideCell.code : null;
   const all = rows.flat(), nums = all.map(endNumber).filter(n => n != null);
   const letter = (u.spec && specLetter(u.spec)) || ((all[0] || "").match(/^[A-Z]*/) || [""])[0];
   const min = nums.length ? Math.min(...nums) : 1;
@@ -2012,7 +2039,7 @@ function draftFromUnit(u) {
       if (!u.spec) vertical = !r.some(c => endNumber(c) === min + 1) && rows.length > 1;
     }
   });
-  return { id: u.id, letter, shelves: rows.length || 1, first: min, start, vertical,
+  return { id: u.id, letter, shelves: rows.length || 1, first: min, start, vertical, wideBox,
     left: rows.map(r => r[0] || ""), right: rows.map(r => r[r.length - 1] || "") };
 }
 function startWizard(mode, u) {
@@ -2073,18 +2100,29 @@ function autofill(d) {
     }
   } else extend("right", null);
 }
-/** Numbers down the columns, shelves of given lengths (top to bottom), lined up at the side
-    where numbering starts: the box number at each shelf's start and far end. */
-function simulateColumns(counts, first, fromBottom) {
-  const S = counts.length, order = [...Array(S).keys()];
+/** Numbers down the columns, shelves of given lengths (top to bottom, in spaces), lined up at the side
+    where numbering starts: the box number at each shelf's start and far end, and every box per shelf.
+    wide[s]: a box on shelf s that takes two spaces (its number, or {col} for "the box in that column");
+    the space after it gets no number. */
+function simulateColumns(counts, first, fromBottom, wide) {
+  const S = counts.length, order = [...Array(S).keys()], w = wide || [];
   if (fromBottom) order.reverse();
-  const start = Array(S), end = Array(S);
+  const start = Array(S), end = Array(S), rows = counts.map(() => []), skip = Array(S).fill(-1);
   let n = first;
   for (let c = 0, W = Math.max(...counts); c < W; c++)
-    for (const s of order) if (c < counts[s]) { if (c === 0) start[s] = n; if (c === counts[s] - 1) end[s] = n; n++; }
-  return { start, end };
+    for (const s of order) {
+      if (c >= counts[s]) continue;
+      if (skip[s] === c) { rows[s].push(null); continue; }
+      if (w[s] != null && (typeof w[s] === "object" ? w[s].col === c : w[s] === n)) skip[s] = c + 1;
+      if (c === 0) start[s] = n;
+      end[s] = n; rows[s].push(n++);
+    }
+  const ok = counts.every((c, s) => w[s] == null || (skip[s] >= 0 && skip[s] < c)); // a wide box sits inside its shelf
+  return { start, end, rows, ok };
 }
-/** Find the shelf lengths that give exactly the typed ends (numbers down the columns), or null. */
+/** Find the shelf lengths (and a wide box) that give exactly the typed ends (numbers down the columns), or null.
+    The fewest, smallest differences from even shelves win; equally good answers come back as choices.
+    A wide box only shows in the numbers as "one box fewer", so where it is has to be asked (d.wideBox). */
 function solveColumns(d) {
   const S = d.shelves, Lf = d.left.map(endNumber), Rt = d.right.map(endNumber);
   if (Lf.concat(Rt).some(x => x == null)) return null;
@@ -2093,21 +2131,59 @@ function solveColumns(d) {
   const fromBottom = startCol.indexOf(lo) === S - 1 && S > 1;
   const W0 = Math.floor((Math.max(...farCol) - lo) / S) + 1; // the full shelves' width
   if (W0 < 1 || W0 > 2000) return null;
-  const fits = counts => { const r = simulateColumns(counts, lo, fromBottom); return r.start.every((x, i) => x === startCol[i]) && r.end.every((x, i) => x === farCol[i]); };
-  const even = Array(S).fill(W0);
-  if (fits(even)) return { counts: even, first: lo, startLeft, fromBottom };
-  // try shelves a little shorter (or one longer) than the rest; the closest fit to even wins
-  const lowest = S <= 6 ? W0 - 3 : S <= 10 ? W0 - 2 : W0 - 1, highest = S <= 6 ? W0 + 1 : W0;
-  let best = null;
-  const counts = Array(S);
-  const walk = (i, cost) => {
-    if (best && cost >= best.cost) return;
-    if (i === S) { if (fits(counts)) best = { counts: counts.slice(), cost }; return; }
-    for (let c = W0; c >= Math.max(1, lowest); c--) { counts[i] = c; walk(i + 1, cost + (W0 - c)); }
-    if (highest > W0) { counts[i] = W0 + 1; walk(i + 1, cost + 1.5); }
+  const order = [...Array(S).keys()]; if (fromBottom) order.reverse();
+  const X = d.wideBox ? endNumber(d.wideBox) : null;
+  const fits = (counts, wide) => { const r = simulateColumns(counts, lo, fromBottom, wide); return r.ok && r.start.every((x, i) => x === startCol[i]) && r.end.every((x, i) => x === farCol[i]) ? r : null; };
+  const answer = (counts, wide, r, choices) => ({ counts, wide: wide.map((w, s) => (w && typeof w === "object" ? r.rows[s][w.col] : w)), guessed: wide.map(w => !!(w && typeof w === "object")),
+    boxes: r.rows.map(row => row.filter(x => x != null).length), first: lo, startLeft, fromBottom, choices: choices || null });
+  if (d.chosen) { const c = JSON.parse(d.chosen), r = c.counts.length === S && fits(c.counts, c.wide); if (r) return answer(c.counts, c.wide, r); }
+  const none = Array(S).fill(null);
+  // where a wide box could be: the one typed (on whichever shelf it lands), or one not known yet. For an unknown one
+  // only which shelf ends it comes before matters, so try it at the start of each column where a shelf ends.
+  const wideTries = counts => {
+    if (X != null) return order.map(s => ({ wide: none.map((_, i) => (i === s ? X : null)), cost: 0 }));
+    const out = [{ wide: none, cost: 0 }];
+    if (d.noWide) return out;
+    const cols = [...new Set([0, ...counts.filter(c => c < Math.max(...counts))])].sort((a, b) => a - b);
+    cols.forEach(col => { const s = order.find(i => counts[i] >= col + 3); if (s != null) out.push({ wide: none.map((_, i) => (i === s ? { col } : null)), cost: 1.2 }); });
+    return out;
   };
-  walk(0, 0);
-  return best ? { counts: best.counts, first: lo, startLeft, fromBottom } : null;
+  const lowest = S <= 6 ? W0 - 3 : S <= 10 ? W0 - 2 : W0 - 1, highest = S <= 6 ? W0 + 1 : W0;
+  const opts = Array.from({ length: S }, () => {
+    const o = [];
+    for (let c = W0 - 1; c >= Math.max(1, lowest); c--) o.push({ c, cost: W0 - c });
+    if (highest > W0) o.push({ c: W0 + 1, cost: 1.5 });
+    return o;
+  });
+  const counts = Array(S).fill(W0);
+  let best = null, ties = [];
+  const consider = cost => {
+    for (const t of wideTries(counts)) {
+      const c2 = cost + t.cost;
+      if (best && c2 > best.cost + 1e-9) continue;
+      const r = fits(counts, t.wide); if (!r) continue;
+      const c = { counts: counts.slice(), wide: t.wide, cost: c2, r };
+      if (!best || c2 < best.cost - 1e-9) { best = c; ties = [c]; } else ties.push(c);
+    }
+  };
+  consider(0);
+  if (!best || best.cost > 0) {
+    const maxDev = S <= 6 ? 4 : S <= 10 ? 3 : 2; // a few odd shelves at most
+    const pick = (from, left, cost) => {
+      for (let s = from; s < S; s++) for (const o of opts[s]) {
+        counts[s] = o.c;
+        consider(cost + o.cost);
+        if (left > 1) pick(s + 1, left - 1, cost + o.cost);
+        counts[s] = W0;
+      }
+    };
+    pick(0, maxDev, 0);
+  }
+  if (!best && X != null) return solveColumns(Object.assign({}, d, { wideBox: null, chosen: null })); // the wide box answer doesn't fit these numbers
+  if (!best) return null;
+  const seen = new Set(), uniq = ties.filter(c => { const k = c.counts.join() + "|" + c.wide.map(w => (w == null ? "" : X != null ? w : "?")).join(); return !seen.has(k) && seen.add(k); });
+  const kinds = new Set(uniq.map(c => c.counts.join() + (c.wide.some(w => w != null) ? "w" : "")));
+  return answer(best.counts, best.wide, best.r, kinds.size > 1 ? uniq : null);
 }
 /** Down the columns or along the shelves? Worked out from the numbers (or as answered). */
 function inferVertical(d) {
@@ -2122,8 +2198,8 @@ function inferVertical(d) {
 function checkDraft(d) {
   const S = d.shelves, n = endNumber;
   for (const side of ["left", "right"]) for (let i = 0; i < S; i++) if (n(d[side][i]) == null)
-    return { text: `What box is at the ${side} end of the ${shelfLabel(i, S).toLowerCase()}?`, typeStep: side };
-  const issue = problemsAs(d, inferVertical(d));
+    return { text: `What box is at the ${side} end of ${theShelf(i, S)}?`, typeStep: side };
+  const issue = problemsAs(d, inferVertical(d)) || lengthQuestion(d);
   if (issue && d.dirForced != null) // answered "the numbers go the other way": let them take it back
     issue.options = (issue.options || []).concat({ label: "Undo: go back to how the numbers looked", apply: () => { d.dirForced = null; } });
   if (issue && d.dirForced == null && S > 1 && !problemsAs(d, !inferVertical(d))) {
@@ -2135,6 +2211,76 @@ function checkDraft(d) {
   }
   return issue;
 }
+/** Each shelf's number of boxes and of spaces (a wide box takes two), and the order the shelves are numbered in. */
+function shelfLengths(d) {
+  const n = endNumber, S = d.shelves;
+  if (inferVertical(d)) {
+    const sol = solveColumns(d); if (!sol) return null;
+    const order = [...Array(S).keys()]; if (sol.fromBottom) order.reverse();
+    return { counts: sol.boxes, spans: sol.counts, wide: sol.wide, guessed: sol.guessed, order, choices: sol.choices, far: sol.startLeft ? "right" : "left" };
+  }
+  const X = d.wideBox ? n(d.wideBox) : null;
+  const wide = d.left.map((v, i) => { const a = n(v), b = n(d.right[i]); return X != null && X >= Math.min(a, b) && X <= Math.max(a, b) ? X : null; });
+  const counts = d.left.map((v, i) => Math.abs(n(d.right[i]) - n(v)) + 1);
+  const order = [...Array(S).keys()].sort((a, b) => Math.min(n(d.left[a]), n(d.right[a])) - Math.min(n(d.left[b]), n(d.right[b])));
+  return { counts, spans: counts.map((c, i) => c + (wide[i] != null ? 1 : 0)), wide, guessed: wide.map(() => false), order, choices: null };
+}
+/** Ask which box takes up two spaces (on shelf s, or anywhere when s is null); the answer is checked against the numbers. */
+function wideQuestion(d, s, text) {
+  const S = d.shelves;
+  return { text, typeStep: "right", input: { placeholder: `e.g. ${d.letter}${endNumber(d.left[s ?? 0]) ?? ""}`, label: "Wide box", apply: v => {
+    const t = normBox(v), code = /^\d+$/.test(t) ? codeOf(d, t) : t, num = endNumber(code);
+    if (num == null) return "Type the box's number.";
+    const old = d.wideBox;
+    d.wideBox = code;
+    if (inferVertical(d)) {
+      const sol = solveColumns(d);
+      if (!sol || !sol.wide.includes(num) || sol.guessed.some(Boolean)) { d.wideBox = old; return `With ${code} wide, the numbers don't add up. Check the number.`; }
+    } else {
+      const a = endNumber(d.left[s]), b = endNumber(d.right[s]);
+      if (num < Math.min(a, b) || num > Math.max(a, b)) { d.wideBox = old; return `${code} isn't on ${theShelf(s, S)} (${codeOf(d, Math.min(a, b))} – ${codeOf(d, Math.max(a, b))}).`; }
+    }
+    d.wideAsk = {}; d.noWide = false; d.chosen = null;
+    return null;
+  } } };
+}
+/** Shelves that aren't the usual length: fine without asking when it's only the last shelf being
+    shorter; otherwise (or when it could be more than one shelf) confirm with the person. A shelf
+    may also have one box fewer because one box takes up two spaces: then ask which box. */
+function lengthQuestion(d) {
+  const L = shelfLengths(d); if (!L) return null;
+  const S = d.shelves, name = i => theShelf(i, S);
+  d.wideAsk = d.wideAsk || {};
+  if (L.choices) {
+    const top = Math.max(...L.choices.flatMap(c => c.counts));
+    const say = c => [...c.counts.map((x, i) => (x !== top ? `${shelfLabel(i, S)}: ${x} boxes` : null)), c.wide.some(w => w != null) ? "one box is wide (two spaces)" : null].filter(Boolean).join(", ") || `All ${top} boxes`;
+    return { text: "The numbers add up in more than one way. Which is right?",
+      options: L.choices.slice(0, 4).map(c => ({ label: say(c), apply: () => { d.chosen = JSON.stringify({ counts: c.counts, wide: c.wide }); } })), typeStep: "right" };
+  }
+  if (L.guessed.some(Boolean)) {
+    const q = wideQuestion(d, null, "Every shelf reaches the end, but there's one box fewer than that would need, so one box probably takes up two spaces. Which box is the wide one?");
+    q.options = [{ label: "No box is wide", apply: () => { d.noWide = true; d.chosen = null; } }];
+    return q;
+  }
+  const ask = Object.keys(d.wideAsk).map(Number).find(i => i < S && L.wide[i] == null);
+  if (ask != null) return wideQuestion(d, ask, `Which box on ${name(ask)} is the wide one (taking up two spaces)?`);
+  const tally = {}; L.spans.forEach(c => { tally[c] = (tally[c] || 0) + 1; });
+  const most = +Object.keys(tally).sort((a, b) => tally[b] - tally[a] || b - a)[0];
+  const odd = L.spans.map((c, i) => (c !== most ? i : -1)).filter(i => i >= 0);
+  if (!odd.length || S < 2) return null;
+  const lastShelf = L.order[S - 1];
+  if (odd.length === 1 && odd[0] === lastShelf && L.spans[lastShelf] < most) return null; // the last shelf ends early: makes sense
+  const sig = L.spans.join(",") + "|" + L.wide.join(",");
+  if (d.okLengths === sig) return null;
+  const options = [{ label: "Yes, that's right", apply: () => { d.okLengths = sig; } }];
+  if (odd.length === 1 && L.spans[odd[0]] === most - 1 && !L.wide.some(w => w != null)) { // one box short: maybe a wide box rather than a shorter shelf
+    const i = odd[0];
+    if (L.far) { const last = d[L.far][i]; options.push({ label: `No, its last box (${last}) is wide`, apply: () => { d.wideBox = last; d.noWide = false; d.chosen = null; } }); }
+    else options.push({ label: "No, one of its boxes is wide", apply: () => { d.wideAsk = { [i]: true }; } });
+  }
+  return { text: `The numbers mean ${odd.map(i => `${name(i)} has ${L.counts[i]} boxes`).join(" and ")}, while the others have ${most}. Is that right?`,
+    options, typeStep: "right" };
+}
 function problemsAs(d, vertical) {
   const S = d.shelves, n = endNumber;
   if (vertical && solveColumns(d)) return null; // the numbers fit (maybe with some shelves shorter)
@@ -2144,7 +2290,7 @@ function problemsAs(d, vertical) {
       for (let i = 1; i < S; i++) {
         const want = col[i - 1] + sg;
         if (col[i] !== want) return {
-          text: `At the ${side} end, ${word} ${codeOf(d, col[i - 1])} (${shelfLabel(i - 1, S).toLowerCase()}) should be ${codeOf(d, want)}, but the ${shelfLabel(i, S).toLowerCase()} says ${codeOf(d, col[i])}. Which is right?`,
+          text: `At the ${side} end, ${word} ${codeOf(d, col[i - 1])} (${shelfLabel(i - 1, S).toLowerCase()}) should be ${codeOf(d, want)}, but ${theShelf(i, S)} says ${codeOf(d, col[i])}. Which is right?`,
           options: [
             { label: `${codeOf(d, want)} is right`, apply: () => setEnd(d, side, i, codeOf(d, want)) },
             { label: `${codeOf(d, col[i])} is right`, apply: () => setEnd(d, side, i - 1, codeOf(d, col[i] - sg)) }],
@@ -2155,14 +2301,30 @@ function problemsAs(d, vertical) {
       const a = n(d.left[i]), b = n(d.right[i]);
       if (Math.abs(b - a) % S) {
         const step = b > a ? S : -S, lo = a + Math.trunc((b - a) / S) * S;
-        return { text: `The ${shelfLabel(i, S).toLowerCase()} goes from ${codeOf(d, a)} to ${codeOf(d, b)}. With ${S} shelves its boxes count by ${S} (${codeOf(d, a)}, ${codeOf(d, a + step)}, ${codeOf(d, a + 2 * step)}…), so it can't end on ${codeOf(d, b)}. What's at its right end?`,
+        return { text: `${TheShelf(i, S)} goes from ${codeOf(d, a)} to ${codeOf(d, b)}. With ${S} shelves its boxes count by ${S} (${codeOf(d, a)}, ${codeOf(d, a + step)}, ${codeOf(d, a + 2 * step)}…), so it can't end on ${codeOf(d, b)}. What's at its right end?`,
           options: [lo, lo + step].filter(x => x > 0 && x !== a).map(x => ({ label: codeOf(d, x), apply: () => setEnd(d, "right", i, codeOf(d, x)) })), typeStep: "right" };
       }
     }
   } else {
     const ranges = d.left.map((v, i) => { const a = n(v), b = n(d.right[i]); return [Math.min(a, b), Math.max(a, b), i]; });
     for (const [a1, b1, i] of ranges) for (const [a2, b2, j] of ranges) if (i < j && a1 <= b2 && a2 <= b1)
-      return { text: `The ${shelfLabel(i, S).toLowerCase()} (${codeOf(d, a1)} – ${codeOf(d, b1)}) and the ${shelfLabel(j, S).toLowerCase()} (${codeOf(d, a2)} – ${codeOf(d, b2)}) share some numbers. One of them is typed wrong; please check them.`, typeStep: "left" };
+      return { text: `${TheShelf(i, S)} (${codeOf(d, a1)} – ${codeOf(d, b1)}) and ${theShelf(j, S)} (${codeOf(d, a2)} – ${codeOf(d, b2)}) share some numbers. One of them is typed wrong; please check them.`, typeStep: "left" };
+    // numbered one shelf after another: the next shelf should start right after this one ends
+    const byStart = ranges.slice().sort((x, y) => x[0] - y[0]);
+    d.okGaps = d.okGaps || [];
+    for (let k = 1; k < byStart.length; k++) {
+      const [, end1, i] = byStart[k - 1], [start2, , j] = byStart[k];
+      if (start2 > end1 + 1 && !d.okGaps.includes(end1 + 1)) {
+        const missing = end1 + 1, nm = x => theShelf(x, S);
+        const sideOf = (x, num) => (n(d.left[x]) === num ? "left" : "right");
+        return { text: `${TheShelf(i, S)} ends at ${codeOf(d, end1)} and ${nm(j)} starts at ${codeOf(d, start2)}. Where is ${codeOf(d, missing)}?`,
+          options: [
+            { label: `End of ${nm(i)}`, apply: () => setEnd(d, sideOf(i, end1), i, codeOf(d, missing)) },
+            { label: `Start of ${nm(j)}`, apply: () => setEnd(d, sideOf(j, start2), j, codeOf(d, missing)) },
+            { label: `There's no ${codeOf(d, start2 - 1 > missing ? missing + "–" + (start2 - 1) : missing)}`, apply: () => { d.okGaps.push(missing); } }],
+          typeStep: "left" };
+      }
+    }
   }
   return null;
 }
@@ -2171,13 +2333,15 @@ function draftToSpec(d) {
   if (inferVertical(d)) {
     const sol = solveColumns(d);
     if (sol) return { letter: d.letter, shelves: d.shelves, vertical: true, byEnds: false, per: sol.counts.join(", "),
+      wide: Object.fromEntries(sol.wide.map((w, s) => [s, w]).filter(x => x[1] != null)),
       first: sol.first, rtl: !sol.startLeft, fromBottom: sol.fromBottom, manual: false };
   }
   const nums = d.left.concat(d.right).map(n), lo = Math.min(...nums);
   const at = d.left.map(n).indexOf(lo) >= 0 ? "l" : "r", row = Math.max(d.left.map(n).indexOf(lo), d.right.map(n).indexOf(lo));
   return { letter: d.letter, shelves: d.shelves, vertical: inferVertical(d), byEnds: true, rtl: at === "r", fromBottom: row >= d.shelves / 2,
     first: lo, per: "10", manual: false,
-    ends: d.left.map((lv, i) => { const a = n(lv), b = n(d.right[i]); return { first: codeOf(d, Math.min(a, b)), last: codeOf(d, Math.max(a, b)), rtl: a > b }; }) };
+    ends: d.left.map((lv, i) => { const a = n(lv), b = n(d.right[i]), w = d.wideBox ? n(d.wideBox) : null;
+      return Object.assign({ first: codeOf(d, Math.min(a, b)), last: codeOf(d, Math.max(a, b)), rtl: a > b }, w != null && w >= Math.min(a, b) && w <= Math.max(a, b) ? { wide: codeOf(d, w) } : {}); }) };
 }
 function saveDraft(d, k) {
   const spec = draftToSpec(d), shelves = aisleShelves(spec);
@@ -2199,9 +2363,10 @@ function saveDraft(d, k) {
 function aislePreview(d) {
   const spec = draftToSpec(d), S = d.shelves;
   return h("div", { class: "preview" }, aisleShelves(spec).map((sh, i) => {
-    const row = shelfBoxes(sh).boxes;
-    return h("div", null, h("span", { class: "small muted" }, shelfLabel(i, S) + ": "),
-      row.length > 6 ? `${row.slice(0, 4).join("  ")}  …  ${row[row.length - 1]}` : row.join("  "), h("span", { class: "small muted" }, `  (${row.length})`));
+    const { cells } = shelfBoxes(sh), row = cells.map(c => (c.span > 1 ? `[${c.code} ↔]` : c.code)), wide = cells.filter(c => c.span > 1).map(c => c.code);
+    const short = row.length > 6 ? `${row.slice(0, 4).join("  ")}  …  ${row[row.length - 1]}` : row.join("  ");
+    return h("div", null, h("span", { class: "small muted" }, shelfLabel(i, S) + ": "), short,
+      h("span", { class: "small muted" }, `  (${row.length}${wide.length && !short.includes("↔") ? `; ${wide.join(", ")} is wide` : ""})`));
   }));
 }
 function renderWizard(v) {
@@ -2234,7 +2399,7 @@ function renderWizard(v) {
     case "shelves":
       q = `How many shelves high is aisle ${d.letter}?`;
       help = "Count the shelves stacked on top of each other.";
-      body = askNumber("Shelves high", d.shelves, 1, x => { const nS = Math.max(1, x || 1); if (nS !== d.shelves) { d.shelves = nS; d.left = []; d.right = []; d.auto = null; } });
+      body = askNumber("Shelves high", d.shelves, 1, x => { const nS = Math.max(1, x || 1); if (nS !== d.shelves) { d.shelves = nS; d.left = []; d.right = []; d.auto = null; d.wideBox = null; d.wideAsk = {}; d.noWide = false; d.chosen = null; } });
       break;
     case "left": case "right": {
       const side = wiz.step;
@@ -2255,7 +2420,11 @@ function renderWizard(v) {
       const issue = checkDraft(d);
       if (issue) {
         q = "One question";
-        body = h("div", null, h("p", { class: "askq" }, issue.text),
+        const inp = issue.input ? h("input", { type: "text", class: "bigin", style: "text-transform:uppercase", placeholder: issue.input.placeholder, "aria-label": issue.input.label,
+          onkeydown: e => { if (e.key === "Enter") okBtn.click(); } }) : null;
+        const errLine = h("p", { class: "small", style: "color:var(--danger);margin:4px 0" });
+        const okBtn = issue.input ? h("button", { class: "btn", type: "button", onclick: () => { const err = issue.input.apply(inp.value); if (err) errLine.textContent = err; else renderSettings(); } }, "OK") : null;
+        body = h("div", null, h("p", { class: "askq" }, issue.text), inp ? h("div", { class: "row" }, inp, okBtn) : null, inp ? errLine : null,
           h("div", { class: "row" }, (issue.options || []).map(o => h("button", { class: "btn", type: "button", onclick: () => { o.apply(); renderSettings(); } }, o.label)),
             h("button", { class: "btn secondary", type: "button", onclick: () => { wiz.step = issue.typeStep; renderSettings(); } }, "Let me type it")));
         nav = [back];
@@ -2264,10 +2433,13 @@ function renderWizard(v) {
         q = `✓ Aisle ${d.letter} makes sense`;
         const vert = inferVertical(d), spec = draftToSpec(d), firstBox = codeOf(d, spec.first);
         help = `${d.shelves} shel${d.shelves === 1 ? "f" : "ves"} high, ${boxes} boxes. ${firstBox} is at the ${spec.fromBottom ? "bottom" : "top"} ${spec.rtl ? "right" : "left"}; the numbers go ${vert ? (spec.fromBottom ? "up" : "down") + " the columns" : "along the shelves"}.`;
-        const sol = vert ? solveColumns(d) : null;
-        const odd = sol && new Set(sol.counts).size > 1
-          ? (() => { const most = sol.counts.slice().sort((a, b) => sol.counts.filter(x => x === b).length - sol.counts.filter(x => x === a).length)[0];
-              return sol.counts.map((c, i) => (c !== most ? `the ${shelfLabel(i, d.shelves).toLowerCase()} has ${c} boxes` : null)).filter(Boolean).join(", ") + ` (the others have ${most}).`; })() : null;
+        const SL = shelfLengths(d), notes = [];
+        if (SL) {
+          const most = SL.spans.slice().sort((a, b) => SL.spans.filter(x => x === b).length - SL.spans.filter(x => x === a).length)[0];
+          SL.spans.forEach((c, i) => { if (c !== most) notes.push(`${theShelf(i, d.shelves)} has ${SL.counts[i]} boxes (the others have ${most})`); });
+          SL.wide.forEach((w, i) => { if (w != null) notes.push(`${codeOf(d, w)} on ${theShelf(i, d.shelves)} is a wide box (two spaces)`); });
+        }
+        const odd = notes.length ? notes.join("; ") + "." : null;
         body = h("div", null, odd ? h("div", { class: "notice good" }, "Note: " + odd) : null, aislePreview(d), d.shelves > 1 ? h("button", { class: "link small", type: "button", style: "margin-top:8px", onclick: () => { d.dirForced = !vert; renderSettings(); } },
           vert ? `Not right? The numbers go along the shelves (${codeOf(d, spec.first + 1)} is next to ${firstBox})` : `Not right? The numbers go up/down (${codeOf(d, spec.first + 1)} is under or above ${firstBox})`) : null);
         const last = wiz.ai >= wiz.drafts.length - 1;

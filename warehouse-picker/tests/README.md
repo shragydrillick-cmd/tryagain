@@ -23,3 +23,10 @@ columns from any corner, some shelves shorter), gives the app only the box at
 each end of each shelf, and checks the map it builds against the real layout box
 by box. "WRONG map" must be 0: anything it can't work out must become a
 question instead.
+
+`aisle-wide.test.js` does the same with 600 aisles of which about half have one
+wide box (a box taking up two spaces), with a pretend person who answers every
+question truthfully (types the wide box when asked, confirms real shelf lengths).
+"WRONG map" must be 0. A wide box that is the last box of its shelf can't be
+told from a shorter shelf by the numbers, so those count as right when every box
+is in the right place. `node tests/aisle-wide.test.js plain` runs it without wide boxes.

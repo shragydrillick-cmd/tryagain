@@ -13,7 +13,10 @@ const { chromium } = require('playwright');
       const sim = simulateColumns(counts, 1, fromBottom);
       const d = { letter: 'C', shelves: S, left: (startRight ? sim.end : sim.start).map(x => 'C' + x), right: (startRight ? sim.start : sim.end).map(x => 'C' + x), dirForced: null };
       cases++;
-      if (checkDraft(d)) { asked++; continue; }
+      // a person confirms unusual shelf lengths that really are like that; any other question counts as "asked"
+      let q, guard = 0;
+      while ((q = checkDraft(d)) && q.options && q.options[0] && q.options[0].label === "Yes, that's right" && guard++ < 3) q.options[0].apply();
+      if (q) { asked++; continue; }
       // compare every box: real layout vs. the map made from the ends
       const truth = counts.map(() => []); let n = 1; const order = [...Array(S).keys()]; if (fromBottom) order.reverse();
       for (let c = 0; c < Math.max(...counts); c++) for (const s of order) if (c < counts[s]) truth[s].push('C' + n++);
@@ -23,6 +26,6 @@ const { chromium } = require('playwright');
     }
     return { cases, ok, asked, wrong };
   });
-  console.log(`random aisles: ${r.cases} | mapped exactly right: ${r.ok} | asked a question instead: ${r.asked} | WRONG map: ${r.wrong}`);
+  console.log(`random aisles: ${r.cases} | mapped exactly right (after confirming unusual shelves): ${r.ok} | asked another question instead: ${r.asked} | WRONG map: ${r.wrong}`);
   await b.close();
 })();
