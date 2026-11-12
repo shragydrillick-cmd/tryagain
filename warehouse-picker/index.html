@@ -689,10 +689,9 @@ function renderUnpack() {
   const tb = h("tbody");
   plan.unpack.forEach(u => {
     const tr = h("tr", { class: (u.last ? "last" : "") + (unpackDone.has(u.step) ? " done" : "") },
-      h("td", { style: "white-space:nowrap" },
+      h("td", null,
         h("input", { type: "checkbox", "aria-label": `Put ${itemName(u)} on order ${u.label}`, checked: unpackDone.has(u.step),
-          onchange: e => { e.target.checked ? unpackDone.add(u.step) : unpackDone.delete(u.step); tr.classList.toggle("done", e.target.checked); } }),
-        h("span", { class: "small muted", style: "margin-left:6px" }, u.step)),
+          onchange: e => { e.target.checked ? unpackDone.add(u.step) : unpackDone.delete(u.step); tr.classList.toggle("done", e.target.checked); } })),
       itemCell(u, null),
       h("td", null, `${u.qty}×`),
       h("td", null, h("span", { class: "pile" }, u.label),
@@ -701,7 +700,7 @@ function renderUnpack() {
   });
   $("tab-unpack").replaceChildren(
     h("p", { class: "small muted" }, "Start from the top of the cart (the last thing you picked). Put each item on the pile for its order number, and tick it off."),
-    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, "Step"), h("th", null, "Item"), h("th", null, "Qty"), h("th", null, "Put on order"))), tb));
+    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Item"), h("th", null, "Qty"), h("th", null, "Put on order"))), tb));
 }
 
 function renderKey() {
@@ -993,10 +992,10 @@ function unpackPdf() {
   y = yy + kh + 16;
   if (y + 60 > PH - 40) { doc.addPage(); y = M; }
 
-  const X = { check: M + 2, step: M + 22, item: M + 46, qty: M + 330, arrow: M + 366, badge: M + 386, raw: M + 436 }, itemW = 275;
+  const X = { check: M + 2, item: M + 26, qty: M + 330, arrow: M + 366, badge: M + 386, raw: M + 436 }, itemW = 295;
   const colHead = () => {
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(110);
-    doc.text("#", X.step, y); doc.text("ITEM", X.item, y); doc.text("QTY", X.qty, y); doc.text("PUT ON ORDER", X.badge, y);
+    doc.text("ITEM", X.item, y); doc.text("QTY", X.qty, y); doc.text("PUT ON ORDER", X.badge, y);
     doc.setTextColor(0); y += 6;
   };
   colHead();
@@ -1006,8 +1005,6 @@ function unpackPdf() {
     const rowH = top + (u.last ? 16 : 0);
     if (y + rowH > PH - 40) { doc.addPage(); y = M; colHead(); }
     if (u.last) { doc.setFillColor(222, 243, 230); doc.rect(M, y, PW - 2 * M, rowH, "F"); }
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(110);
-    doc.text(String(u.step), X.step, y + 19); doc.setTextColor(0);
     doc.setDrawColor(60); doc.setLineWidth(1); doc.rect(X.check, y + 8, 14, 14, "S");
     drawItemBlock(doc, b, X.item, y + 5);
     doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text(`${u.qty} x`, X.qty, y + 19);
