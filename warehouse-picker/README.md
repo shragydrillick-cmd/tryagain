@@ -111,6 +111,9 @@ Settings opens with two buttons:
   the columns. If something doesn't add up it asks one question at a time, with
   the likely answers as buttons (including "Where is C2: next to C1 or under it?"
   when it can't tell).
+  Every shelf end has − / + to nudge it by one. Shelves of different lengths are
+  worked out from the numbers (e.g. 33 boxes on each shelf but the bottom one has
+  32, so it ends a column early), and the app notes which shelves are shorter.
 - **Order**: which aisle first, how to pick (for every aisle at once, or one
   aisle only), with a picture of the picking order.
 

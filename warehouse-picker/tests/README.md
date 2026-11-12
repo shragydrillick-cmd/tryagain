@@ -17,3 +17,9 @@ sent to "Check these": the number of mistakes NOT flagged must be 0.
 missing quantity, no "Total items", an order printed twice, a page with no
 order number), checks each is flagged under "Check these", fixes them the way
 a person would, and checks the lists afterwards.
+
+`aisle-map.test.js` makes 400 random aisles (2–8 shelves, numbers down the
+columns from any corner, some shelves shorter), gives the app only the box at
+each end of each shelf, and checks the map it builds against the real layout box
+by box. "WRONG map" must be 0: anything it can't work out must become a
+question instead.

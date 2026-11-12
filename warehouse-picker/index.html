@@ -139,6 +139,8 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 .bigopt { display: flex; flex-direction: column; gap: 4px; text-align: left; }
 .bigopt b { font-size: 19px; }
 .bigin.auto { color: var(--muted); font-style: italic; }
+.nudge { display: grid; grid-template-columns: 44px 1fr 44px; gap: 6px; align-items: center; }
+.nudge .bigin { max-width: none; }
 .endrow2 { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; }
 .askq { font-size: 18px; font-weight: 600; }
 .wiznav { margin-top: 18px; }
@@ -2071,6 +2073,42 @@ function autofill(d) {
     }
   } else extend("right", null);
 }
+/** Numbers down the columns, shelves of given lengths (top to bottom), lined up at the side
+    where numbering starts: the box number at each shelf's start and far end. */
+function simulateColumns(counts, first, fromBottom) {
+  const S = counts.length, order = [...Array(S).keys()];
+  if (fromBottom) order.reverse();
+  const start = Array(S), end = Array(S);
+  let n = first;
+  for (let c = 0, W = Math.max(...counts); c < W; c++)
+    for (const s of order) if (c < counts[s]) { if (c === 0) start[s] = n; if (c === counts[s] - 1) end[s] = n; n++; }
+  return { start, end };
+}
+/** Find the shelf lengths that give exactly the typed ends (numbers down the columns), or null. */
+function solveColumns(d) {
+  const S = d.shelves, Lf = d.left.map(endNumber), Rt = d.right.map(endNumber);
+  if (Lf.concat(Rt).some(x => x == null)) return null;
+  const lo = Math.min(...Lf, ...Rt), startLeft = Lf.includes(lo);
+  const startCol = startLeft ? Lf : Rt, farCol = startLeft ? Rt : Lf;
+  const fromBottom = startCol.indexOf(lo) === S - 1 && S > 1;
+  const W0 = Math.floor((Math.max(...farCol) - lo) / S) + 1; // the full shelves' width
+  if (W0 < 1 || W0 > 2000) return null;
+  const fits = counts => { const r = simulateColumns(counts, lo, fromBottom); return r.start.every((x, i) => x === startCol[i]) && r.end.every((x, i) => x === farCol[i]); };
+  const even = Array(S).fill(W0);
+  if (fits(even)) return { counts: even, first: lo, startLeft, fromBottom };
+  // try shelves a little shorter (or one longer) than the rest; the closest fit to even wins
+  const lowest = S <= 6 ? W0 - 3 : S <= 10 ? W0 - 2 : W0 - 1, highest = S <= 6 ? W0 + 1 : W0;
+  let best = null;
+  const counts = Array(S);
+  const walk = (i, cost) => {
+    if (best && cost >= best.cost) return;
+    if (i === S) { if (fits(counts)) best = { counts: counts.slice(), cost }; return; }
+    for (let c = W0; c >= Math.max(1, lowest); c--) { counts[i] = c; walk(i + 1, cost + (W0 - c)); }
+    if (highest > W0) { counts[i] = W0 + 1; walk(i + 1, cost + 1.5); }
+  };
+  walk(0, 0);
+  return best ? { counts: best.counts, first: lo, startLeft, fromBottom } : null;
+}
 /** Down the columns or along the shelves? Worked out from the numbers (or as answered). */
 function inferVertical(d) {
   if (d.dirForced != null) return d.dirForced;
@@ -2099,6 +2137,7 @@ function checkDraft(d) {
 }
 function problemsAs(d, vertical) {
   const S = d.shelves, n = endNumber;
+  if (vertical && solveColumns(d)) return null; // the numbers fit (maybe with some shelves shorter)
   if (vertical) {
     for (const side of ["left", "right"]) {
       const col = d[side].map(n), sg = Math.sign(col[1] - col[0]) || 1, word = sg > 0 ? "under" : "above";
@@ -2129,6 +2168,11 @@ function problemsAs(d, vertical) {
 }
 function draftToSpec(d) {
   const n = endNumber;
+  if (inferVertical(d)) {
+    const sol = solveColumns(d);
+    if (sol) return { letter: d.letter, shelves: d.shelves, vertical: true, byEnds: false, per: sol.counts.join(", "),
+      first: sol.first, rtl: !sol.startLeft, fromBottom: sol.fromBottom, manual: false };
+  }
   const nums = d.left.concat(d.right).map(n), lo = Math.min(...nums);
   const at = d.left.map(n).indexOf(lo) >= 0 ? "l" : "r", row = Math.max(d.left.map(n).indexOf(lo), d.right.map(n).indexOf(lo));
   return { letter: d.letter, shelves: d.shelves, vertical: inferVertical(d), byEnds: true, rtl: at === "r", fromBottom: row >= d.shelves / 2,
@@ -2195,13 +2239,16 @@ function renderWizard(v) {
     case "left": case "right": {
       const side = wiz.step;
       q = `What box is at the ${side.toUpperCase()} end of each shelf?`;
-      help = side === "left" ? "Top shelf first, going down. Type the first two and the rest is filled in; grey ones were filled in for you, so check them."
-        : "Top shelf first, going down. Grey ones were filled in for you; check them and fix any that are wrong.";
+      help = side === "left" ? "Top shelf first, going down. Type the first two and the rest is filled in. Grey ones were filled in for you: check them, and use − / + or type to fix any."
+        : "Top shelf first, going down. Type the top one and the rest is filled in. Grey ones were filled in for you: check them, and use − / + or type to fix any (e.g. a shelf that's one box shorter).";
       body = h("div", { class: "endsrows" }, Array.from({ length: d.shelves }, (_, i) => h("div", { class: "endrow2" },
         h("span", { class: "lbl" }, shelfLabel(i, d.shelves)),
+        h("div", { class: "nudge" },
+        h("button", { class: "btn secondary small", type: "button", "aria-label": "One less", onclick: () => { const x = endNumber(d[side][i]); if (x > 1) { setEnd(d, side, i, codeOf(d, x - 1)); renderSettings(); } } }, "−"),
         h("input", { type: "text", value: d[side][i] || "", placeholder: d.letter + "…", class: "bigin" + (d.auto && d.auto[side][i] ? " auto" : ""), style: "text-transform:uppercase", "aria-label": `${shelfLabel(i, d.shelves)}, ${side} end`,
           onchange: e => { const t = normBox(e.target.value); setEnd(d, side, i, /^\d+$/.test(t) ? codeOf(d, t) : t); renderSettings();
-            const nextIn = $("settingsView").querySelectorAll(".endrow2 input")[i + 1]; if (nextIn && !nextIn.value) try { nextIn.focus(); } catch (er) {} } }))));
+            const nextIn = $("settingsView").querySelectorAll(".endrow2 input")[i + 1]; if (nextIn && !nextIn.value) try { nextIn.focus(); } catch (er) {} } }),
+        h("button", { class: "btn secondary small", type: "button", "aria-label": "One more", onclick: () => { const x = endNumber(d[side][i]); if (x != null) { setEnd(d, side, i, codeOf(d, x + 1)); renderSettings(); } } }, "+")))));
       break;
     }
     case "check": {
@@ -2217,7 +2264,11 @@ function renderWizard(v) {
         q = `✓ Aisle ${d.letter} makes sense`;
         const vert = inferVertical(d), spec = draftToSpec(d), firstBox = codeOf(d, spec.first);
         help = `${d.shelves} shel${d.shelves === 1 ? "f" : "ves"} high, ${boxes} boxes. ${firstBox} is at the ${spec.fromBottom ? "bottom" : "top"} ${spec.rtl ? "right" : "left"}; the numbers go ${vert ? (spec.fromBottom ? "up" : "down") + " the columns" : "along the shelves"}.`;
-        body = h("div", null, aislePreview(d), d.shelves > 1 ? h("button", { class: "link small", type: "button", style: "margin-top:8px", onclick: () => { d.dirForced = !vert; renderSettings(); } },
+        const sol = vert ? solveColumns(d) : null;
+        const odd = sol && new Set(sol.counts).size > 1
+          ? (() => { const most = sol.counts.slice().sort((a, b) => sol.counts.filter(x => x === b).length - sol.counts.filter(x => x === a).length)[0];
+              return sol.counts.map((c, i) => (c !== most ? `the ${shelfLabel(i, d.shelves).toLowerCase()} has ${c} boxes` : null)).filter(Boolean).join(", ") + ` (the others have ${most}).`; })() : null;
+        body = h("div", null, odd ? h("div", { class: "notice good" }, "Note: " + odd) : null, aislePreview(d), d.shelves > 1 ? h("button", { class: "link small", type: "button", style: "margin-top:8px", onclick: () => { d.dirForced = !vert; renderSettings(); } },
           vert ? `Not right? The numbers go along the shelves (${codeOf(d, spec.first + 1)} is next to ${firstBox})` : `Not right? The numbers go up/down (${codeOf(d, spec.first + 1)} is under or above ${firstBox})`) : null);
         const last = wiz.ai >= wiz.drafts.length - 1;
         next.textContent = last ? "Save ✓" : `Next: aisle ${wiz.drafts[wiz.ai + 1].letter || letterAfter(d.letter)} ▶`;
