@@ -2034,7 +2034,7 @@ function wizBack() {
 }
 const wcur = () => wiz.drafts[wiz.ai];
 const codeOf = (d, n) => `${d.letter}${n}`;
-/** A shelf end typed or chosen by the person: kept as given, and the filled-in ones are worked out again. */
+/** A shelf end typed, nudged or chosen by the person: only that box changes. Empty ones may still be filled in. */
 function setEnd(d, side, i, value) {
   d.auto = d.auto || { left: [], right: [] };
   d[side][i] = value; d.auto[side][i] = false;
@@ -2044,9 +2044,9 @@ function setEnd(d, side, i, value) {
 function autofill(d) {
   const S = d.shelves, n = endNumber;
   d.auto = d.auto || { left: [], right: [] };
-  for (const side of ["left", "right"]) { // forget what was filled in before; keep what was typed
-    d[side] = Array.from({ length: S }, (_, i) => (d.auto[side][i] ? "" : d[side][i] || ""));
-    d.auto[side] = Array.from({ length: S }, () => false);
+  for (const side of ["left", "right"]) { // only empty boxes get filled in; anything already there stays exactly as it is
+    d[side] = Array.from({ length: S }, (_, i) => d[side][i] || "");
+    d.auto[side] = Array.from({ length: S }, (_, i) => !!d.auto[side][i]);
   }
   const set = (side, i, val) => { if (!d[side][i] && val > 0) { d[side][i] = codeOf(d, val); d.auto[side][i] = true; } };
   const typed = side => d[side].map((v, i) => [i, n(v)]).filter(x => x[1] != null);
@@ -2239,8 +2239,8 @@ function renderWizard(v) {
     case "left": case "right": {
       const side = wiz.step;
       q = `What box is at the ${side.toUpperCase()} end of each shelf?`;
-      help = side === "left" ? "Top shelf first, going down. Type the first two and the rest is filled in. Grey ones were filled in for you: check them, and use − / + or type to fix any."
-        : "Top shelf first, going down. Type the top one and the rest is filled in. Grey ones were filled in for you: check them, and use − / + or type to fix any (e.g. a shelf that's one box shorter).";
+      help = side === "left" ? "Top shelf first, going down. Type the first two and the rest is filled in. Grey ones were filled in for you: check them, and use − / + or type to change any one of them."
+        : "Top shelf first, going down. Type the top one and the rest is filled in. Grey ones were filled in for you: check them, and use − / + or type to change any one of them (e.g. a shelf that's one box shorter). Changing one never changes the others.";
       body = h("div", { class: "endsrows" }, Array.from({ length: d.shelves }, (_, i) => h("div", { class: "endrow2" },
         h("span", { class: "lbl" }, shelfLabel(i, d.shelves)),
         h("div", { class: "nudge" },
