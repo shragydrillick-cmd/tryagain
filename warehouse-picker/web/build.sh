@@ -12,6 +12,7 @@ sed "s/__VERSION__/$VERSION/" sw.js > dist/sw.js
 sed -e 's#https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js#vendor/jspdf.umd.min.js#' \
     -e 's#https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js#vendor/xlsx.full.min.js#' \
     -e 's#https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/#vendor/#g' \
+    -e 's#https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/#vendor/#g' \
     ../index.html | awk '
   /<\/body>/ { while ((getline line < "pwa.js") > 0) body = body line "\n"; print "<script>\n" body "</script>" }
   { print }

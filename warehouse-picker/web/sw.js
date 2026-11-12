@@ -2,7 +2,7 @@
    __VERSION__ changes with every new build; the phone then picks up the new
    version in the background and uses it the next time the app is opened. */
 const CACHE = "pick-and-sort-__VERSION__";
-const FILES = ["./", "index.html", "manifest.webmanifest", "vendor/jspdf.umd.min.js", "vendor/xlsx.full.min.js", "vendor/pdf.min.js", "vendor/pdf.worker.min.js",
+const FILES = ["./", "index.html", "manifest.webmanifest", "vendor/jspdf.umd.min.js", "vendor/xlsx.full.min.js", "vendor/pdf.min.js", "vendor/pdf.worker.min.js", "vendor/qrcode.min.js",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
@@ -14,6 +14,6 @@ self.addEventListener("activate", e => {
     .then(() => self.clients.claim()));
 });
 self.addEventListener("fetch", e => {
-  if (e.request.method !== "GET") return;
+  if (e.request.method !== "GET" || new URL(e.request.url).origin !== location.origin) return; // the linked-devices database always goes to the internet
   e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request)));
 });

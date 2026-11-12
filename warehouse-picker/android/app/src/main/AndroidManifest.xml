@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No internet permission: the app runs fully offline and sends nothing anywhere. -->
+    <!-- Internet is only used if you link your devices (your own Firebase database); otherwise nothing is sent anywhere. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"

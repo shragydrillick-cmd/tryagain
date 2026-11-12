@@ -30,3 +30,9 @@ question truthfully (taps the shelf each number is really on, confirms real shel
 "WRONG map" must be 0. A wide box that is the last box of its shelf can't be
 told from a shorter shelf by the numbers, so those count as right when every box
 is in the right place. `node tests/aisle-wide.test.js plain` runs it without wide boxes.
+
+`linking.test.js` checks **Send to phone** (QR code, link, list file) and
+linked devices with three browsers and a pretend Firestore database that
+answers the same calls: joining with the link text, ticks going both ways, new
+orders and **Clear list** reaching the other device, a wrong key, and changes
+made offline being sent once the database is reachable again.

@@ -186,6 +186,8 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
   .card { border: 0; padding: 0; }
   .tabpane.hidden { display: block !important; page-break-before: always; }
 }
+.sendbox { margin: 10px 0; padding: 12px; border: 1px solid var(--line, #ccd); border-radius: 10px; }
+img.qr { display: block; width: 220px; max-width: 100%; image-rendering: pixelated; background: #fff; padding: 6px; border-radius: 8px; margin: 6px 0; }
 </style>
 </head>
 <body>
@@ -211,7 +213,7 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
     <p class="muted small"><b>Packing slips (PDF):</b> choose the PDF with all the slips, or select many PDFs at once (one per order is fine). The app reads each slip's order number, items, bins and quantities, and checks them against "Total items".</p>
     <p class="muted small">Or a spreadsheet (Excel or CSV) with one line per item: <b>Order</b>, <b>Box</b> (like A1 = aisle A, box 1), <b>Item</b> (what it is), and optional <b>Details</b> and <b>Qty</b>. Any other columns are shown as details.</p>
     <div class="row">
-      <label class="btn">Choose file<input id="fileInput" type="file" multiple accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls,text/csv,application/pdf" hidden></label>
+      <label class="btn">Choose file<input id="fileInput" type="file" multiple accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls,.json,text/csv,application/pdf,application/json" hidden></label>
       <button class="btn secondary" id="pasteToggle" type="button">Paste instead</button>
       <button class="btn secondary" id="exampleBtn" type="button">Try an example</button>
     </div>
@@ -235,6 +237,7 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
     <h2>2. Your lists</h2>
     <div class="row no-print" style="justify-content:space-between;align-items:center"><p class="muted small" id="fileName" style="margin:0"></p>
       <button class="btn secondary small" id="clearBtn" type="button">&#10005; Clear list &amp; start new</button></div>
+    <p class="small muted no-print" id="syncLine" style="margin:4px 0 0"></p>
     <div class="stats" id="stats"></div>
     <div id="warnings"></div>
     <div id="review"></div>
@@ -246,7 +249,10 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
         <button class="btn" id="pdfUnpack" type="button">&#11015; PDF</button>
         <button class="btn secondary" id="stepBtn" type="button">&#9654; Step by step</button>
         <button class="btn secondary" id="printBtn" type="button">Print</button></div>
+      <div class="grp"><b>Phone</b>
+        <button class="btn secondary" id="sendBtn" type="button">&#128241; Send to phone</button></div>
     </div>
+    <div id="sendBox" class="hidden no-print sendbox"></div>
     <div class="tabs" role="tablist">
       <button data-tab="pick" class="on" type="button">Pick list</button>
       <button data-tab="unpack" type="button">Unpack list</button>
@@ -994,14 +1000,17 @@ function saveList() {
     stepper: open ? { mode: stepMode, seq, stepAt, skipped: [...skipped] } : null };
   try { localStorage.setItem(LIST_KEY, JSON.stringify(savedList)); } catch (e) {}
   writeNative();
+  syncChanged(); // linked devices get the change too
 }
 const saveListSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveList, 400); };
-function clearList() {
+function clearList(quiet) {
+  if (!$("stepper").classList.contains("hidden")) { $("stepper").classList.add("hidden"); document.body.style.overflow = ""; }
   current = null; plan = null; pickedDone = new Set(); unpackDone = new Set(); savedList = null; builtFor = null;
   try { localStorage.removeItem(LIST_KEY); } catch (e) {}
   writeNative();
-  $("results").classList.add("hidden"); $("fileInput").value = ""; $("loadMsg").replaceChildren();
-  window.scrollTo(0, 0); toast("Cleared. Add the new orders.");
+  syncChanged();
+  $("results").classList.add("hidden"); $("fileInput").value = ""; $("loadMsg").replaceChildren(); $("sendBox").classList.add("hidden");
+  window.scrollTo(0, 0); if (!quiet) toast("Cleared. Add the new orders.");
 }
 function restoreList() {
   let s = null;
@@ -1153,6 +1162,9 @@ $("fileInput").addEventListener("change", async e => {
         pages.push(...await pdfWords(await files[i].arrayBuffer()));
       }
       useSlips(parseSlips(pages), files.length > 1 ? `${files.length} PDF files` : files[0].name);
+    } else if (files.length === 1 && /\.json$/i.test(files[0].name)) {
+      let data = null; try { data = JSON.parse(await files[0].text()); } catch (er) {}
+      if (data && data.pickAndSortList) receiveList(data, "from a file"); else showLoadMsg("That file isn't a list from Pick & Sort.");
     } else if (files.length === 1) useRows(await readTable(files[0]), files[0].name);
     else showLoadMsg("Choose one spreadsheet, or any number of packing-slip PDFs.");
   } catch (err) { showLoadMsg("Couldn't read that file: " + err.message); }
@@ -1554,6 +1566,221 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") $("stepPrev").click();
   if (e.key === "Escape") $("stepClose").click();
 });
+
+/* ---------- sending the list to another device ---------- */
+const SITE = "https://shragydrillick-cmd.github.io/tryagain/";
+const siteUrl = () => (/^https?:$/.test(location.protocol) && !inClaude ? location.origin + location.pathname : SITE);
+const b64u = bytes => { let bin = ""; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+async function packText(text) {
+  const bytes = new TextEncoder().encode(text);
+  if (window.CompressionStream) {
+    const z = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+    return "z" + b64u(z);
+  }
+  return "j" + b64u(bytes);
+}
+async function unpackText(s) {
+  const bytes = unb64u(s.slice(1));
+  if (s[0] === "z") return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
+  return new TextDecoder().decode(bytes);
+}
+function listToSend() {
+  saveList();
+  return { pickAndSortList: 1, name: current.name, warnings: current.warnings || [], openChecks: savedList.openChecks || 0, lines: savedList.lines };
+}
+let qrReady = null;
+const loadQr = () => (qrReady = qrReady || loadScript("https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"));
+/** A QR code picture for a link, or null when it's too long for one. */
+async function qrImage(text) {
+  try { await loadQr(); } catch (e) { return null; }
+  try { const q = qrcode(0, "L"); q.addData(text, "Byte"); q.make(); return h("img", { src: q.createDataURL(4, 8), alt: "QR code", class: "qr" }); } catch (e) { return null; }
+}
+async function showSendBox() {
+  const box = $("sendBox");
+  if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  box.replaceChildren(h("p", { class: "small muted" }, "Making the link…"));
+  const data = listToSend(), file = new Blob([JSON.stringify(data)], { type: "application/json" });
+  const link = siteUrl() + "#list=" + await packText(JSON.stringify(data));
+  const img = link.length <= 2900 ? await qrImage(link) : null;
+  const fileName = `pick-list-${fileStamp()}.json`;
+  box.replaceChildren(
+    h("h3", { style: "margin-top:0" }, "Send this list to a phone"),
+    img ? h("div", null, img, h("p", { class: "small muted" }, "Scan this with the phone's camera: the list opens on the Pick & Sort website. Ticks made there stay on that phone.")) :
+      h("p", { class: "small muted" }, "This list is too long for a QR code. Send the link or the file instead."),
+    h("div", { class: "row" },
+      navigator.share ? h("button", { class: "btn secondary", type: "button", onclick: () => navigator.share({ title: "Pick list", url: link }).catch(() => {}) }, "Share link…") : null,
+      h("button", { class: "btn secondary", type: "button", onclick: e => copyText(link, e.currentTarget) }, "Copy link"),
+      h("button", { class: "btn secondary", type: "button", onclick: () => download(file, fileName) }, "Save as file")),
+    h("p", { class: "small muted" }, "In the Android or iPhone app: send yourself the file (email, WhatsApp, AirDrop…), then open it with Choose file. ",
+      syncOn() ? "These devices are linked, so the list is already on the others." : "Or link the devices once (Settings → More → Link devices) and every list shows up on all of them by itself."));
+}
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const t = h("textarea", { style: "position:fixed;opacity:0" }); t.value = text; document.body.append(t); t.select(); try { document.execCommand("copy"); } catch (er) {} t.remove(); }
+  if (btn) { const old = btn.textContent; btn.textContent = "Copied ✓"; setTimeout(() => { btn.textContent = old; }, 2000); }
+}
+/** A list that came from another device: open it, but ask first if it would replace one in progress. */
+function receiveList(data, how) {
+  if (!data || !Array.isArray(data.lines) || !data.lines.length) { showLoadMsg("That list is empty or damaged."); return; }
+  const use = () => {
+    current = { lines: data.lines, warnings: data.warnings || [], name: data.name || "List from another device", src: null, openChecks: data.openChecks || 0 };
+    $("loadMsg").replaceChildren(); rebuild(); toast(`List received (${how}).`);
+  };
+  if (!current) return use();
+  $("loadMsg").replaceChildren(h("div", { class: "notice warn" }, `A list came ${how}: "${data.name || "list"}". Open it instead of the list you have now?`,
+    h("div", { class: "row", style: "margin-top:8px" },
+      h("button", { class: "btn small", type: "button", onclick: use }, "Open the new list"),
+      h("button", { class: "btn secondary small", type: "button", onclick: () => $("loadMsg").replaceChildren() }, "Keep mine"))));
+  window.scrollTo(0, 0);
+}
+
+/* ---------- linked devices: one shared list, kept in step through the owner's own free Firebase database ---------- */
+const sync = { rev: 0, dirty: false, lastStr: null, pushTimer: null, state: "", err: "" };
+const syncOn = () => !!(settings.sync && settings.sync.projectId && settings.sync.apiKey && settings.sync.code);
+const SYNC_KEY = "pick-and-sort-sync-v1";
+try { const o = JSON.parse(localStorage.getItem(SYNC_KEY) || "{}"); if (settings.sync && o.code === settings.sync.code) { sync.rev = o.rev || 0; sync.dirty = !!o.dirty; } } catch (e) {}
+const keepSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify({ rev: sync.rev, dirty: sync.dirty, code: settings.sync && settings.sync.code })); } catch (e) {} };
+const docUrl = () => `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(settings.sync.projectId)}/databases/(default)/documents/lists/${encodeURIComponent(settings.sync.code)}?key=${encodeURIComponent(settings.sync.apiKey)}`;
+const pickKey = p => `${p.box}|${p.name}|${p.details}`;
+const unpackKey = u => `${u.raw}|${u.box}|${u.name}|${u.details}`;
+/** What all linked devices share: the orders and the ticks (not where each one is in step by step). */
+function sharedState() {
+  if (!current || !plan || !savedList) return { cleared: true };
+  return { name: current.name, warnings: current.warnings || [], openChecks: savedList.openChecks || 0, lines: savedList.lines,
+    picked: plan.picks.filter(p => pickedDone.has(p.step)).map(pickKey).sort(), unpacked: plan.unpack.filter(u => unpackDone.has(u.step)).map(unpackKey).sort() };
+}
+function syncChanged() {
+  if (!syncOn()) return;
+  const str = JSON.stringify(sharedState());
+  if (str === sync.lastStr) return;
+  sync.lastStr = str; sync.dirty = true; keepSync();
+  clearTimeout(sync.pushTimer); sync.pushTimer = setTimeout(syncPush, 600);
+}
+async function syncErr(r) { let m = ""; try { m = (await r.json()).error.message; } catch (e) {} return new Error(r.status === 403 ? "The database said no (check the rules, the project ID and the key)." : m || "Error " + r.status); }
+function setSync(state, err) { sync.state = state; sync.err = err || ""; showSyncLine(); }
+function showSyncLine() {
+  const el = $("syncLine"); if (!el) return;
+  el.textContent = !syncOn() ? "" : sync.state === "ok" ? "🔗 Linked: up to date" : sync.state === "offline" ? `🔗 Linked: not reaching the database${sync.err ? " (" + sync.err + ")" : ""}. Changes are kept and sent later.` : "🔗 Linked";
+  const m = $("syncStatus"); if (m) m.textContent = el.textContent || "";
+}
+async function syncPush() {
+  if (!syncOn()) return;
+  const rev = sync.rev + 1, data = sync.lastStr || JSON.stringify(sharedState());
+  try {
+    const r = await fetch(docUrl(), { method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fields: { data: { stringValue: data }, rev: { integerValue: String(rev) }, at: { integerValue: String(Date.now()) } } }) });
+    if (!r.ok) throw await syncErr(r);
+    sync.rev = rev; sync.dirty = false; keepSync(); setSync("ok");
+  } catch (e) { setSync("offline", e.message); }
+}
+let pulling = false;
+async function syncPull() {
+  if (!syncOn() || pulling || document.visibilityState === "hidden") return;
+  pulling = true;
+  try {
+    const r = await fetch(docUrl(), { cache: "no-store" });
+    if (r.status === 404) { if (current) { sync.lastStr = null; syncChanged(); } setSync("ok"); return; }
+    if (!r.ok) throw await syncErr(r);
+    const f = (await r.json()).fields || {}, rev = parseInt(f.rev && f.rev.integerValue, 10) || 0;
+    if (rev > sync.rev) { sync.rev = rev; sync.dirty = false; keepSync(); applyRemote(JSON.parse(f.data.stringValue)); }
+    else if (sync.dirty) syncPush();
+    setSync("ok");
+  } catch (e) { setSync("offline", e.message); }
+  finally { pulling = false; }
+}
+/** Another device changed the list or ticked something: show it here. */
+function applyRemote(state) {
+  sync.lastStr = JSON.stringify(state);
+  if (state.cleared) { if (current) { clearList(true); toast("The list was cleared on another device."); } return; }
+  const sameList = current && savedList && JSON.stringify(savedList.lines) === JSON.stringify(state.lines);
+  if (!sameList) {
+    const was = !!current;
+    if (!$("stepper").classList.contains("hidden")) closeSteps();
+    current = { lines: state.lines, warnings: state.warnings || [], name: state.name, src: null, openChecks: state.openChecks || 0 };
+    rebuild();
+    toast(was ? "New list from another device." : "List from another device.");
+  }
+  const pk = new Set(state.picked || []), uk = new Set(state.unpacked || []);
+  pickedDone = new Set(plan.picks.filter(p => pk.has(pickKey(p))).map(p => p.step));
+  unpackDone = new Set(plan.unpack.filter(u => uk.has(unpackKey(u))).map(u => u.step));
+  renderPick(); renderUnpack();
+  if (!$("stepper").classList.contains("hidden")) showStep();
+  saveList(); sync.lastStr = JSON.stringify(state);
+}
+function newLinkCode() { const b = new Uint8Array(18); crypto.getRandomValues(b); return b64u(b); }
+/** The link to give another device: the database and the shared code, in one piece. */
+const linkText = () => siteUrl() + "#link=" + b64u(new TextEncoder().encode(JSON.stringify({ p: settings.sync.projectId, k: settings.sync.apiKey, c: settings.sync.code })));
+function joinLink(text) {
+  const m = String(text).trim().match(/#?link=([A-Za-z0-9_-]+)/);
+  if (!m) return "That isn't a link from Pick & Sort.";
+  try {
+    const o = JSON.parse(new TextDecoder().decode(unb64u(m[1])));
+    if (!o.p || !o.k || !o.c) throw new Error();
+    settings.sync = { projectId: o.p, apiKey: o.k, code: o.c }; saveSettings();
+    sync.rev = 0; sync.dirty = false; sync.lastStr = null; keepSync(); syncPull();
+    return null;
+  } catch (e) { return "That link is damaged. Copy it again."; }
+}
+function unlink() { settings.sync = null; saveSettings(); sync.rev = 0; sync.dirty = false; keepSync(); showSyncLine(); }
+function linkSection() {
+  const wrap = h("div");
+  const draw = async () => {
+    if (syncOn()) {
+      const link = linkText(), img = await qrImage(link);
+      wrap.replaceChildren(
+        h("p", { class: "small", id: "syncStatus" }, ""),
+        h("p", { class: "small muted" }, "To link another phone or computer: scan this with its camera (opens the website), or send it the link text and paste it there under \"Join\"."),
+        img, h("div", { class: "row" },
+          h("button", { class: "btn secondary small", type: "button", onclick: e => copyText(link, e.currentTarget) }, "Copy link text"),
+          navigator.share ? h("button", { class: "btn secondary small", type: "button", onclick: () => navigator.share({ title: "Link Pick & Sort", url: link }).catch(() => {}) }, "Share…") : null,
+          h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Unlink this device?", () => { unlink(); draw(); }) }, "Unlink this device")),
+        h("p", { class: "small muted" }, "Anyone with this link can see and change the list, so only send it to your own devices."));
+      showSyncLine(); syncPull();
+      return;
+    }
+    const pid = h("input", { type: "text", placeholder: "Project ID, e.g. pick-and-sort-1a2b3", "aria-label": "Firebase project ID" });
+    const key = h("input", { type: "text", placeholder: "Web API key (starts with AIza…)", "aria-label": "Firebase web API key" });
+    const join = h("input", { type: "text", placeholder: "Paste the link from the other device", "aria-label": "Link from the other device" });
+    const msg = h("p", { class: "small", style: "color:var(--danger)" });
+    wrap.replaceChildren(
+      h("p", { class: "small muted" }, "Link the computer and the phones so they share one list: orders added on one show up on the others, and ticks too. It uses a free database in your own Google account (Firebase). Set it up once on one device, then join the others."),
+      h("details", null, h("summary", { class: "small" }, "How to make the free database (about 5 minutes)"),
+        h("ol", { class: "small" },
+          h("li", null, "Go to console.firebase.google.com and sign in with a Google account."),
+          h("li", null, "Create a project (any name, e.g. pick-and-sort). Google Analytics isn't needed."),
+          h("li", null, "Open Build → Firestore Database → Create database. Pick a location near you, start in production mode."),
+          h("li", null, "Open the Rules tab, replace everything with the rules below, and tap Publish."),
+          h("li", null, "Open Project settings (the gear) → General → Your apps → the web button </>. Register an app (any nickname). Copy the apiKey and projectId it shows into the boxes here.")),
+        h("pre", { class: "small", style: "white-space:pre-wrap;user-select:all" }, "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /lists/{code} {\n      allow get, create, update, delete: if code.size() >= 20;\n    }\n  }\n}")),
+      h("h4", null, "First device"), pid, key,
+      h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: async () => {
+        const p = pid.value.trim(), k = key.value.trim();
+        if (!p || !k) { msg.textContent = "Fill in both boxes."; return; }
+        settings.sync = { projectId: p, apiKey: k, code: newLinkCode() };
+        try {
+          const r = await fetch(docUrl(), { cache: "no-store" });
+          if (!r.ok && r.status !== 404) throw await syncErr(r);
+        } catch (e) { settings.sync = null; msg.textContent = "Couldn't reach the database: " + e.message; return; }
+        saveSettings(); sync.rev = 0; sync.dirty = false; sync.lastStr = null; keepSync(); syncChanged(); toast("Linked. Now join your other devices."); draw();
+      } }, "Start linking")),
+      h("h4", null, "Join (the other devices)"), join,
+      h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => { const e = joinLink(join.value); if (e) msg.textContent = e; else { toast("Linked."); draw(); } } }, "Join")),
+      msg);
+  };
+  draw();
+  return wrap;
+}
+/** Opened from a link: #list=… (a list sent from another device) or #link=… (join linked devices). */
+async function openFromLink() {
+  const hsh = location.hash;
+  if (!/^#(list|link)=/.test(hsh)) return;
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+  if (hsh.startsWith("#link=")) { const e = joinLink(hsh); toast(e || "This device is now linked."); return; }
+  try { receiveList(JSON.parse(await unpackText(hsh.slice(6))), "from another device"); }
+  catch (e) { showLoadMsg("That list link is damaged. Send it again."); }
+}
 
 /* ---------- PDFs ---------- */
 const PW = 612, PH = 792, M = 40;
@@ -2627,6 +2854,8 @@ function renderMorePage(v) {
           const f = e.target.files[0]; if (!f) return;
           try { settings = fixSettings(JSON.parse(await f.text())); saveSettings(); renderSettings(); toast("Settings loaded."); } catch (err) { toast("That isn't a settings file."); }
         } }))),
+      h("h3", null, "Link devices"),
+      linkSection(),
       h("h3", null, "Look"),
       h("select", { onchange: e => { settings.theme = e.target.value; applyTheme(); saveSettings(); } },
         [["auto", "Match device"], ["light", "Light"], ["dark", "Dark"]].map(([val, t]) => h("option", { value: val, selected: settings.theme === val }, t))),
@@ -2665,8 +2894,14 @@ window.appBack = () => {
 
 applyTheme();
 showInvStatus();
-$("clearBtn").onclick = e => tapTwice(e.currentTarget, "Clear everything?", clearList);
+$("clearBtn").onclick = e => tapTwice(e.currentTarget, syncOn() ? "Clear it on all linked devices?" : "Clear everything?", () => clearList());
+$("sendBtn").onclick = showSendBox;
 restoreList();
+openFromLink();
+window.addEventListener("hashchange", openFromLink);
+showSyncLine(); syncPull();
+setInterval(syncPull, 4000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncPull(); });
 </script>
 </body>
 </html>

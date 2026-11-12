@@ -107,6 +107,42 @@ says "Picked up where you left off" and carries on from the same step.
 Choosing new order files also replaces it. If the shelf map changes so the pick
 order is different, the orders are kept but the ticks start again.
 
+## Sending the list to a phone
+
+**📱 Send to phone** (next to the lists) shows a QR code. Scan it with the
+phone's camera and the list opens on the Pick & Sort website on that phone. There's
+also **Copy link**, **Share link…** and **Save as file**. In the Android or
+iPhone app, send yourself the file (email, WhatsApp, AirDrop…) and open it
+with **Choose file**. If the phone already has a list, it asks before
+replacing it. This is a one-time copy: ticks don't go back to the computer.
+Nothing is stored online.
+
+## Linked devices (one shared list, live)
+
+**Settings → More → Link devices** links the computer and the phones so they
+share one list. Orders loaded on one device show up on the others within a few
+seconds. Ticks on the pick and unpack lists and **Clear list** are shared too.
+Each device keeps its own place in step by step. It uses a free Firebase
+(Google) database in your own account:
+
+1. On console.firebase.google.com create a project, then **Firestore Database
+   → Create database** (production mode).
+2. In **Rules**, paste the rules shown in the app and **Publish**. Each list
+   can only be read with its long secret code, and lists can't be browsed.
+3. In **Project settings → Your apps → Web (</>)**, register an app and copy
+   the **projectId** and **apiKey** into the app, then tap **Start linking**.
+4. On each other device, scan the QR code shown there (opens the website), or
+   copy the link text, send it over, and paste it under **Join**. Use the
+   pasted link for the Android and iPhone apps and for a home-screen website,
+   because the camera opens Safari or Chrome instead.
+
+The list is sent to that database only while devices are linked. Without
+internet the app carries on as normal and sends the changes when it's back
+online ("🔗 Linked: …" under the list shows the state). If two people change
+the list at the same moment, the last change wins. **Unlink this device** stops
+linking. Anyone with the link can see and change the list, so only send it to
+your own devices.
+
 ## Settings: Map and Order
 
 Settings opens with two buttons:
@@ -192,7 +228,8 @@ files and the Print button work without them.
 ## Android app (APK)
 
 `android/` is a small Android app that shows this same page, built in, with no
-internet needed and no internet permission. Everything stays on the phone:
+internet needed. It has the internet permission only for "Link devices"
+(below): if devices aren't linked, nothing is sent anywhere. Everything stays on the phone:
 
 - The shelf setup is saved in a file inside the app's private storage. It stays
   through restarts and app updates. It's only removed if the app is uninstalled
