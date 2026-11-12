@@ -105,8 +105,11 @@ shelf, A11–A20 on the next…). For each aisle fill in:
 
 - **Aisle letter**, **Shelves**, **Boxes per shelf** (one number, or one per
   shelf from the top when they differ: `10, 10, 12, 8`), **First number**
-- **Numbers run** left → right or right → left
-- **Numbering starts on** the top shelf or the bottom shelf
+- **Numbers go** along each shelf (A2 beside A1) or **down each column** (A2 under A1,
+  A3 under A2… then the next column)
+- **Numbers run** / **Columns go** left → right or right → left
+- **Numbering starts on** the top shelf or the bottom shelf (for columns: each column
+  starts at the top or the bottom)
 
 The app works out every shelf's boxes and shows them ("A1 – A50"). **Quick
 setup** makes several aisles (A, B, C…) the same way in one go; **Make a map
