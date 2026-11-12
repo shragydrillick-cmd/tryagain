@@ -107,15 +107,25 @@ says "Picked up where you left off" and carries on from the same step.
 Choosing new order files also replaces it. If the shelf map changes so the pick
 order is different, the orders are kept but the ticks start again.
 
-## Sending the list to a phone
+## Sending the list to a phone (scan, nothing else to send)
 
-**📱 Send to phone** (next to the lists) shows a QR code. Scan it with the
-phone's camera and the list opens on the Pick & Sort website on that phone. There's
-also **Copy link**, **Share link…** and **Save as file**. In the Android or
-iPhone app, send yourself the file (email, WhatsApp, AirDrop…) and open it
-with **Choose file**. If the phone already has a list, it asks before
-replacing it. This is a one-time copy: ticks don't go back to the computer.
-Nothing is stored online.
+On the computer tap **📱 Send to phone**: it shows a QR code. On the phone, in
+Pick & Sort (the iPhone app, the Android app or the website), tap
+**📷 Scan from computer** on the main screen and point it at the code. All
+orders and items load on the phone, with nothing else to send.
+
+- A big list doesn't fit in one QR code, so the computer shows several codes
+  that change by themselves (e.g. 80 orders, 277 lines = 6 codes). Hold the phone on them: it
+  counts "Got 3 of 6 codes…" and catches them in any order. It took about 4
+  seconds in the test.
+- If the phone already has a list, it asks before replacing it.
+- A list that fits in one code also works with the phone's own camera app (it
+  opens the list on the website).
+- **Other ways** (under the code): Copy link, Share link, Save as file (open it
+  with **Choose file**).
+- The phone asks once for permission to use the camera. Nothing goes online.
+  This is a one-time copy: ticks on the phone don't go back to the computer
+  (link the devices for that).
 
 ## Linked devices (one shared list, live)
 
@@ -131,10 +141,8 @@ Each device keeps its own place in step by step. It uses a free Firebase
    can only be read with its long secret code, and lists can't be browsed.
 3. In **Project settings → Your apps → Web (</>)**, register an app and copy
    the **projectId** and **apiKey** into the app, then tap **Start linking**.
-4. On each other device, scan the QR code shown there (opens the website), or
-   copy the link text, send it over, and paste it under **Join**. Use the
-   pasted link for the Android and iPhone apps and for a home-screen website,
-   because the camera opens Safari or Chrome instead.
+4. On each other device tap **📷 Scan from computer** and scan the QR code
+   shown under Link devices, or paste the link text under **Join**.
 
 The list is sent to that database only while devices are linked. Without
 internet the app carries on as normal and sends the changes when it's back

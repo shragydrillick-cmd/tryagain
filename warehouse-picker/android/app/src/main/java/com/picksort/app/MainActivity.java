@@ -1,9 +1,11 @@
 package com.picksort.app;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -11,6 +13,7 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -32,11 +35,14 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * Pick & Sort: shows the bundled web page (assets/www/index.html) full screen.
- * Everything runs on the phone. The app has no internet permission.
+ * Everything runs on the phone. The internet is only used if you link your devices;
+ * the camera only for "Scan from computer".
  */
 public class MainActivity extends Activity {
     private static final String START_URL = "https://appassets.androidplatform.net/assets/www/index.html";
     private static final int PICK_FILE = 1;
+    private static final int CAMERA_REQ = 2;
+    private PermissionRequest pendingCamera;
 
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
@@ -73,8 +79,24 @@ public class MainActivity extends Activity {
             }
         });
 
-        // "Choose file" button: open the phone's file picker.
+        // "Choose file" button: open the phone's file picker. "Scan from computer": the camera.
         web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(() -> {
+                    boolean video = false;
+                    for (String r : request.getResources()) if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) video = true;
+                    if (!video) { request.deny(); return; }
+                    if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                    } else {
+                        if (pendingCamera != null) pendingCamera.deny();
+                        pendingCamera = request;
+                        requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA_REQ);
+                    }
+                });
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
@@ -106,6 +128,18 @@ public class MainActivity extends Activity {
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        if (requestCode == CAMERA_REQ && pendingCamera != null) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
+                pendingCamera.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            else pendingCamera.deny();
+            pendingCamera = null;
+            return;
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, results);
     }
 
     /** Phone back button: let the page close the step screen or settings first. */

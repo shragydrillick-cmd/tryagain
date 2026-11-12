@@ -63,6 +63,6 @@ const { chromium } = require('playwright');
   await computer.context().unroute(/firestore\.googleapis\.com/); await computer.context().route(/firestore\.googleapis\.com/, fake);
   await computer.evaluate(() => syncPull()); await computer.waitForTimeout(1200); await phone.evaluate(() => syncPull()); await phone.waitForTimeout(800);
   console.log('back online, phone has:', await phone.evaluate(() => current ? current.name : 'nothing'), '|', await computer.innerText('#syncLine'));
-  await computer.screenshot({ path: process.argv[2] || '/dev/null', fullPage: false });
+  if (process.argv[2]) await computer.screenshot({ path: process.argv[2] });
   console.log('errors', errs); await b.close();
 })();

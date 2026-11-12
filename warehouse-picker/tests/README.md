@@ -36,3 +36,9 @@ linked devices with three browsers and a pretend Firestore database that
 answers the same calls: joining with the link text, ticks going both ways, new
 orders and **Clear list** reaching the other device, a wrong key, and changes
 made offline being sent once the database is reachable again.
+
+`qr-scan.test.js` makes a big list (80 orders), shows it as several changing QR
+codes, films them into a video (needs ffmpeg), uses the video as a second
+browser's camera, and checks that **Scan from computer** rebuilds exactly the same
+list. The iPhone app's self-test on the build server also makes the codes and
+reads them back with Safari's engine.

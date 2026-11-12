@@ -56,6 +56,7 @@ tasks.register('copyWebApp', Copy) {
             .replace('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'vendor/xlsx.full.min.js')
             .replace('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/', 'vendor/')
             .replace('https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/', 'vendor/')
+            .replace('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/', 'vendor/')
     }
 }
 preBuild.dependsOn copyWebApp

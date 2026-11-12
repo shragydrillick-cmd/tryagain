@@ -17,7 +17,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 }
 
-final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate, QLPreviewControllerDataSource {
+final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate, QLPreviewControllerDataSource {
     private var webView: WKWebView!
     private var previewURL: URL?
     private let selfTest = ProcessInfo.processInfo.arguments.contains("-selftest")
@@ -36,8 +36,11 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
         contentController.add(WeakHandler(self), name: "app")
         let config = WKWebViewConfiguration()
         config.userContentController = contentController
+        config.allowsInlineMediaPlayback = true // the camera picture for "Scan from computer" shows inside the page
+        config.mediaTypesRequiringUserActionForPlayback = []
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.scrollView.contentInsetAdjustmentBehavior = .never // the page handles the notch itself
         webView.isOpaque = false
         webView.backgroundColor = UIColor(red: 0.12, green: 0.37, blue: 0.55, alpha: 1)
@@ -111,6 +114,13 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
         (previewURL ?? URL(fileURLWithPath: "/")) as NSURL
     }
 
+    /// "Scan from computer" asks for the camera: iOS itself still asks the person the first time.
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decisionHandler(type == .camera ? .grant : .deny)
+    }
+
     /// If iOS ever stops the page in the background, reload it instead of showing a blank screen.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }
 
@@ -120,7 +130,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
         let js = """
         (function () {
           document.getElementById('exampleBtn').click();
-          var r = { native: !!window.NativeApp, libs: !!(window.jspdf && window.XLSX),
+          var r = { native: !!window.NativeApp, libs: !!(window.jspdf && window.XLSX), camera: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia), secure: window.isSecureContext,
                     orders: plan.orders.length, picks: plan.picks.length, unpack: plan.unpack.length };
           saveSettings(); pickPdf(); unpackPdf();
           return JSON.stringify(r);
@@ -167,6 +177,38 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
                     "Bib||BB100|4741631100103|B3|1",
                 ]
                 print(want.allSatisfy { r.contains($0) } ? "SELFTEST PDF OK" : "SELFTEST PDF FAIL wrong reading")
+            }
+            self.selfTestQr()
+        }
+    }
+
+    /// "Send to phone" codes made and read back by Safari's engine: the example list is cut into
+    /// several QR codes, each drawn and decoded like the camera would, then put back together.
+    private func selfTestQr() {
+        let js = """
+        document.getElementById('exampleBtn').click();
+        const want = plan.orders.length, packed = await packText(JSON.stringify(listToSend()));
+        const n = Math.ceil(packed.length / 120), parts = [];
+        for (let i = 0; i < n; i++) parts.push(`PS:test:${i + 1}/${n}:${packed.slice(i * 120, (i + 1) * 120)}`);
+        await loadJsQr();
+        clearList(true);
+        for (const t of parts.reverse()) {
+          const img = new Image(); img.src = await qrUrl(t, 4); await img.decode();
+          const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+          const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+          const code = jsQR(x.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+          if (!code) return 'could not decode a code';
+          await handleScan(code.data);
+        }
+        return JSON.stringify({ codes: n, orders: plan ? plan.orders.length : 0, want });
+        """
+        webView.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .failure(let error): print("SELFTEST QR FAIL \(error)")
+            case .success(let value):
+                let r = (value as? String) ?? ""
+                print("SELFTEST QR RESULT \(r)")
+                print(r.contains("\"orders\":5") && r.contains("\"want\":5") ? "SELFTEST QR OK" : "SELFTEST QR FAIL")
             }
         }
     }

@@ -188,6 +188,16 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
 }
 .sendbox { margin: 10px 0; padding: 12px; border: 1px solid var(--line, #ccd); border-radius: 10px; }
 img.qr { display: block; width: 220px; max-width: 100%; image-rendering: pixelated; background: #fff; padding: 6px; border-radius: 8px; margin: 6px 0; }
+img.qr.big { width: 320px; }
+.scanner { position: fixed; inset: 0; z-index: 50; background: #000; color: #fff; display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px); }
+.scanhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.scanview { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 12px; }
+.scanview video { width: 100%; height: 100%; object-fit: cover; }
+.scanframe { position: absolute; width: 70%; aspect-ratio: 1; max-height: 80%; border: 3px solid rgba(255,255,255,.85); border-radius: 14px; box-shadow: 0 0 0 9999px rgba(0,0,0,.35); }
+.scanhead .btn { color: #fff; border-color: rgba(255,255,255,.6); background: transparent; }
+.scanmsg { margin: 10px 0 6px; font-size: 17px; text-align: center; }
+.scanbar { height: 8px; background: rgba(255,255,255,.2); border-radius: 4px; overflow: hidden; }
+.scanbar > div { height: 100%; width: 0; background: #5fd08f; transition: width .2s; }
 </style>
 </head>
 <body>
@@ -216,6 +226,7 @@ img.qr { display: block; width: 220px; max-width: 100%; image-rendering: pixelat
       <label class="btn">Choose file<input id="fileInput" type="file" multiple accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls,.json,text/csv,application/pdf,application/json" hidden></label>
       <button class="btn secondary" id="pasteToggle" type="button">Paste instead</button>
       <button class="btn secondary" id="exampleBtn" type="button">Try an example</button>
+      <button class="btn secondary" id="scanBtn" type="button">&#128247; Scan from computer</button>
     </div>
     <div id="pasteBox" class="hidden" style="margin-top:12px">
       <textarea id="pasteText" placeholder="Order,Box,Item,Details,Qty&#10;10452,A3,Blue mug,12 oz,1&#10;10452,A14,Notebook,Lined A5,2"></textarea>
@@ -1587,34 +1598,129 @@ async function unpackText(s) {
 }
 function listToSend() {
   saveList();
-  return { pickAndSortList: 1, name: current.name, warnings: current.warnings || [], openChecks: savedList.openChecks || 0, lines: savedList.lines };
+  // compact: the field names once, then one row per line
+  const keys = [...new Set(savedList.lines.flatMap(l => Object.keys(l)))];
+  return { pickAndSortList: 1, name: current.name, warnings: current.warnings || [], openChecks: savedList.openChecks || 0,
+    k: keys, r: savedList.lines.map(l => keys.map(k => (l[k] === undefined ? null : l[k]))) };
+}
+/** Back from the compact form (or a plain list of lines). */
+function linesOf(data) {
+  if (Array.isArray(data.lines)) return data.lines;
+  if (!Array.isArray(data.k) || !Array.isArray(data.r)) return [];
+  return data.r.map(row => { const o = {}; data.k.forEach((k, i) => { if (row[i] != null) o[k] = row[i]; }); return o; });
 }
 let qrReady = null;
 const loadQr = () => (qrReady = qrReady || loadScript("https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"));
-/** A QR code picture for a link, or null when it's too long for one. */
-async function qrImage(text) {
+/** A QR code picture (as a data URL) for some text, or null when it's too long for one. */
+async function qrUrl(text, cell) {
   try { await loadQr(); } catch (e) { return null; }
-  try { const q = qrcode(0, "L"); q.addData(text, "Byte"); q.make(); return h("img", { src: q.createDataURL(4, 8), alt: "QR code", class: "qr" }); } catch (e) { return null; }
+  try { const q = qrcode(0, "L"); q.addData(text, "Byte"); q.make(); return q.createDataURL(cell || 4, 8); } catch (e) { return null; }
 }
+async function qrImage(text) { const u = await qrUrl(text); return u ? h("img", { src: u, alt: "QR code", class: "qr" }) : null; }
+const QR_PART = 700; // characters per code when a list needs several: small enough to scan easily off a screen
+let qrAnim = null;
 async function showSendBox() {
   const box = $("sendBox");
+  clearInterval(qrAnim);
   if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
-  box.replaceChildren(h("p", { class: "small muted" }, "Making the link…"));
-  const data = listToSend(), file = new Blob([JSON.stringify(data)], { type: "application/json" });
-  const link = siteUrl() + "#list=" + await packText(JSON.stringify(data));
-  const img = link.length <= 2900 ? await qrImage(link) : null;
-  const fileName = `pick-list-${fileStamp()}.json`;
+  box.replaceChildren(h("p", { class: "small muted" }, "Making the code…"));
+  const data = listToSend(), packed = await packText(JSON.stringify(data));
+  const link = siteUrl() + "#list=" + packed, fileName = `pick-list-${fileStamp()}.json`;
+  const file = new Blob([JSON.stringify(data)], { type: "application/json" });
+  let codeArea;
+  if (link.length <= 1000) { // one code: works with the in-app scanner, and with the phone's own camera (opens the website)
+    codeArea = h("div", null, await qrImage(link),
+      h("p", { class: "small" }, "On the phone: Pick & Sort → ", h("b", null, "📷 Scan from computer"), ", and point it here. (Or the phone's camera app: opens the list on the website.)"));
+  } else { // several codes, shown one after another: the scanner collects them in any order
+    const id = Math.random().toString(36).slice(2, 7), n = Math.ceil(packed.length / QR_PART);
+    const urls = [];
+    for (let i = 0; i < n; i++) urls.push(await qrUrl(`PS:${id}:${i + 1}/${n}:${packed.slice(i * QR_PART, (i + 1) * QR_PART)}`));
+    const img = h("img", { src: urls[0], alt: "QR code", class: "qr big" }), label = h("p", { class: "small muted", style: "margin:0" }, `Code 1 of ${n}`);
+    let i = 0, paused = false;
+    const pause = h("button", { class: "btn secondary small", type: "button", onclick: () => { paused = !paused; pause.textContent = paused ? "▶ Play" : "❚❚ Pause"; } }, "❚❚ Pause");
+    qrAnim = setInterval(() => { if (paused || box.classList.contains("hidden") || !document.body.contains(img)) return; i = (i + 1) % n; img.src = urls[i]; label.textContent = `Code ${i + 1} of ${n}`; }, 700);
+    codeArea = h("div", null, img, label,
+      h("p", { class: "small" }, `This list is big, so it's ${n} codes that change by themselves. On the phone: Pick & Sort → `, h("b", null, "📷 Scan from computer"),
+        ", and hold it on the codes until it says it has them all (it catches them in any order)."), pause);
+  }
   box.replaceChildren(
-    h("h3", { style: "margin-top:0" }, "Send this list to a phone"),
-    img ? h("div", null, img, h("p", { class: "small muted" }, "Scan this with the phone's camera: the list opens on the Pick & Sort website. Ticks made there stay on that phone.")) :
-      h("p", { class: "small muted" }, "This list is too long for a QR code. Send the link or the file instead."),
-    h("div", { class: "row" },
-      navigator.share ? h("button", { class: "btn secondary", type: "button", onclick: () => navigator.share({ title: "Pick list", url: link }).catch(() => {}) }, "Share link…") : null,
-      h("button", { class: "btn secondary", type: "button", onclick: e => copyText(link, e.currentTarget) }, "Copy link"),
-      h("button", { class: "btn secondary", type: "button", onclick: () => download(file, fileName) }, "Save as file")),
-    h("p", { class: "small muted" }, "In the Android or iPhone app: send yourself the file (email, WhatsApp, AirDrop…), then open it with Choose file. ",
-      syncOn() ? "These devices are linked, so the list is already on the others." : "Or link the devices once (Settings → More → Link devices) and every list shows up on all of them by itself."));
+    h("h3", { style: "margin-top:0" }, "Send this list to a phone"), codeArea,
+    h("details", null, h("summary", { class: "small" }, "Other ways"),
+      h("div", { class: "row", style: "margin-top:8px" },
+        navigator.share ? h("button", { class: "btn secondary small", type: "button", onclick: () => navigator.share({ title: "Pick list", url: link }).catch(() => {}) }, "Share link…") : null,
+        h("button", { class: "btn secondary small", type: "button", onclick: e => copyText(link, e.currentTarget) }, "Copy link"),
+        h("button", { class: "btn secondary small", type: "button", onclick: () => download(file, fileName) }, "Save as file")),
+      h("p", { class: "small muted" }, syncOn() ? "These devices are linked, so the list is already on the others." : "Or link the devices once (Settings → More → Link devices) and every list shows up on all of them by itself.")));
+}
+
+/* ---------- scanning a code from the computer's screen (in the apps and on the website) ---------- */
+let jsqrReady = null;
+const loadJsQr = () => (jsqrReady = jsqrReady || loadScript("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"));
+const scan = { parts: null, id: null, n: 0, stream: null, el: null, timer: null };
+/** What a scanned code says: a list link, a linked-devices link, or one part of a big list. Returns a message, or null when done. */
+async function handleScan(text) {
+  text = String(text || "").trim();
+  if (/#link=/.test(text)) { const e = joinLink(text); closeScanner(); toast(e || "This device is now linked."); return null; }
+  let m = text.match(/#list=([A-Za-z0-9_-]+)/);
+  if (m) {
+    try { const data = JSON.parse(await unpackText(m[1])); closeScanner(); receiveList(data, "from the computer"); return null; }
+    catch (e) { return "That code didn't read right. Hold steady and try again."; }
+  }
+  m = text.match(/^PS:(\w+):(\d+)\/(\d+):([A-Za-z0-9_-]*)$/);
+  if (!m) return "That isn't a Pick & Sort code.";
+  const [, id, i, n] = m;
+  if (scan.id !== id) { scan.id = id; scan.n = +n; scan.parts = new Map(); }
+  scan.parts.set(+i, m[4]);
+  if (scan.parts.size < scan.n) return `Got ${scan.parts.size} of ${scan.n} codes. Keep it pointed at the screen…`;
+  const packed = [...Array(scan.n).keys()].map(k => scan.parts.get(k + 1)).join("");
+  try { const data = JSON.parse(await unpackText(packed)); scan.id = null; closeScanner(); receiveList(data, "from the computer"); return null; }
+  catch (e) { scan.id = null; return "Something didn't read right. Starting again: keep it pointed at the codes."; }
+}
+function closeScanner() {
+  clearTimeout(scan.timer);
+  if (scan.stream) scan.stream.getTracks().forEach(t => t.stop());
+  scan.stream = null;
+  if (scan.el) scan.el.remove();
+  scan.el = null; document.body.style.overflow = "";
+}
+async function openScanner() {
+  const video = h("video", { playsinline: true, muted: true, autoplay: true }), msg = h("p", { class: "scanmsg" }, "Starting the camera…");
+  const bar = h("div", { class: "scanbar" }, h("div"));
+  scan.el = h("div", { class: "scanner", role: "dialog", "aria-label": "Scan from computer" },
+    h("div", { class: "scanhead" }, h("b", null, "Scan from computer"), h("button", { class: "btn secondary small", type: "button", onclick: closeScanner }, "✕ Close")),
+    h("div", { class: "scanview" }, video, h("div", { class: "scanframe" })), msg, bar);
+  document.body.append(scan.el); document.body.style.overflow = "hidden";
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
+    await loadJsQr();
+    scan.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    video.srcObject = scan.stream; await video.play();
+  } catch (e) {
+    msg.textContent = /no camera/.test(e.message) ? "The camera can't be used here. On the computer use \"Other ways\" (link or file) instead."
+      : /Permission|NotAllowed/i.test(e.name + e.message) ? "The camera wasn't allowed. Allow the camera for Pick & Sort in the phone's Settings, then try again."
+      : "Couldn't start the camera: " + e.message;
+    return;
+  }
+  msg.textContent = "Point the camera at the code on the computer.";
+  const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
+  let busy = false;
+  const tick = async () => {
+    if (!scan.el) return;
+    if (!busy && video.readyState >= 2 && video.videoWidth) {
+      busy = true;
+      const w = Math.min(960, video.videoWidth), hh = Math.round(video.videoHeight * w / video.videoWidth);
+      canvas.width = w; canvas.height = hh; ctx.drawImage(video, 0, 0, w, hh);
+      const code = jsQR(ctx.getImageData(0, 0, w, hh).data, w, hh, { inversionAttempts: "dontInvert" });
+      if (code && code.data) {
+        const r = await handleScan(code.data);
+        if (r && scan.el) { msg.textContent = r; bar.firstChild.style.width = scan.n && scan.parts ? `${Math.round(100 * scan.parts.size / scan.n)}%` : "0"; }
+      }
+      busy = false;
+    }
+    scan.timer = setTimeout(tick, 120);
+  };
+  tick();
 }
 async function copyText(text, btn) {
   try { await navigator.clipboard.writeText(text); }
@@ -1623,9 +1729,10 @@ async function copyText(text, btn) {
 }
 /** A list that came from another device: open it, but ask first if it would replace one in progress. */
 function receiveList(data, how) {
-  if (!data || !Array.isArray(data.lines) || !data.lines.length) { showLoadMsg("That list is empty or damaged."); return; }
+  const lines = data ? linesOf(data) : [];
+  if (!lines.length) { showLoadMsg("That list is empty or damaged."); return; }
   const use = () => {
-    current = { lines: data.lines, warnings: data.warnings || [], name: data.name || "List from another device", src: null, openChecks: data.openChecks || 0 };
+    current = { lines, warnings: data.warnings || [], name: data.name || "List from another device", src: null, openChecks: data.openChecks || 0 };
     $("loadMsg").replaceChildren(); rebuild(); toast(`List received (${how}).`);
   };
   if (!current) return use();
@@ -1731,7 +1838,7 @@ function linkSection() {
       const link = linkText(), img = await qrImage(link);
       wrap.replaceChildren(
         h("p", { class: "small", id: "syncStatus" }, ""),
-        h("p", { class: "small muted" }, "To link another phone or computer: scan this with its camera (opens the website), or send it the link text and paste it there under \"Join\"."),
+        h("p", { class: "small muted" }, "To link another phone or computer: on it, tap 📷 Scan from computer (on the main screen) and point it here. Or send it the link text and paste it under \"Join\"."),
         img, h("div", { class: "row" },
           h("button", { class: "btn secondary small", type: "button", onclick: e => copyText(link, e.currentTarget) }, "Copy link text"),
           navigator.share ? h("button", { class: "btn secondary small", type: "button", onclick: () => navigator.share({ title: "Link Pick & Sort", url: link }).catch(() => {}) }, "Share…") : null,
@@ -2882,6 +2989,7 @@ function renderChecks() {
 
 /** Phone back button (Android app): close what's open first; returns true if handled. */
 window.appBack = () => {
+  if (scan.el) { closeScanner(); return true; }
   if (!$("stepper").classList.contains("hidden")) { if (stepView !== "step") { $("stepPrev").click(); } else closeSteps(); return true; }
   if (view === "settings") {
     const up = { map: "home", order: "home", more: "home", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
@@ -2896,6 +3004,7 @@ applyTheme();
 showInvStatus();
 $("clearBtn").onclick = e => tapTwice(e.currentTarget, syncOn() ? "Clear it on all linked devices?" : "Clear everything?", () => clearList());
 $("sendBtn").onclick = showSendBox;
+$("scanBtn").onclick = openScanner;
 restoreList();
 openFromLink();
 window.addEventListener("hashchange", openFromLink);

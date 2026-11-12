@@ -3,6 +3,9 @@
 
     <!-- Internet is only used if you link your devices (your own Firebase database); otherwise nothing is sent anywhere. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Camera: only for "Scan from computer" (reading the list's QR code off the computer's screen). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:allowBackup="true"
