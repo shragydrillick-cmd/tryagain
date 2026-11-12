@@ -28,7 +28,8 @@ need an account, Claude, or a server.
 
 ## Packing slips (PDF)
 
-The quickest way: choose the PDF with all the packing slips. For each slip the
+The quickest way: choose the PDF with all the packing slips, or select many PDFs
+at once (one per order is fine); they're all read together into one pick list. For each slip the
 app reads the **order number**, every item's **name** (the part after the last
 " - " is kept as the colour/size), **SKU**, **barcode**, **Bin** and **Quantity**,
 and checks the count against the slip's **"Total items"**. Any slip that doesn't
