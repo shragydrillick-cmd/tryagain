@@ -1,14 +1,14 @@
-Order,Item,Qty
-10452,3,1
-10452,10,2
-10452,87,1
-10449,10,1
-10449,40,1
-10449,59,1
-10460,59,2
-10460,5,1
-10451,72,1
-10451,3,1
-10455,40,1
-10455,26,1
-10455,94,1
+Order,Box,Item,Details,Qty
+10452,1A,Blue ceramic mug,12 oz,1
+10452,3B,Notebook,"Lined, A5",2
+10452,1A,Mug coaster,Cork,1
+10449,3B,Notebook,"Lined, A5",1
+10449,15A,Desk lamp,White,1
+10449,27C,Phone stand,Black,1
+10460,27C,Phone stand,Black,2
+10460,6A,Pen set,Black ink,1
+10451,22D,Cable ties,Pack of 50,1
+10451,1A,Blue ceramic mug,12 oz,1
+10455,15A,Desk lamp,White,1
+10455,12B,Sticky notes,Yellow,1
+10455,29A,Water bottle,750 ml,1

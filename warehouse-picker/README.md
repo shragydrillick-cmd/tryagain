@@ -30,18 +30,28 @@ need an account, Claude, or a server.
 
 One line per item works best:
 
-| Order | Item | Qty |
-|-------|------|-----|
-| 10452 | 3    | 1   |
-| 10452 | 10   | 2   |
-| 10460 | 59   | 2   |
+| Order | Box | Item             | Details | Qty |
+|-------|-----|------------------|---------|-----|
+| 10452 | 1A  | Blue ceramic mug | 12 oz   | 1   |
+| 10452 | 3B  | Notebook         | Lined   | 2   |
+| 10452 | 1A  | Mug coaster      | Cork    | 1   |
 
-- Qty is optional (1 if left out).
-- If the order number is only on the first line of each order and blank
-  below it, that works too.
-- One line per order also works: `10452, 3, 10, 10, 87` (or `10x2`).
+- **Box** is the number on the shelf box (like 1A). It decides the walking order.
+- **Item** and **Details** say what to take from the box. Any other columns
+  (color, size…) are shown as details too. A box can hold more than one kind of
+  item; each gets its own line.
+- The **pick list** shows box + item. The **unpack list** shows only the item
+  and which order it goes to.
+- Qty is optional (1 if left out). A blank order number means "same order as
+  the line above".
 
 See `example-orders.csv`.
+
+## The shelf map
+
+Each shelving unit can have its own number of shelves. For each shelf, type its
+boxes from left to right: a run like `1A-10A` or `1-25`, or a list like
+`1A, 2A, 5A`.
 
 ## Ways to walk a shelving unit
 

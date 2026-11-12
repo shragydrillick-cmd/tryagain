@@ -79,6 +79,10 @@ tr.last td { background: var(--good-soft); }
 .pile { display: inline-block; min-width: 42px; text-align: center; background: var(--accent); color: var(--accent-text);
   border-radius: 8px; padding: 2px 8px; font-size: 20px; font-weight: 800; }
 .lastnote { color: var(--good); font-weight: 700; font-size: 14px; }
+.iname { font-weight: 700; font-size: 17px; }
+.idet { color: var(--muted); font-size: 14px; }
+td.box { font-size: 20px; font-weight: 800; white-space: nowrap; }
+#stepper .details { font-size: 18px; color: var(--muted); }
 .key { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
 .key div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; align-items: center; gap: 10px; }
 .unit { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 10px 0; }
@@ -118,14 +122,14 @@ tr.last td { background: var(--good-soft); }
 <main id="homeView">
   <section class="card no-print">
     <h2>1. Add your orders file</h2>
-    <p class="muted small">A spreadsheet (Excel or CSV) with one line per item: <b>Order number</b>, <b>Item number</b>, and (optional) <b>Quantity</b>.</p>
+    <p class="muted small">A spreadsheet (Excel or CSV) with one line per item: <b>Order</b>, <b>Box</b> (the shelf number, like 1A), <b>Item</b> (what it is), and optional <b>Details</b> and <b>Qty</b>. Any other columns are shown as details.</p>
     <div class="row">
       <label class="btn">Choose file<input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" hidden></label>
       <button class="btn secondary" id="pasteToggle" type="button">Paste instead</button>
       <button class="btn secondary" id="exampleBtn" type="button">Try an example</button>
     </div>
     <div id="pasteBox" class="hidden" style="margin-top:12px">
-      <textarea id="pasteText" placeholder="Order,Item,Qty&#10;10452,3,1&#10;10452,10,2&#10;10460,59,1"></textarea>
+      <textarea id="pasteText" placeholder="Order,Box,Item,Details,Qty&#10;10452,1A,Blue mug,12 oz,1&#10;10452,3B,Notebook,Lined A5,2"></textarea>
       <div class="row" style="margin-top:8px"><button class="btn" id="pasteGo" type="button">Use this</button></div>
     </div>
     <p class="small muted" style="margin-bottom:0">
@@ -133,8 +137,8 @@ tr.last td { background: var(--good-soft); }
       &nbsp;·&nbsp; File layout:
       <select id="formatSel" aria-label="File layout">
         <option value="auto">Figure it out</option>
-        <option value="long">One line per item (Order, Item, Qty)</option>
-        <option value="wide">One line per order (Order, item, item, …)</option>
+        <option value="long">One line per item (Order, Box, Item, Qty)</option>
+        <option value="wide">One line per order (Order, box, box, …)</option>
       </select>
     </p>
     <div id="loadMsg"></div>
@@ -215,67 +219,88 @@ function parseDelimited(text) {
 }
 
 const clean = v => String(v == null ? "" : v).trim();
-/** "#0059" -> "59";  "A-12" stays "A-12". */
-function normItem(v) {
-  const s = clean(v).replace(/^#\s*/, "");
-  return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s;
+/** Box codes: "#01a " -> "1A". Leading zeros and spaces don't matter. */
+function normBox(v) {
+  return clean(v).replace(/^#\s*/, "").replace(/\s+/g, "").toUpperCase().replace(/\d+/g, d => String(parseInt(d, 10)));
 }
-const itemNumber = s => (/^\d+$/.test(s) ? parseInt(s, 10) : NaN);
 const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+
+/**
+ * Expand a shelf's box list, left to right.
+ * "1A-10A" -> 1A,2A..10A   "A1-A5" -> A1..A5   "1-25" -> 1..25   "1A, 3A, 7C" -> as written
+ */
+function expandBoxes(text) {
+  const out = [], errors = [];
+  String(text || "").split(/[,;\n]+/).map(t => t.trim()).filter(Boolean).forEach(part => {
+    const m = part.replace(/\s+/g, "").toUpperCase().match(/^([A-Z]*)(\d+)([A-Z]*)(?:-|–|TO)([A-Z]*)(\d+)([A-Z]*)$/);
+    if (m && m[1] === m[4] && m[3] === m[6]) {
+      const a = parseInt(m[2], 10), b = parseInt(m[5], 10), step = b >= a ? 1 : -1;
+      if (Math.abs(b - a) > 5000) { errors.push(`"${part}" is too long a range.`); return; }
+      for (let n = a; ; n += step) { out.push(`${m[1]}${n}${m[3]}`); if (n === b) break; }
+    } else if (m) {
+      errors.push(`"${part}": both ends of a range need the same letters (like 1A-10A).`);
+    } else out.push(normBox(part));
+  });
+  return { boxes: out, errors };
+}
 
 function findHeader(row) {
   const c = row.map(x => clean(x).toLowerCase());
-  const oi = c.findIndex(x => /order|invoice|ticket|^po\b|customer/.test(x));
+  const used = new Set();
+  const pick = re => { const i = c.findIndex((x, j) => !used.has(j) && x && re.test(x)); if (i >= 0) used.add(i); return i; };
+  const oi = pick(/order|invoice|ticket|^po\b|customer/);
   if (oi < 0) return null;
-  const itemCols = c.map((x, i) => (i !== oi && /item|sku|product|part|code|number|^#$|^no\.?$/.test(x) ? i : -1)).filter(i => i >= 0);
-  if (!itemCols.length) return null;
-  const qi = c.findIndex((x, i) => i !== oi && !itemCols.includes(i) && /qty|quant|amount|count|units|pcs|how many/.test(x));
-  return { oi, itemCols, qi };
+  const qi = pick(/qty|quant|amount|count|units|pcs|how many/);
+  let bi = pick(/box|bin|loc|slot|position|shelf|number|^no\.?$|^#$|code|sku/);
+  let ni = pick(/name|desc|product|item|title|article/);
+  if (bi < 0 && ni >= 0) { bi = ni; ni = -1; } // only one item column: it's the box
+  if (bi < 0) return null;
+  const di = c.map((x, i) => (!used.has(i) && x ? i : -1)).filter(i => i >= 0);
+  return { oi, qi, bi, ni, di, labels: row.map(clean) };
 }
 
-/** Turn rows into order lines: [{order, item, qty}] */
+/** Turn rows into order lines: [{order, box, name, details, qty}] */
 function rowsToLines(rows, format) {
   rows = rows.map(r => r.map(clean)).filter(r => r.some(Boolean));
   const warnings = [];
   if (!rows.length) return { lines: [], warnings: ["The file looks empty."] };
-  let header = findHeader(rows[0]);
-  let body = header ? rows.slice(1) : rows;
+  const header = findHeader(rows[0]);
+  const body = header ? rows.slice(1) : rows;
   let mode = format;
-  if (mode === "auto") {
-    if (header) mode = header.itemCols.length > 1 && header.qi < 0 ? "wide" : "long";
-    else mode = Math.max(...rows.map(r => r.filter(Boolean).length)) > 3 ? "wide" : "long";
-  }
+  if (mode === "auto") mode = !header && Math.max(...rows.map(r => r.filter(Boolean).length)) > 3 ? "wide" : "long";
   const oi = header ? header.oi : 0;
   const lines = [];
   let lastOrder = "";
+  const lineNo = idx => idx + (header ? 2 : 1);
   body.forEach((r, idx) => {
-    let order = r[oi] || "";
-    if (!order) order = lastOrder; // blank order cell = same order as the line above
-    if (!order) { warnings.push(`Line ${idx + (header ? 2 : 1)}: no order number, skipped.`); return; }
+    let order = r[oi] || lastOrder; // blank order cell = same order as the line above
+    if (!order) { warnings.push(`Line ${lineNo(idx)}: no order number, skipped.`); return; }
     lastOrder = order;
     if (mode === "wide") {
       r.forEach((cell, i) => {
         if (i === oi || !cell) return;
         const m = cell.match(/^(.+?)\s*[x×*]\s*(\d+)$/i);
-        lines.push({ order, item: normItem(m ? m[1] : cell), qty: m ? parseInt(m[2], 10) : 1 });
+        lines.push({ order, box: normBox(m ? m[1] : cell), name: "", details: "", qty: m ? parseInt(m[2], 10) : 1 });
       });
-    } else {
-      const ii = header ? header.itemCols[0] : 1;
-      const qi = header ? header.qi : 2;
-      const item = normItem(r[ii]);
-      if (!item) { warnings.push(`Line ${idx + (header ? 2 : 1)} (order ${order}): no item number, skipped.`); return; }
-      let qty = 1;
-      if (qi >= 0 && r[qi] !== undefined && r[qi] !== "") {
-        qty = parseInt(String(r[qi]).replace(/[^\d]/g, ""), 10);
-        if (!(qty >= 0)) { warnings.push(`Line ${idx + (header ? 2 : 1)}: quantity "${r[qi]}" isn't a number, used 1.`); qty = 1; }
-      }
-      if (qty > 0) lines.push({ order, item, qty });
+      return;
     }
+    const bi = header ? header.bi : 1, qi = header ? header.qi : 2;
+    const box = normBox(r[bi]);
+    if (!box) { warnings.push(`Line ${lineNo(idx)} (order ${order}): no box number, skipped.`); return; }
+    let qty = 1;
+    if (qi >= 0 && r[qi] !== undefined && r[qi] !== "") {
+      qty = parseInt(String(r[qi]).replace(/[^\d]/g, ""), 10);
+      if (!(qty >= 0)) { warnings.push(`Line ${lineNo(idx)}: quantity "${r[qi]}" isn't a number, used 1.`); qty = 1; }
+    }
+    const name = header && header.ni >= 0 ? r[header.ni] || "" : "";
+    const details = header ? header.di.filter(i => r[i])
+      .map(i => /detail|note|desc|info|comment|variant|option|extra/i.test(header.labels[i]) ? r[i] : `${header.labels[i]}: ${r[i]}`).join(" · ") : "";
+    if (qty > 0) lines.push({ order, box, name, details, qty });
   });
   return { lines, warnings, mode };
 }
 
-/** Map every item number to its place in the walk. Returns {locate, problems}. */
+/** Map every box code to its place in the walk. Returns {locate, problems, size}. */
 function buildLocator(settings) {
   const map = new Map(), problems = [];
   const walkIndex = new Map(settings.walk.map((id, i) => [id, i]));
@@ -284,14 +309,11 @@ function buildLocator(settings) {
     const S = u.shelves.length;
     const block = Math.max(1, parseInt(u.block, 10) || 5);
     u.shelves.forEach((sh, s) => {
-      const a = parseInt(sh.start, 10), b = parseInt(sh.end, 10);
-      if (!Number.isFinite(a) || !Number.isFinite(b)) return;
-      const L = Math.abs(b - a) + 1;
-      if (L > 50000) { problems.push(`${u.name}, shelf ${s + 1}: range too big.`); return; }
-      const step = b >= a ? 1 : -1;
-      for (let p = 0; p < L; p++) {
-        const n = a + p * step;
-        if (map.has(n)) { const o = map.get(n); problems.push(`Number ${n} is on both "${o.unitName}" shelf ${o.shelf} and "${u.name}" shelf ${s + 1}.`); continue; }
+      const { boxes, errors } = expandBoxes(sh.boxes);
+      errors.forEach(e => problems.push(`${u.name}, shelf ${s + 1}: ${e}`));
+      const L = boxes.length;
+      boxes.forEach((code, p) => {
+        if (map.has(code)) { const o = map.get(code); problems.push(`Box ${code} is on both "${o.unitName}" shelf ${o.shelf} and "${u.name}" shelf ${s + 1}.`); return; }
         const x = u.dir === "rtl" ? L - 1 - p : p;
         let k;
         switch (u.pattern) {
@@ -300,12 +322,12 @@ function buildLocator(settings) {
           case "blocks": k = [Math.floor(x / block), s, x]; break;
           default: k = [s, x]; // rows-down
         }
-        map.set(n, { unitId: u.id, unitName: u.name, shelf: s + 1, shelves: S, pos: p + 1, key: [wi, ...k] });
-      }
+        map.set(code, { unitId: u.id, unitName: u.name, shelf: s + 1, shelves: S, pos: p + 1, key: [wi, ...k] });
+      });
     });
   });
-  if (problems.length > 6) problems.splice(6, problems.length - 6, `…and more overlaps.`);
-  return { locate: n => map.get(n) || null, problems, size: map.size };
+  if (problems.length > 6) problems.splice(6, problems.length - 6, "…and more.");
+  return { locate: code => map.get(normBox(code)) || null, problems, size: map.size };
 }
 
 function compareKeys(a, b) {
@@ -319,80 +341,105 @@ function compareKeys(a, b) {
 /** The whole plan: pick list (shelf order) + unpack list (last picked first). */
 function makePlan(lines, settings) {
   const { locate } = buildLocator(settings);
-  // orders, in first-seen order
   const orders = new Map();
   lines.forEach(l => {
-    if (!orders.has(l.order)) orders.set(l.order, { raw: l.order, units: 0, lineCount: 0, items: new Map() });
+    if (!orders.has(l.order)) orders.set(l.order, { raw: l.order, units: 0, things: new Map() });
     const o = orders.get(l.order);
     o.units += l.qty;
-    o.items.set(l.item, (o.items.get(l.item) || 0) + l.qty);
+    const k = `${l.box}\u0000${l.name}\u0000${l.details}`;
+    if (!o.things.has(k)) o.things.set(k, { box: l.box, name: l.name, details: l.details, qty: 0 });
+    o.things.get(k).qty += l.qty;
   });
   const orderList = [...orders.values()];
   if (settings.orderNumbering !== "file") orderList.sort((a, b) => natural(a.raw, b.raw));
-  orderList.forEach((o, i) => { o.label = i + 1; o.lineCount = o.items.size; });
+  orderList.forEach((o, i) => { o.label = i + 1; });
 
-  // items across all orders
-  const items = new Map();
-  orderList.forEach(o => o.items.forEach((qty, item) => {
-    if (!items.has(item)) items.set(item, { item, qty: 0, orders: [], loc: locate(itemNumber(item)) });
-    const it = items.get(item);
-    it.qty += qty;
-    it.orders.push({ label: o.label, raw: o.raw, qty });
+  // One pick line per box + item (a box can hold more than one kind of item)
+  const picks = new Map();
+  orderList.forEach(o => o.things.forEach((t, k) => {
+    if (!picks.has(k)) picks.set(k, { box: t.box, name: t.name, details: t.details, qty: 0, orders: [], loc: locate(t.box) });
+    const p = picks.get(k);
+    p.qty += t.qty;
+    p.orders.push({ label: o.label, raw: o.raw, qty: t.qty });
   }));
-  const picks = [...items.values()];
-  picks.sort((a, b) => {
-    if (a.loc && b.loc) return compareKeys(a.loc.key, b.loc.key);
-    if (a.loc) return -1;
-    if (b.loc) return 1;
-    return natural(a.item, b.item);
+  const list = [...picks.values()];
+  list.sort((a, b) => {
+    if (a.loc && b.loc) { const d = compareKeys(a.loc.key, b.loc.key); if (d) return d; }
+    else if (a.loc) return -1;
+    else if (b.loc) return 1;
+    else { const d = natural(a.box, b.box); if (d) return d; }
+    return natural(a.name, b.name) || natural(a.details, b.details);
   });
-  picks.forEach((p, i) => { p.step = i + 1; });
+  list.forEach((p, i) => { p.step = i + 1; });
 
-  // unpack: top of the cart = last picked
+  // Unpack: top of the cart = last picked
   const left = new Map(orderList.map(o => [o.label, o.units]));
   const unpack = [];
-  [...picks].reverse().forEach(p => {
+  [...list].reverse().forEach(p => {
     p.orders.forEach(o => {
       left.set(o.label, left.get(o.label) - o.qty);
-      unpack.push({ item: p.item, qty: o.qty, label: o.label, raw: o.raw, loc: p.loc, last: left.get(o.label) === 0 });
+      unpack.push({ box: p.box, name: p.name, details: p.details, qty: o.qty, label: o.label, raw: o.raw, last: left.get(o.label) === 0 });
     });
   });
   unpack.forEach((u, i) => { u.step = i + 1; });
 
-  return {
-    orders: orderList, picks, unpack,
-    unknown: picks.filter(p => !p.loc).map(p => p.item),
-    totalUnits: picks.reduce((s, p) => s + p.qty, 0),
-  };
+  const unknown = [...new Set(list.filter(p => !p.loc).map(p => p.box))];
+  return { orders: orderList, picks: list, unpack, unknown, totalUnits: list.reduce((s, p) => s + p.qty, 0) };
 }
+/** What to call an item when the box number isn't shown. */
+const itemName = t => t.name || `Item from box ${t.box}`;
 
 /* ---------- settings ---------- */
 let nextId = 1;
-function makeUnits(nUnits, shelvesPer, perShelf, firstNumber) {
+/**
+ * Quick-setup map. shelvesPer: a number, or a list (one per unit).
+ * letters=true: every shelf of a unit shares box numbers, with a shelf letter (top = A): 1A..10A, 1B..10B.
+ * letters=false: numbers just keep counting: 1..10, 11..20.
+ */
+function makeUnits(shelvesPer, perShelf, firstNumber, letters) {
   const units = []; let n = firstNumber;
-  for (let u = 0; u < nUnits; u++) {
-    const count = Array.isArray(shelvesPer) ? shelvesPer[u] : shelvesPer;
+  shelvesPer.forEach((count, u) => {
     const shelves = [];
-    for (let s = 0; s < count; s++) { shelves.push({ start: n, end: n + perShelf - 1 }); n += perShelf; }
+    for (let s = 0; s < count; s++) {
+      if (letters) { const L = String.fromCharCode(65 + (s % 26)); shelves.push({ boxes: `${n}${L}-${n + perShelf - 1}${L}` }); }
+      else { shelves.push({ boxes: `${n}-${n + perShelf - 1}` }); n += perShelf; }
+    }
+    if (letters) n += perShelf;
     units.push({ id: nextId++, name: `Unit ${u + 1}`, shelves, pattern: "rows-down", block: 5, dir: "ltr" });
-  }
+  });
   return units;
 }
+/** Suggest the next shelf below, from the one above: 1A-10A -> 1B-10B; 1-25 -> 26-50. */
+function guessNextShelf(text) {
+  const m = String(text || "").replace(/\s+/g, "").toUpperCase().match(/^([A-Z]*)(\d+)([A-Z]?)-([A-Z]*)(\d+)([A-Z]?)$/);
+  if (!m) return "";
+  const a = +m[2], b = +m[5];
+  if (m[3] && m[3] === m[6] && m[3] !== "Z") { const L = String.fromCharCode(m[3].charCodeAt(0) + 1); return `${m[1]}${a}${L}-${m[4]}${b}${L}`; }
+  if (!m[3] && !m[6]) return `${m[1]}${b + 1}-${m[4]}${b + 1 + (b - a)}`;
+  return "";
+}
 function defaultSettings() {
-  const units = makeUnits(4, 4, 25, 1);
-  return { version: 1, units, walk: units.map(u => u.id), orderNumbering: "sorted", theme: "auto" };
+  const units = makeUnits([3, 2, 4, 3], 10, 1, true);
+  return { version: 2, units, walk: units.map(u => u.id), orderNumbering: "sorted", theme: "auto" };
 }
 function fixSettings(s) {
   if (!s || !Array.isArray(s.units)) return defaultSettings();
-  s.units.forEach(u => { if (!u.id) u.id = nextId++; nextId = Math.max(nextId, u.id + 1); u.shelves = u.shelves || []; u.pattern = u.pattern || "rows-down"; u.dir = u.dir || "ltr"; u.block = u.block || 5; });
+  s.units.forEach(u => {
+    if (!u.id) u.id = nextId++;
+    nextId = Math.max(nextId, u.id + 1);
+    u.shelves = (u.shelves || []).map(sh => sh.boxes !== undefined ? sh
+      : { boxes: sh.start === sh.end ? `${sh.start ?? ""}` : `${sh.start ?? ""}-${sh.end ?? ""}` }); // old number ranges
+    u.pattern = u.pattern || "rows-down"; u.dir = u.dir || "ltr"; u.block = u.block || 5;
+  });
   const ids = new Set(s.units.map(u => u.id));
   s.walk = (s.walk || []).filter(id => ids.has(id));
   s.units.forEach(u => { if (!s.walk.includes(u.id)) s.walk.push(u.id); });
   s.orderNumbering = s.orderNumbering || "sorted";
   s.theme = s.theme || "auto";
+  s.version = 2;
   return s;
 }
-const STORE_KEY = "pick-and-sort-settings-v1";
+const STORE_KEY = "pick-and-sort-settings-v2";
 function loadSettings() {
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) return fixSettings(JSON.parse(raw)); } catch (e) {}
   return defaultSettings();
@@ -403,70 +450,24 @@ function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(s
    SCREEN CODE
    ===================================================================== */
 let settings = loadSettings();
-let current = null; // { lines, warnings, name }
+let current = null; // { lines, warnings, name, src }
 let plan = null;
 const $ = id => document.getElementById(id);
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (k === "class") el.className = v;
-    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k.startsWith("on")) { if (v) el.addEventListener(k.slice(2), v); }
     else if (v === true) el.setAttribute(k, "");
     else if (v !== false && v != null) el.setAttribute(k, v);
   }
   kids.flat().forEach(k => { if (k != null && k !== false) el.append(k.nodeType ? k : String(k)); });
   return el;
 }
-const where = loc => (loc ? `${loc.unitName} · shelf ${loc.shelf}` : "Not on your map");
 function applyTheme() {
   if (settings.theme === "auto") document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme", settings.theme);
 }
-
-/* ---------- loading ---------- */
-function showLoadMsg(text, kind) { $("loadMsg").innerHTML = ""; if (text) $("loadMsg").append(h("div", { class: `notice ${kind || "warn"}` }, text)); }
-
-function useRows(rows, name) {
-  const r = rowsToLines(rows, $("formatSel").value);
-  if (!r.lines.length) { showLoadMsg("Couldn't find any orders in that file. " + (r.warnings[0] || "Try the template.")); return; }
-  current = { lines: r.lines, warnings: r.warnings, name, src: rows };
-  showLoadMsg("");
-  rebuild();
-  $("results").scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-$("fileInput").addEventListener("change", async e => {
-  const f = e.target.files[0]; e.target.value = "";
-  if (!f) return;
-  try {
-    if (/\.xlsx?$/i.test(f.name)) {
-      if (!window.XLSX) { showLoadMsg("Excel files need an internet connection the first time. Save the sheet as CSV instead, or connect and reload."); return; }
-      const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      useRows(XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }), f.name);
-    } else useRows(parseDelimited(await f.text()), f.name);
-  } catch (err) { showLoadMsg("Couldn't read that file: " + err.message); }
-});
-$("pasteToggle").onclick = () => $("pasteBox").classList.toggle("hidden");
-$("pasteGo").onclick = () => useRows(parseDelimited($("pasteText").value), "Pasted list");
-$("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name); };
-
-const EXAMPLE = `Order,Item,Qty
-10452,3,1
-10452,10,2
-10452,87,1
-10449,10,1
-10449,40,1
-10449,59,1
-10460,59,2
-10460,5,1
-10451,72,1
-10451,3,1
-10455,40,1
-10455,26,1
-10455,94,1`;
-$("exampleBtn").onclick = () => useRows(parseDelimited(EXAMPLE), "Example orders");
-$("templateBtn").onclick = () => download(new Blob(["Order,Item,Qty\n"], { type: "text/csv" }), "orders-template.csv");
 
 /* Inside a claude.ai page, files go through the page's save prompt; on its own, a normal download. */
 const inClaude = !!(window.claude && window.claude.use);
@@ -496,6 +497,51 @@ async function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
+/* ---------- loading ---------- */
+function showLoadMsg(text, kind) { $("loadMsg").innerHTML = ""; if (text) $("loadMsg").append(h("div", { class: `notice ${kind || "warn"}` }, text)); }
+
+function useRows(rows, name) {
+  const r = rowsToLines(rows, $("formatSel").value);
+  if (!r.lines.length) { showLoadMsg("Couldn't find any orders in that file. " + (r.warnings[0] || "Try the template.")); return; }
+  current = { lines: r.lines, warnings: r.warnings, name, src: rows };
+  showLoadMsg("");
+  rebuild();
+  $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("fileInput").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try {
+    if (/\.xlsx?$/i.test(f.name)) {
+      if (!window.XLSX) { showLoadMsg("Excel files need an internet connection. Save the sheet as CSV instead, or connect and reload."); return; }
+      const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      useRows(XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }), f.name);
+    } else useRows(parseDelimited(await f.text()), f.name);
+  } catch (err) { showLoadMsg("Couldn't read that file: " + err.message); }
+});
+$("pasteToggle").onclick = () => $("pasteBox").classList.toggle("hidden");
+$("pasteGo").onclick = () => useRows(parseDelimited($("pasteText").value), "Pasted list");
+$("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name); };
+
+const EXAMPLE = `Order,Box,Item,Details,Qty
+10452,1A,Blue ceramic mug,12 oz,1
+10452,3B,Notebook,"Lined, A5",2
+10452,1A,Mug coaster,Cork,1
+10449,3B,Notebook,"Lined, A5",1
+10449,15A,Desk lamp,White,1
+10449,27C,Phone stand,Black,1
+10460,27C,Phone stand,Black,2
+10460,6A,Pen set,Black ink,1
+10451,22D,Cable ties,Pack of 50,1
+10451,1A,Blue ceramic mug,12 oz,1
+10455,15A,Desk lamp,White,1
+10455,12B,Sticky notes,Yellow,1
+10455,29A,Water bottle,750 ml,1`;
+$("exampleBtn").onclick = () => useRows(parseDelimited(EXAMPLE), "Example orders");
+$("templateBtn").onclick = () => download(new Blob(["Order,Box,Item,Details,Qty\n"], { type: "text/csv" }), "orders-template.csv");
+
 /* ---------- results ---------- */
 let pickedDone = new Set();
 function rebuild() {
@@ -507,34 +553,42 @@ function rebuild() {
   $("stats").replaceChildren(
     h("div", { class: "stat" }, h("b", null, plan.orders.length), "orders"),
     h("div", { class: "stat" }, h("b", null, plan.totalUnits), "items to pick"),
-    h("div", { class: "stat" }, h("b", null, plan.picks.length), "stops on the shelves"));
+    h("div", { class: "stat" }, h("b", null, new Set(plan.picks.map(p => p.box)).size), "boxes to visit"));
   const w = $("warnings"); w.replaceChildren();
   if (plan.unknown.length) w.append(h("div", { class: "notice warn" },
-    `${plan.unknown.length} item number(s) aren't on your shelf map, so they're listed at the end: ${plan.unknown.slice(0, 12).join(", ")}${plan.unknown.length > 12 ? "…" : ""}. You can fix the map in Settings.`));
+    `${plan.unknown.length} box number(s) aren't on your shelf map, so they're listed at the end: ${plan.unknown.slice(0, 12).join(", ")}${plan.unknown.length > 12 ? "…" : ""}. You can add them in Settings.`));
   if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""));
   renderPick(); renderUnpack(); renderKey();
 }
 
+function itemCell(t, extra) {
+  return h("td", null,
+    h("div", { class: "iname" }, itemName(t)),
+    t.details ? h("div", { class: "idet" }, t.details) : null,
+    extra ? h("div", { class: "idet" }, extra) : null);
+}
+
 function renderPick() {
   const tb = h("tbody");
-  let lastUnit = undefined;
+  let lastUnit, lastBox;
   plan.picks.forEach(p => {
     const unitId = p.loc ? p.loc.unitId : "none";
     if (unitId !== lastUnit) {
       tb.append(h("tr", { class: "unit-head" }, h("td", { colspan: 4 }, p.loc ? p.loc.unitName : "Not on your shelf map")));
-      lastUnit = unitId;
+      lastUnit = unitId; lastBox = undefined;
     }
+    const sameBox = p.box === lastBox; lastBox = p.box;
     const tr = h("tr", { class: pickedDone.has(p.step) ? "done" : "" },
-      h("td", null, h("input", { type: "checkbox", "aria-label": `Picked item ${p.item}`, checked: pickedDone.has(p.step),
+      h("td", null, h("input", { type: "checkbox", "aria-label": `Picked ${itemName(p)}`, checked: pickedDone.has(p.step),
         onchange: e => { e.target.checked ? pickedDone.add(p.step) : pickedDone.delete(p.step); tr.className = e.target.checked ? "done" : ""; } })),
       h("td", { class: "big" }, `${p.qty}×`),
-      h("td", { class: "big" }, `#${p.item}`),
-      h("td", { class: "small muted" }, p.loc ? `shelf ${p.loc.shelf} of ${p.loc.shelves}` : ""));
+      h("td", { class: "box" }, sameBox ? h("span", { class: "idet" }, "same box") : p.box),
+      itemCell(p, p.loc && !sameBox ? `shelf ${p.loc.shelf} of ${p.loc.shelves}` : null));
     tb.append(tr);
   });
   $("tab-pick").replaceChildren(
     h("p", { class: "small muted" }, "Walk the shelves top to bottom of this list. Tick items off as they go in the cart."),
-    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Take"), h("th", null, "Item"), h("th", null, "Where"))), tb));
+    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Take"), h("th", null, "Box"), h("th", null, "Item"))), tb));
 }
 
 function renderUnpack() {
@@ -542,10 +596,10 @@ function renderUnpack() {
   plan.unpack.forEach(u => {
     tb.append(h("tr", { class: u.last ? "last" : "" },
       h("td", { class: "small muted" }, u.step),
-      h("td", { class: "big" }, `#${u.item}`),
+      itemCell(u, null),
       h("td", null, `${u.qty}×`),
       h("td", null, h("span", { class: "pile" }, u.label),
-        u.last ? h("div", { class: "lastnote" }, `✓ Last item — order ${u.label} is complete. Pack it!`) : null)));
+        u.last ? h("div", { class: "lastnote" }, `✓ Last item. Order ${u.label} is complete, pack it!`) : null)));
   });
   $("tab-unpack").replaceChildren(
     h("p", { class: "small muted" }, "Start from the top of the cart (the last thing you picked). Put each item on the pile for its order number."),
@@ -575,9 +629,10 @@ function showStep() {
   $("stepBar").style.width = `${((stepAt + 1) / total) * 100}%`;
   $("stepCount").textContent = `Item ${stepAt + 1} of ${total}`;
   $("stepBody").replaceChildren(
-    h("div", { class: "item" }, `Item #${u.item}`),
+    h("div", { class: "item" }, itemName(u)),
+    ...(u.details ? [h("div", { class: "details" }, u.details)] : []),
     h("div", { class: "qty" }, u.qty > 1 ? `Take ${u.qty} of them` : "Take 1"),
-    h("div", { class: "to" }, "put it on order"),
+    h("div", { class: "to" }, "put on order"),
     h("div", { class: "order" }, u.label),
     h("div", { class: "small muted" }, `real order #${u.raw}`),
     ...(u.last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []));
@@ -617,34 +672,54 @@ function docHeader(doc, title, sub) {
   return M + 54;
 }
 function stamp() { return `${plan.orders.length} orders · ${plan.totalUnits} items · ${today()}`; }
+/** Item name (bold) + details (small grey), wrapped to width. Returns lines to draw and their height. */
+function itemBlock(doc, t, width) {
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+  const nameLines = doc.splitTextToSize(itemName(t), width);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+  const detLines = t.details ? doc.splitTextToSize(t.details, width) : [];
+  return { nameLines, detLines, height: nameLines.length * 14 + detLines.length * 11 };
+}
+function drawItemBlock(doc, b, x, y) {
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+  b.nameLines.forEach(l => { y += 14; doc.text(l, x, y - 3); });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(95);
+  b.detLines.forEach(l => { y += 11; doc.text(l, x, y - 2); });
+  doc.setTextColor(0);
+}
 
 function pickPdf() {
   const doc = newDoc(); if (!doc) return;
   let y = docHeader(doc, "PICK LIST", `${stamp()} · go top to bottom, tick each box`);
+  const X = { take: M + 28, box: M + 76, item: M + 150, where: M + 432 }, itemW = 270;
   const colHead = () => {
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(110);
-    doc.text("TAKE", M + 30, y); doc.text("ITEM #", M + 100, y); doc.text("WHERE", M + 250, y);
+    doc.text("TAKE", X.take, y); doc.text("BOX", X.box, y); doc.text("ITEM", X.item, y); doc.text("WHERE", X.where, y);
     doc.setTextColor(0); y += 6;
   };
   colHead();
-  let lastUnit;
-  const rowH = 26;
+  let lastUnit, lastBox;
   plan.picks.forEach(p => {
     const unitId = p.loc ? p.loc.unitId : "none";
     const needHead = unitId !== lastUnit;
-    if (y + rowH + (needHead ? 22 : 0) > PH - 40) { doc.addPage(); y = M; colHead(); }
+    const b = itemBlock(doc, p, itemW);
+    const rowH = Math.max(28, b.height + 10);
+    if (y + rowH + (needHead ? 22 : 0) > PH - 40) { doc.addPage(); y = M; colHead(); lastBox = undefined; }
     if (needHead) {
       doc.setFillColor(225, 235, 244); doc.rect(M, y, PW - 2 * M, 20, "F");
       doc.setFont("helvetica", "bold"); doc.setFontSize(11);
       doc.text(p.loc ? p.loc.unitName : "NOT ON YOUR SHELF MAP", M + 6, y + 14);
-      y += 22; lastUnit = unitId;
+      y += 22; lastUnit = unitId; lastBox = undefined;
     }
-    doc.setDrawColor(60); doc.setLineWidth(1); doc.rect(M + 4, y + 6, 14, 14, "S");
+    const sameBox = p.box === lastBox; lastBox = p.box;
+    doc.setDrawColor(60); doc.setLineWidth(1); doc.rect(M + 4, y + 7, 14, 14, "S");
     doc.setFont("helvetica", "bold"); doc.setFontSize(16);
-    doc.text(`${p.qty} x`, M + 30, y + 18);
-    doc.text(`#${p.item}`, M + 100, y + 18);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(11);
-    doc.text(p.loc ? `shelf ${p.loc.shelf} of ${p.loc.shelves}` : "find it by hand", M + 250, y + 17);
+    doc.text(`${p.qty} x`, X.take, y + 19);
+    if (sameBox) { doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(110); doc.text("same box", X.box, y + 18); doc.setTextColor(0); }
+    else doc.text(p.box, X.box, y + 19);
+    drawItemBlock(doc, b, X.item, y + 5);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+    if (!sameBox) doc.text(p.loc ? `shelf ${p.loc.shelf} of ${p.loc.shelves}` : "find by hand", X.where, y + 18);
     doc.setDrawColor(215); doc.setLineWidth(0.5); doc.line(M, y + rowH, PW - M, y + rowH);
     y += rowH;
   });
@@ -655,7 +730,6 @@ function pickPdf() {
 function unpackPdf() {
   const doc = newDoc(); if (!doc) return;
   let y = docHeader(doc, "UNPACK & SORT", `${stamp()} · start at the TOP of the cart`);
-  // order key
   doc.setFont("helvetica", "bold"); doc.setFontSize(12);
   doc.text("Lay out your order sheets and number them:", M, y); y += 10;
   const cols = 4, cw = (PW - 2 * M) / cols, kh = 30;
@@ -673,30 +747,31 @@ function unpackPdf() {
   y = yy + kh + 16;
   if (y + 60 > PH - 40) { doc.addPage(); y = M; }
 
+  const X = { step: M + 4, item: M + 34, qty: M + 330, arrow: M + 366, badge: M + 386, raw: M + 436 }, itemW = 285;
   const colHead = () => {
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(110);
-    doc.text("STEP", M + 4, y); doc.text("ITEM #", M + 50, y); doc.text("QTY", M + 170, y); doc.text("PUT ON ORDER", M + 230, y);
+    doc.text("STEP", X.step, y); doc.text("ITEM", X.item, y); doc.text("QTY", X.qty, y); doc.text("PUT ON ORDER", X.badge, y);
     doc.setTextColor(0); y += 6;
   };
   colHead();
   plan.unpack.forEach(u => {
-    const rowH = u.last ? 40 : 30;
+    const b = itemBlock(doc, u, itemW);
+    const top = Math.max(30, b.height + 10);
+    const rowH = top + (u.last ? 16 : 0);
     if (y + rowH > PH - 40) { doc.addPage(); y = M; colHead(); }
     if (u.last) { doc.setFillColor(222, 243, 230); doc.rect(M, y, PW - 2 * M, rowH, "F"); }
     doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(110);
-    doc.text(String(u.step), M + 4, y + 20); doc.setTextColor(0);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(16);
-    doc.text(`#${u.item}`, M + 50, y + 20);
-    doc.setFontSize(13); doc.text(`${u.qty} x`, M + 170, y + 20);
-    // arrow + order badge
-    doc.setFillColor(90); doc.triangle(M + 200, y + 9, M + 200, y + 21, M + 211, y + 15, "F");
-    doc.setFillColor(31, 95, 139); doc.roundedRect(M + 230, y + 4, 44, 22, 4, 4, "F");
-    doc.setTextColor(255); doc.setFontSize(16); doc.text(String(u.label), M + 252, y + 21, { align: "center" });
+    doc.text(String(u.step), X.step, y + 19); doc.setTextColor(0);
+    drawItemBlock(doc, b, X.item, y + 5);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text(`${u.qty} x`, X.qty, y + 19);
+    doc.setFillColor(90); doc.triangle(X.arrow, y + 9, X.arrow, y + 21, X.arrow + 11, y + 15, "F");
+    doc.setFillColor(31, 95, 139); doc.roundedRect(X.badge, y + 4, 44, 22, 4, 4, "F");
+    doc.setTextColor(255); doc.setFontSize(16); doc.text(String(u.label), X.badge + 22, y + 21, { align: "center" });
     doc.setTextColor(100); doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-    doc.text(`#${u.raw}`, M + 282, y + 19); doc.setTextColor(0);
+    doc.text(`#${u.raw}`, X.raw, y + 19); doc.setTextColor(0);
     if (u.last) {
       doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 110, 60);
-      doc.text(`LAST ITEM - order ${u.label} is complete. Pack it!`, M + 50, y + 35); doc.setTextColor(0);
+      doc.text(`LAST ITEM - order ${u.label} is complete. Pack it!`, X.item, y + top + 8); doc.setTextColor(0);
     }
     doc.setDrawColor(215); doc.setLineWidth(0.5); doc.line(M, y + rowH, PW - M, y + rowH);
     y += rowH;
@@ -712,8 +787,8 @@ $("pdfUnpack").onclick = unpackPdf;
 const PATTERNS = [
   ["rows-down", "Shelf by shelf, top shelf first"],
   ["rows-up", "Shelf by shelf, bottom shelf first"],
-  ["columns", "Up and down: one spot at a time, all shelves top to bottom"],
-  ["blocks", "Sections: a few spots on every shelf, then move along"],
+  ["columns", "Up and down: one box at a time, all shelves top to bottom"],
+  ["blocks", "Sections: a few boxes on every shelf, then move along"],
 ];
 let view = "home";
 $("navBtn").onclick = () => {
@@ -725,47 +800,53 @@ $("navBtn").onclick = () => {
   window.scrollTo(0, 0);
 };
 function changed(rerender) { saveSettings(); if (rerender) renderSettings(); else renderChecks(); }
-function numInput(value, onset, attrs) {
-  return h("input", Object.assign({ type: "number", value: value ?? "", inputmode: "numeric",
-    oninput: e => { onset(e.target.value === "" ? "" : parseInt(e.target.value, 10)); changed(false); } }, attrs || {}));
+function numInput(value, onset) {
+  return h("input", { type: "number", value: value ?? "", inputmode: "numeric", min: 1,
+    oninput: e => { onset(e.target.value === "" ? "" : parseInt(e.target.value, 10)); changed(false); } });
 }
+const quick = { units: 4, shelves: "3, 2, 4, 3", per: 10, first: 1, letters: true };
 
 function renderSettings() {
   const v = $("settingsView");
-  const quick = { units: 4, shelves: 4, per: 25, first: 1 };
+  const qIn = (key, attrs) => h("input", Object.assign({ value: quick[key], oninput: e => { quick[key] = e.target.type === "number" ? +e.target.value : e.target.value; } }, attrs));
   v.replaceChildren(
     h("section", { class: "card" },
       h("h2", null, "Quick setup"),
-      h("p", { class: "small muted" }, "Builds a starting map with numbers running in order: unit 1 top shelf left → right, then the next shelf down, then unit 2. Adjust any shelf below afterwards."),
+      h("p", { class: "small muted" }, "Builds a starting map. You can change any shelf afterwards."),
       h("div", { class: "row" },
-        h("label", null, "Shelving units ", numInput(quick.units, x => quick.units = x, { min: 1, oninput: null, onchange: e => quick.units = +e.target.value })),
-        h("label", null, "Shelves on each ", numInput(quick.shelves, x => quick.shelves = x, { min: 1, oninput: null, onchange: e => quick.shelves = +e.target.value })),
-        h("label", null, "Items per shelf ", numInput(quick.per, x => quick.per = x, { min: 1, oninput: null, onchange: e => quick.per = +e.target.value })),
-        h("label", null, "First number ", numInput(quick.first, x => quick.first = x, { oninput: null, onchange: e => quick.first = +e.target.value }))),
+        h("label", null, "Shelving units ", qIn("units", { type: "number", min: 1, id: "qUnits" })),
+        h("label", null, "Boxes per shelf ", qIn("per", { type: "number", min: 1, id: "qPer" })),
+        h("label", null, "First number ", qIn("first", { type: "number", id: "qFirst" }))),
+      h("label", { style: "display:block;margin-top:10px" }, "Shelves on each unit ",
+        qIn("shelves", { type: "text", id: "qShelves", style: "width:160px" }),
+        h("div", { class: "small muted" }, "One number if they're all the same (4), or one per unit, top to bottom of the walking order (3, 2, 4).")),
+      h("div", { style: "margin-top:10px" },
+        h("label", { style: "display:block;padding:4px 0" }, h("input", { type: "radio", name: "qlet", checked: quick.letters, onchange: () => { quick.letters = true; } }),
+          " Shelf letters: top shelf A, next B… (1A 2A 3A on top, 1B 2B 3B below)"),
+        h("label", { style: "display:block;padding:4px 0" }, h("input", { type: "radio", name: "qlet", checked: !quick.letters, onchange: () => { quick.letters = false; } }),
+          " Plain numbers that keep counting (1–10 on top, 11–20 below)")),
       h("div", { class: "row", style: "margin-top:10px" },
-        h("button", { class: "btn", type: "button", onclick: e => {
-          const btn = e.currentTarget;
-          return tapTwice(btn, "Replace your whole map?", () => {
-          settings.units = makeUnits(Math.max(1, quick.units | 0), Math.max(1, quick.shelves | 0), Math.max(1, quick.per | 0), quick.first | 0);
+        h("button", { class: "btn", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace your whole map?", () => {
+          const n = Math.max(1, quick.units | 0);
+          const list = String(quick.shelves).split(/[^\d]+/).filter(Boolean).map(x => Math.max(1, parseInt(x, 10)));
+          const shelvesPer = Array.from({ length: n }, (_, i) => list.length ? (list[i] ?? list[list.length - 1]) : 4);
+          settings.units = makeUnits(shelvesPer, Math.max(1, quick.per | 0), quick.first | 0, quick.letters);
           settings.walk = settings.units.map(u => u.id); changed(true); toast("Map built.");
-          });
-        } }, "Build this map"))),
+        }) }, "Build this map"))),
     h("section", { class: "card" },
       h("h2", null, "Your shelving units"),
-      h("p", { class: "small muted" }, "For each shelf, type the item number on its far left and on its far right. Shelf 1 is the top shelf. Then choose how to walk that unit."),
+      h("p", { class: "small muted" }, "For each shelf, type its boxes from left to right. Shelf 1 is the top shelf. Use a dash for a run (1A-10A or 1-25), or list them with commas (1A, 2A, 5A). Then choose how to walk that unit."),
       h("div", { id: "checks" }),
       settings.units.map((u, ui) => unitCard(u, ui)),
       h("button", { class: "btn secondary", type: "button", onclick: () => {
         const last = settings.units[settings.units.length - 1];
-        const lastShelves = last ? last.shelves.length : 4;
-        let maxN = 0; settings.units.forEach(x => x.shelves.forEach(s => { maxN = Math.max(maxN, s.start | 0, s.end | 0); }));
-        const per = last && last.shelves[0] ? Math.abs((last.shelves[0].end | 0) - (last.shelves[0].start | 0)) + 1 : 25;
-        const [nu] = makeUnits(1, lastShelves, per, maxN + 1); nu.name = `Unit ${settings.units.length + 1}`;
+        const shelves = last ? last.shelves.map(() => ({ boxes: "" })) : [{ boxes: "" }];
+        const nu = { id: nextId++, name: `Unit ${settings.units.length + 1}`, shelves, pattern: "rows-down", block: 5, dir: "ltr" };
         settings.units.push(nu); settings.walk.push(nu.id); changed(true);
       } }, "+ Add a shelving unit")),
     h("section", { class: "card" },
       h("h2", null, "Walking order"),
-      h("p", { class: "small muted" }, "Which unit you visit first, second, third… Use the arrows to change it. (It doesn't have to match the numbers.)"),
+      h("p", { class: "small muted" }, "Which unit you visit first, second, third… Use the arrows to change it."),
       settings.walk.map((id, i) => {
         const u = settings.units.find(x => x.id === id);
         return h("div", { class: "walk-item" }, h("span", { class: "n" }, `${i + 1}.`), h("span", { class: "name" }, u.name),
@@ -779,9 +860,9 @@ function renderSettings() {
         h("input", { type: "radio", name: "onum", checked: settings.orderNumbering === val, onchange: () => { settings.orderNumbering = val; changed(false); } }),
         val === "sorted" ? " Lowest order number becomes 1" : " First order in the file becomes 1"))),
     h("section", { class: "card" },
-      h("h2", null, "Check a number"),
-      h("p", { class: "small muted" }, "Type an item number to see where your map puts it."),
-      h("div", { class: "row" }, h("input", { type: "number", id: "probe", inputmode: "numeric", oninput: renderChecks }), h("span", { id: "probeOut" }))),
+      h("h2", null, "Find a box"),
+      h("p", { class: "small muted" }, "Type a box number to see where your map puts it."),
+      h("div", { class: "row" }, h("input", { type: "text", id: "probe", placeholder: "e.g. 12B", style: "width:120px", oninput: renderChecks }), h("span", { id: "probeOut" }))),
     h("section", { class: "card" },
       h("h2", null, "Backup & other devices"),
       h("p", { class: "small muted" }, "Settings are saved on this device only. Save them to a file to copy them to another phone, tablet or computer."),
@@ -803,25 +884,30 @@ function unitCard(u, ui) {
     h("div", { class: "unit-top" },
       h("input", { type: "text", value: u.name, "aria-label": "Unit name", style: "font-weight:700;max-width:220px",
         onchange: e => { u.name = e.target.value.trim() || `Unit ${ui + 1}`; changed(true); } }),
+      h("span", { class: "small muted" }, `${u.shelves.length} shelf${u.shelves.length === 1 ? "" : "s"}`),
       h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Delete?", () => {
         settings.units.splice(ui, 1); settings.walk = settings.walk.filter(id => id !== u.id); changed(true);
       }) }, "Delete unit")),
     h("div", { class: "row", style: "margin:10px 0" },
       h("select", { "aria-label": "How to walk this unit", onchange: e => { u.pattern = e.target.value; changed(true); } },
         PATTERNS.map(([val, t]) => h("option", { value: val, selected: u.pattern === val }, t))),
-      u.pattern === "blocks" ? h("label", null, "spots per section ", numInput(u.block, x => u.block = x, { min: 1 })) : null,
+      u.pattern === "blocks" ? h("label", null, "boxes per section ", numInput(u.block, x => u.block = x)) : null,
       h("select", { "aria-label": "Direction", onchange: e => { u.dir = e.target.value; changed(false); } },
         [["ltr", "Left to right"], ["rtl", "Right to left"]].map(([val, t]) => h("option", { value: val, selected: u.dir === val }, t)))),
-    u.shelves.map((s, si) => h("div", { class: "shelf-row" },
-      h("span", { class: "lbl" }, si === 0 ? "Shelf 1 (top)" : si === u.shelves.length - 1 ? `Shelf ${si + 1} (bottom)` : `Shelf ${si + 1}`),
-      h("label", null, "left ", numInput(s.start, x => s.start = x)),
-      h("label", null, "right ", numInput(s.end, x => s.end = x)),
-      h("button", { class: "btn secondary small", type: "button", "aria-label": "Remove shelf", onclick: () => { u.shelves.splice(si, 1); changed(true); } }, "✕"))),
+    u.shelves.map((s, si) => {
+      const count = h("span", { class: "small muted" });
+      const showCount = () => { const r = expandBoxes(s.boxes); count.textContent = r.errors.length ? "check this" : `${r.boxes.length} box${r.boxes.length === 1 ? "" : "es"}`; };
+      showCount();
+      return h("div", { class: "shelf-row" },
+        h("span", { class: "lbl" }, si === 0 ? "Shelf 1 (top)" : si === u.shelves.length - 1 ? `Shelf ${si + 1} (bottom)` : `Shelf ${si + 1}`),
+        h("input", { type: "text", value: s.boxes, placeholder: "1A-10A", "aria-label": `Boxes on shelf ${si + 1}`, style: "flex:1;min-width:140px",
+          oninput: e => { s.boxes = e.target.value; showCount(); changed(false); } }),
+        count,
+        h("button", { class: "btn secondary small", type: "button", "aria-label": "Remove shelf", onclick: () => { u.shelves.splice(si, 1); changed(true); } }, "✕"));
+    }),
     h("button", { class: "btn secondary small", type: "button", style: "margin-top:6px", onclick: () => {
       const last = u.shelves[u.shelves.length - 1];
-      const len = last ? Math.abs((last.end | 0) - (last.start | 0)) + 1 : 10;
-      const st = last ? (last.end | 0) + 1 : 1;
-      u.shelves.push({ start: st, end: st + len - 1 }); changed(true);
+      u.shelves.push({ boxes: last ? guessNextShelf(last.boxes) : "" }); changed(true);
     } }, "+ Add shelf at the bottom"));
 }
 
@@ -829,12 +915,12 @@ function renderChecks() {
   const loc = buildLocator(settings);
   const box = $("checks");
   if (box) box.replaceChildren(loc.problems.length
-    ? h("div", { class: "notice warn" }, "Overlaps: ", loc.problems.join(" "))
-    : h("div", { class: "notice good" }, `Map covers ${loc.size} item numbers.`));
+    ? h("div", { class: "notice warn" }, "Check these: ", loc.problems.join(" "))
+    : h("div", { class: "notice good" }, `Map has ${loc.size} boxes.`));
   const p = $("probe");
-  if (p && p.value !== "") {
-    const n = parseInt(p.value, 10), l = loc.locate(n);
-    $("probeOut").textContent = l ? `${l.unitName}, shelf ${l.shelf} of ${l.shelves}, spot ${l.pos} from the left` : "Not on the map";
+  if (p && p.value.trim()) {
+    const l = loc.locate(p.value);
+    $("probeOut").textContent = l ? `${l.unitName}, shelf ${l.shelf} of ${l.shelves}, box ${l.pos} from the left` : "Not on the map";
   } else if ($("probeOut")) $("probeOut").textContent = "";
 }
 
