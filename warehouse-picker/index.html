@@ -119,6 +119,9 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 .pickopts { display: grid; gap: 8px; }
 .pickopt { display: grid; grid-template-columns: minmax(110px, 38%) 1fr; gap: 8px; align-items: center; font-size: 15px; }
 .pickopt select, .pickopt input { width: 100%; min-width: 0; }
+.endsrows { display: grid; gap: 6px; margin-top: 4px; }
+.endrow { display: grid; grid-template-columns: 96px 1fr auto 1fr; gap: 6px; align-items: center; font-size: 15px; }
+.endrow input { min-width: 0; width: 100%; }
 .sidebtn { white-space: nowrap; }
 details summary { cursor: pointer; color: var(--accent); font-weight: 600; margin-top: 10px; }
 .gridwrap { overflow-x: auto; margin-top: 4px; }
@@ -762,8 +765,26 @@ const specFirst = spec => (Number.isFinite(parseInt(spec.first, 10)) ? parseInt(
  * The aisle's boxes are numbered across all its shelves (A1-A10 top shelf, A11-A20 next…),
  * starting on the top or the bottom shelf, with numbers running left->right or right->left.
  */
+/** Each shelf typed as its first and last box: [{first, last}] for every shelf, top to bottom. */
+function shelfEnds(spec) {
+  const S = Math.max(1, parseInt(spec.shelves, 10) || 1);
+  spec.ends = Array.from({ length: S }, (_, i) => (spec.ends && spec.ends[i]) || { first: "", last: "" });
+  return spec.ends;
+}
+const endNumber = v => { const m = normBox(v).match(/^[A-Z]*(\d+)[A-Z]*$/); return m ? parseInt(m[1], 10) : null; };
 function aisleShelves(spec) {
   const counts = perShelfCounts(spec), L = specLetter(spec);
+  if (spec.byEnds) {
+    // first and last box of each shelf: along a shelf every number is there; down the columns
+    // a shelf holds every Nth number, N being the number of shelves (1, 7, 13 … with 6 shelves)
+    const ends = shelfEnds(spec), by = spec.vertical ? ends.length : 1;
+    return ends.map(e => {
+      const a = endNumber(e.first), b = endNumber(e.last);
+      if (a == null) return { boxes: "", rtl: !!spec.rtl };
+      if (b == null || b === a) return { boxes: `${L}${a}`, rtl: !!spec.rtl };
+      return { boxes: `${L}${a}-${L}${b}${by > 1 ? "/" + by : ""}`, rtl: !!spec.rtl };
+    });
+  }
   const shelves = counts.map(() => ({ boxes: "", rtl: !!spec.rtl }));
   const order = counts.map((_, i) => i);
   if (spec.fromBottom) order.reverse();
@@ -792,6 +813,10 @@ function prettyBoxes(text) {
   return String(text).replace("-", " – ");
 }
 function aisleSummary(spec) {
+  if (spec.byEnds) {
+    const nums = aisleShelves(spec).flatMap(sh => expandBoxes(sh.boxes).boxes).map(endNumber).filter(n => n != null), L = specLetter(spec);
+    return nums.length ? `${L}${Math.min(...nums)} – ${L}${Math.max(...nums)} (${nums.length} boxes)` : "Type each shelf's first and last box.";
+  }
   const total = perShelfCounts(spec).reduce((a, b) => a + b, 0), L = specLetter(spec), f = specFirst(spec);
   return `${L}${f} – ${L}${f + total - 1} (${total} boxes)`;
 }
@@ -1757,15 +1782,28 @@ function aisleForm(u, refreshGrid) {
   const list = h("div", { class: "small muted" });
   const show = () => {
     summary.textContent = aisleSummary(u.spec);
-    list.replaceChildren(...u.shelves.map((sh, i) => h("div", null,
-      `${i === 0 ? "Top shelf" : i === u.shelves.length - 1 ? "Bottom shelf" : `Shelf ${i + 1}`}: ${prettyBoxes(sh.boxes)} ${u.spec.vertical ? "" : sh.rtl ? "(numbers run ←)" : "(numbers run →)"}`)));
+    list.replaceChildren(...u.shelves.map((sh, i) => {
+      const r = expandBoxes(sh.boxes), name = i === 0 ? "Top shelf" : i === u.shelves.length - 1 ? "Bottom shelf" : `Shelf ${i + 1}`;
+      if (r.errors.length) {
+        let msg = r.errors[0];
+        const e = u.spec.byEnds && u.spec.ends && u.spec.ends[i], by = u.spec.vertical ? u.shelves.length : 1;
+        if (e && by > 1) { // say it plainly, with the nearest numbers that do fit
+          const a = endNumber(e.first), z = endNumber(e.last), L = specLetter(u.spec);
+          if (a != null && z != null) { const lo = a + Math.floor((z - a) / by) * by; msg = `${L}${z} doesn't fit. Going down ${by} shelves, this shelf has ${L}${a}, ${L}${a + by}, ${L}${a + 2 * by}… so its last box is probably ${L}${lo} or ${L}${lo + by}.`; }
+        }
+        return h("div", { style: "color:var(--danger);font-weight:600" }, `${name}: ⚠ ${msg}`);
+      }
+      return h("div", null, `${name}: ${sh.boxes ? prettyBoxes(sh.boxes) : "–"} (${r.boxes.length} box${r.boxes.length === 1 ? "" : "es"})${u.spec.vertical ? "" : sh.rtl ? " (numbers run ←)" : " (numbers run →)"}`);
+    }));
   };
   show();
   return h("div", null,
     aisleFields(u.spec, key => {
       if (key === "letter") { const L = specLetter(u.spec); if (!u.name || /^Aisle [A-Z]*$/.test(u.name)) u.name = L ? `Aisle ${L}` : u.name; }
+      if (key === "byEnds" && u.spec.byEnds) // start from what the shelves are now
+        u.spec.ends = u.shelves.map(sh => { const bx = expandBoxes(sh.boxes).boxes.slice().sort(natural); return { first: bx[0] || "", last: bx[bx.length - 1] || "" }; });
       u.shelves = aisleShelves(u.spec);
-      changed(key === "letter" || key === "shelves" || key === "vertical"); show(); refreshGrid();
+      changed(["letter", "shelves", "vertical", "byEnds"].includes(key)); show(); refreshGrid();
     }),
     summary, list,
     h("button", { class: "link small", type: "button", style: "margin-top:6px", onclick: () => { u.spec.manual = true; changed(true); } }, "Odd shelf? Edit the shelves one by one"));
@@ -1811,15 +1849,32 @@ function aisleFields(spec, onChange, quickMode) {
     quickMode ? field("First aisle letter", "letter", { type: "text", maxlength: 2, style: "text-transform:uppercase" }) : field("Aisle letter", "letter", { type: "text", maxlength: 2, style: "text-transform:uppercase" }),
     quickMode ? field("How many aisles", "count", { type: "number", min: 1, inputmode: "numeric" }) : null,
     field("Shelves", "shelves", { type: "number", min: 1, inputmode: "numeric" }),
-    field("Boxes per shelf", "per", { type: "text", inputmode: "numeric" }, "One number, or one per shelf from the top: 10, 10, 12, 8"),
-    field("First number", "first", { type: "number", inputmode: "numeric" }),
     choose("Numbers go", "vertical", [["0", "along each shelf (2 is beside 1)"], ["1", "down each column (2 is under 1)"]]),
+    quickMode ? null : choose("Shelf numbers", "byEnds", [["0", "work them out from boxes per shelf"], ["1", "I'll type each shelf's first and last box"]]),
+    spec.byEnds && !quickMode ? null : field("Boxes per shelf", "per", { type: "text", inputmode: "numeric" }, "One number, or one per shelf from the top: 10, 10, 12, 8"),
+    spec.byEnds && !quickMode ? null : field("First number", "first", { type: "number", inputmode: "numeric" }),
     spec.vertical
       ? choose("Columns go", "rtl", [["0", "left → right (1 on the left)"], ["1", "right → left (1 on the right)"]])
       : choose("Numbers run", "rtl", [["0", "left → right"], ["1", "right → left"]]),
-    spec.vertical
+    spec.byEnds && !quickMode ? null : spec.vertical
       ? choose("Each column starts at", "fromBottom", [["0", "the top (2 under 1)"], ["1", "the bottom (2 above 1)"]])
-      : choose("Numbering starts on", "fromBottom", [["0", "the top shelf"], ["1", "the bottom shelf"]]));
+      : choose("Numbering starts on", "fromBottom", [["0", "the top shelf"], ["1", "the bottom shelf"]]),
+    spec.byEnds && !quickMode ? endsRows(spec, onChange) : null);
+}
+/** One row per shelf: its first and last box. */
+function endsRows(spec, onChange) {
+  const ends = shelfEnds(spec), L = specLetter(spec);
+  return h("div", { class: "endsrows" },
+    h("div", { class: "small muted" }, spec.vertical
+      ? `Type the box at the start and the end of each shelf. Numbers go down the columns, so each shelf counts up by ${ends.length} (the number of shelves).`
+      : "Type the box at the start and the end of each shelf. Every number in between is on that shelf."),
+    ends.map((e, i) => h("div", { class: "endrow" },
+      h("span", { class: "lbl" }, i === 0 ? "Top shelf" : i === ends.length - 1 ? "Bottom shelf" : `Shelf ${i + 1}`),
+      h("input", { type: "text", value: e.first, placeholder: `${L}${i + 1}`, "aria-label": `Shelf ${i + 1} first box`, style: "text-transform:uppercase",
+        onchange: ev => { e.first = normBox(ev.target.value); ev.target.value = e.first; onChange("ends"); } }),
+      h("span", null, "to"),
+      h("input", { type: "text", value: e.last, placeholder: spec.vertical ? `${L}${i + 1 + ends.length * 9}` : `${L}${(i + 1) * 10}`, "aria-label": `Shelf ${i + 1} last box`, style: "text-transform:uppercase",
+        onchange: ev => { e.last = normBox(ev.target.value); ev.target.value = e.last; onChange("ends"); } }))));
 }
 
 /** One set of picking choices that can be copied to every unit. */

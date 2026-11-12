@@ -111,6 +111,12 @@ shelf, A11–A20 on the next…). For each aisle fill in:
 - **Numbering starts on** the top shelf or the bottom shelf (for columns: each column
   starts at the top or the bottom)
 
+Or set **Shelf numbers → I'll type each shelf's first and last box**: type
+the box at each end of every shelf (top shelf C1 to C91, shelf 2 C2 to C92…).
+With numbers going down the columns, each shelf counts up by the number of
+shelves (C1, C7, C13 … with 6 shelves); along a shelf every number in between is
+there. An end that doesn't fit is pointed out with the likely right number.
+
 The app works out every shelf's boxes and shows them ("A1 – A50"). **Quick
 setup** makes several aisles (A, B, C…) the same way in one go; **Make a map
 from my bins** fills in each aisle's first and last box from your files. For an
