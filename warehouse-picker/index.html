@@ -60,6 +60,7 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; fon
 input[type=number], input[type=text], select, textarea { font: inherit; color: var(--text); background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 40px; }
 input[type=number] { width: 90px; }
+select { max-width: 100%; }
 textarea { width: 100%; min-height: 140px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; }
 .notice { border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: 15px; }
 .notice.warn { background: var(--warn-soft); color: var(--warn); }
@@ -108,18 +109,24 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 .walk-item span.name { flex: 1; }
 .hidden { display: none !important; }
 /* step-through */
-#stepper { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; }
+#stepper { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); overscroll-behavior: contain; }
 #stepper .bar { height: 6px; background: var(--line); }
 #stepper .bar i { display: block; height: 100%; background: var(--accent); }
-#stepper .body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 16px; gap: 6px; }
+/* the middle scrolls when a step has more than fits; centred when it doesn't */
+#stepper .body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; text-align: center; padding: 16px; gap: 6px; }
+#stepper .body > :first-child { margin-top: auto; }
+#stepper .body > :last-child { margin-bottom: auto; }
+#stepper .nav { flex: none; border-top: 1px solid var(--line); }
 #stepper .item { font-size: 30px; font-weight: 700; }
 #stepper .qty { font-size: 22px; color: var(--muted); }
 #stepper .to { font-size: 22px; margin-top: 14px; color: var(--muted); }
 #stepper .order { font-size: 110px; font-weight: 900; line-height: 1; color: var(--accent); }
 #stepper .done-banner { margin-top: 16px; background: var(--good-soft); color: var(--good); border-radius: 14px; padding: 14px 18px; font-size: 20px; font-weight: 800; }
 #stepper .nav { display: flex; gap: 10px; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
-#stepper .nav button { flex: 1; min-height: 64px; font-size: 18px; padding: 8px; }
-#stepper #stepPrev { flex: 0.7; }
+#stepper .nav button { flex: 0.8; min-height: 60px; font-size: clamp(15px, 4.6vw, 19px); padding: 8px 6px; white-space: nowrap; }
+#stepper #stepNext { flex: 1.4; }
+#stepper .nav { gap: 8px; }
 @media print {
   header.top, .no-print, .tabs { display: none !important; }
   body { background: #fff; color: #000; }
@@ -197,7 +204,7 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
   <div class="body" id="stepBody"></div>
   <div class="nav">
     <button class="btn secondary" id="stepPrev" type="button">&#9664; Back</button>
-    <button class="btn secondary" id="stepSkip" type="button">Skip for now</button>
+    <button class="btn secondary" id="stepSkip" type="button">Skip</button>
     <button class="btn" id="stepNext" type="button">Next &#9654;</button>
   </div>
 </div>
@@ -721,16 +728,17 @@ function showStep() {
       ...(last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []),
       ...(stillOpen ? [h("div", { class: "note" }, `Order ${u.label} is still waiting for a skipped item. Don't pack it yet.`)] : []));
   }
+  $("stepBody").scrollTop = 0;
   $("stepPrev").disabled = stepAt === 0;
-  $("stepSkip").textContent = left === 0 ? "Can't find it" : "Skip for now";
-  $("stepNext").textContent = left === 0 ? "Finish ✓" : stepMode === "pick" ? "In the cart ▶" : "Next ▶";
+  $("stepSkip").textContent = left === 0 ? "Not found" : "Skip";
+  $("stepNext").textContent = left === 0 ? "Finish ✓" : stepMode === "pick" ? "In cart ▶" : "Next ▶";
 }
 function openSteps(mode) {
   stepMode = mode; stepItems = mode === "pick" ? boxGroups() : plan.unpack;
   seq = stepItems.map((_, i) => i); skipped = new Set(); stepAt = 0;
-  $("stepper").classList.remove("hidden"); showStep();
+  $("stepper").classList.remove("hidden"); document.body.style.overflow = "hidden"; showStep();
 }
-function closeSteps() { $("stepper").classList.add("hidden"); if (stepMode === "pick") renderPick(); }
+function closeSteps() { $("stepper").classList.add("hidden"); document.body.style.overflow = ""; if (stepMode === "pick") renderPick(); }
 $("stepBtn").onclick = () => openSteps("unpack");
 $("stepPickBtn").onclick = () => openSteps("pick");
 $("stepClose").onclick = closeSteps;
