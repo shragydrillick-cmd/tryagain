@@ -12,12 +12,13 @@
 <style>
 :root {
   --bg: #f4f5f7; --card: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #d9dde3;
-  --accent: #1f5f8b; --accent-text: #ffffff; --accent-soft: #e3eef6;
+  --accent: #1f5f8b; --accent-text: #ffffff; --accent-soft: #e3eef6; --hl: #ffe27a;
   --good: #1e7a46; --good-soft: #e2f4e9; --warn: #9a5b00; --warn-soft: #fff3dc;
   --danger: #b3261e;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --hl: #7a5d00; color-scheme: dark;
     --bg: #14171b; --card: #1d2127; --text: #eceff3; --muted: #a2abb7; --line: #343a43;
     --accent: #5aa7dc; --accent-text: #0d1a24; --accent-soft: #1d3446;
     --good: #5fd08f; --good-soft: #17352a; --warn: #f0b45a; --warn-soft: #3a2c14;
@@ -25,6 +26,7 @@
   }
 }
 :root[data-theme="dark"] {
+  --hl: #7a5d00; color-scheme: dark;
   --bg: #14171b; --card: #1d2127; --text: #eceff3; --muted: #a2abb7; --line: #343a43;
   --accent: #5aa7dc; --accent-text: #0d1a24; --accent-soft: #1d3446;
   --good: #5fd08f; --good-soft: #17352a; --warn: #f0b45a; --warn-soft: #3a2c14;
@@ -74,14 +76,21 @@ table.list th { text-align: left; font-size: 13px; color: var(--muted); font-wei
 table.list td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 table.list td.big { font-size: 20px; font-weight: 700; }
 tr.unit-head td { background: var(--accent-soft); font-weight: 700; font-size: 14px; }
-tr.done td { opacity: .4; text-decoration: line-through; }
+tr.done td:not(.box) { opacity: .4; text-decoration: line-through; }
 tr.last td { background: var(--good-soft); }
 .pile { display: inline-block; min-width: 42px; text-align: center; background: var(--accent); color: var(--accent-text);
   border-radius: 8px; padding: 2px 8px; font-size: 20px; font-weight: 800; }
 .lastnote { color: var(--good); font-weight: 700; font-size: 14px; }
 .iname { font-weight: 700; font-size: 17px; }
 .idet { color: var(--muted); font-size: 14px; }
-td.box { font-size: 20px; font-weight: 800; white-space: nowrap; }
+td.box { font-size: 22px; font-weight: 800; white-space: nowrap; text-align: center; vertical-align: middle; }
+td.box.multi { background: var(--accent-soft); border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+td.box .where { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
+mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-radius: 4px; padding: 0 3px; }
+.grp { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.grp > b { width: 64px; }
+#stepper .boxcode { font-size: 96px; font-weight: 900; line-height: 1; color: var(--accent); }
+#stepper .note { margin-top: 12px; background: var(--hl); color: var(--text); border-radius: 12px; padding: 10px 14px; font-size: 16px; font-weight: 600; }
 #stepper .details { font-size: 18px; color: var(--muted); }
 .key { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
 .key div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; align-items: center; gap: 10px; }
@@ -149,11 +158,14 @@ td.box { font-size: 20px; font-weight: 800; white-space: nowrap; }
     <p class="muted small" id="fileName"></p>
     <div class="stats" id="stats"></div>
     <div id="warnings"></div>
-    <div class="row no-print" style="margin-bottom:14px">
-      <button class="btn" id="pdfPick" type="button">&#11015; Pick list PDF</button>
-      <button class="btn" id="pdfUnpack" type="button">&#11015; Unpack list PDF</button>
-      <button class="btn secondary" id="stepBtn" type="button">&#9654; Unpack step by step</button>
-      <button class="btn secondary" id="printBtn" type="button">Print</button>
+    <div class="no-print" style="margin-bottom:6px">
+      <div class="grp"><b>Pick</b>
+        <button class="btn" id="pdfPick" type="button">&#11015; PDF</button>
+        <button class="btn secondary" id="stepPickBtn" type="button">&#9654; Step by step</button></div>
+      <div class="grp"><b>Unpack</b>
+        <button class="btn" id="pdfUnpack" type="button">&#11015; PDF</button>
+        <button class="btn secondary" id="stepBtn" type="button">&#9654; Step by step</button>
+        <button class="btn secondary" id="printBtn" type="button">Print</button></div>
     </div>
     <div class="tabs" role="tablist">
       <button data-tab="pick" class="on" type="button">Pick list</button>
@@ -170,7 +182,7 @@ td.box { font-size: 20px; font-weight: 800; white-space: nowrap; }
 
 <div id="toast" class="hidden" role="status"></div>
 
-<div id="stepper" class="hidden" role="dialog" aria-label="Unpack step by step">
+<div id="stepper" class="hidden" role="dialog" aria-label="Step by step">
   <div class="bar"><i id="stepBar"></i></div>
   <div class="row" style="justify-content:space-between;padding:12px 16px">
     <span class="muted" id="stepCount"></span>
@@ -371,6 +383,7 @@ function makePlan(lines, settings) {
     return natural(a.name, b.name) || natural(a.details, b.details);
   });
   list.forEach((p, i) => { p.step = i + 1; });
+  markDifferences(list);
 
   // Unpack: top of the cart = last picked
   const left = new Map(orderList.map(o => [o.label, o.units]));
@@ -378,7 +391,7 @@ function makePlan(lines, settings) {
   [...list].reverse().forEach(p => {
     p.orders.forEach(o => {
       left.set(o.label, left.get(o.label) - o.qty);
-      unpack.push({ box: p.box, name: p.name, details: p.details, qty: o.qty, label: o.label, raw: o.raw, last: left.get(o.label) === 0 });
+      unpack.push({ box: p.box, name: p.name, details: p.details, marks: p.marks, qty: o.qty, label: o.label, raw: o.raw, last: left.get(o.label) === 0 });
     });
   });
   unpack.forEach((u, i) => { u.step = i + 1; });
@@ -388,6 +401,22 @@ function makePlan(lines, settings) {
 }
 /** What to call an item when the box number isn't shown. */
 const itemName = t => t.name || `Item from box ${t.box}`;
+
+/* When one box holds several items (e.g. the same blanket in blue and gray),
+   find the words that tell them apart, so they can be highlighted. */
+const normWord = w => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+const splitPunct = w => w.match(/^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u);
+const wordsOf = t => `${itemName(t)} ${t.details || ""}`.split(/\s+/).map(normWord).filter(Boolean);
+function markDifferences(picks) {
+  const byBox = new Map();
+  picks.forEach(p => { p.marks = new Set(); if (!byBox.has(p.box)) byBox.set(p.box, []); byBox.get(p.box).push(p); });
+  byBox.forEach(group => {
+    group.forEach(p => { p.boxCount = group.length; p.boxIndex = group.indexOf(p) + 1; });
+    if (group.length < 2) return;
+    const sets = group.map(p => new Set(wordsOf(p)));
+    group.forEach((p, i) => sets[i].forEach(w => { if (!sets.every(s => s.has(w))) p.marks.add(w); }));
+  });
+}
 
 /* ---------- settings ---------- */
 let nextId = 1;
@@ -461,7 +490,7 @@ function h(tag, attrs, ...kids) {
     else if (v === true) el.setAttribute(k, "");
     else if (v !== false && v != null) el.setAttribute(k, v);
   }
-  kids.flat().forEach(k => { if (k != null && k !== false) el.append(k.nodeType ? k : String(k)); });
+  kids.flat(Infinity).forEach(k => { if (k != null && k !== false) el.append(k.nodeType ? k : String(k)); });
   return el;
 }
 function applyTheme() {
@@ -526,16 +555,16 @@ $("pasteGo").onclick = () => useRows(parseDelimited($("pasteText").value), "Past
 $("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name); };
 
 const EXAMPLE = `Order,Box,Item,Details,Qty
-10452,1A,Blue ceramic mug,12 oz,1
+10452,1A,Fleece blanket,"Blue, 50x60 in",1
 10452,3B,Notebook,"Lined, A5",2
-10452,1A,Mug coaster,Cork,1
+10449,1A,Fleece blanket,"Gray, 50x60 in",1
 10449,3B,Notebook,"Lined, A5",1
 10449,15A,Desk lamp,White,1
 10449,27C,Phone stand,Black,1
 10460,27C,Phone stand,Black,2
 10460,6A,Pen set,Black ink,1
 10451,22D,Cable ties,Pack of 50,1
-10451,1A,Blue ceramic mug,12 oz,1
+10451,1A,Fleece blanket,"Blue, 50x60 in",1
 10455,15A,Desk lamp,White,1
 10455,12B,Sticky notes,Yellow,1
 10455,29A,Water bottle,750 ml,1`;
@@ -561,34 +590,54 @@ function rebuild() {
   renderPick(); renderUnpack(); renderKey();
 }
 
+/** Text with the "difference" words highlighted. */
+function hl(text, marks) {
+  if (!marks || !marks.size) return [text];
+  return text.split(/(\s+)/).map(part => {
+    if (!normWord(part) || !marks.has(normWord(part))) return part;
+    const [, pre, core, post] = splitPunct(part);
+    return [pre, h("mark", { class: "diff" }, core), post];
+  });
+}
 function itemCell(t, extra) {
   return h("td", null,
-    h("div", { class: "iname" }, itemName(t)),
-    t.details ? h("div", { class: "idet" }, t.details) : null,
+    h("div", { class: "iname" }, hl(itemName(t), t.marks)),
+    t.details ? h("div", { class: "idet" }, hl(t.details, t.marks)) : null,
     extra ? h("div", { class: "idet" }, extra) : null);
+}
+/** Consecutive pick lines from the same box on the same unit. */
+function boxGroups() {
+  const groups = [];
+  plan.picks.forEach(p => {
+    const uid = p.loc ? p.loc.unitId : "none", g = groups[groups.length - 1];
+    if (g && g.box === p.box && g.uid === uid) g.items.push(p);
+    else groups.push({ box: p.box, uid, loc: p.loc, items: [p] });
+  });
+  return groups;
 }
 
 function renderPick() {
   const tb = h("tbody");
-  let lastUnit, lastBox;
-  plan.picks.forEach(p => {
-    const unitId = p.loc ? p.loc.unitId : "none";
-    if (unitId !== lastUnit) {
-      tb.append(h("tr", { class: "unit-head" }, h("td", { colspan: 4 }, p.loc ? p.loc.unitName : "Not on your shelf map")));
-      lastUnit = unitId; lastBox = undefined;
+  let lastUnit;
+  boxGroups().forEach(g => {
+    if (g.uid !== lastUnit) {
+      tb.append(h("tr", { class: "unit-head" }, h("td", { colspan: 4 }, g.loc ? g.loc.unitName : "Not on your shelf map")));
+      lastUnit = g.uid;
     }
-    const sameBox = p.box === lastBox; lastBox = p.box;
-    const tr = h("tr", { class: pickedDone.has(p.step) ? "done" : "" },
-      h("td", null, h("input", { type: "checkbox", "aria-label": `Picked ${itemName(p)}`, checked: pickedDone.has(p.step),
-        onchange: e => { e.target.checked ? pickedDone.add(p.step) : pickedDone.delete(p.step); tr.className = e.target.checked ? "done" : ""; } })),
-      h("td", { class: "big" }, `${p.qty}×`),
-      h("td", { class: "box" }, sameBox ? h("span", { class: "idet" }, "same box") : p.box),
-      itemCell(p, p.loc && !sameBox ? `shelf ${p.loc.shelf} of ${p.loc.shelves}` : null));
-    tb.append(tr);
+    g.items.forEach((p, i) => {
+      const tr = h("tr", { class: pickedDone.has(p.step) ? "done" : "" },
+        h("td", null, h("input", { type: "checkbox", "aria-label": `Picked ${itemName(p)}`, checked: pickedDone.has(p.step),
+          onchange: e => { e.target.checked ? pickedDone.add(p.step) : pickedDone.delete(p.step); tr.className = e.target.checked ? "done" : ""; } })),
+        h("td", { class: "big" }, `${p.qty}×`),
+        i === 0 ? h("td", { class: "box" + (g.items.length > 1 ? " multi" : ""), rowspan: g.items.length }, g.box,
+          h("span", { class: "where" }, g.loc ? `shelf ${g.loc.shelf} of ${g.loc.shelves}` : "find by hand")) : null,
+        itemCell(p, null));
+      tb.append(tr);
+    });
   });
   $("tab-pick").replaceChildren(
-    h("p", { class: "small muted" }, "Walk the shelves top to bottom of this list. Tick items off as they go in the cart."),
-    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Take"), h("th", null, "Box"), h("th", null, "Item"))), tb));
+    h("p", { class: "small muted" }, "Walk the shelves top to bottom of this list. Tick items off as they go in the cart. When a box holds more than one item, the words that tell them apart are highlighted."),
+    h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Take"), h("th", { style: "text-align:center" }, "Box"), h("th", null, "Item"))), tb));
 }
 
 function renderUnpack() {
@@ -622,27 +671,48 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 $("printBtn").onclick = () => window.print();
 if (inClaude) $("printBtn").classList.add("hidden");
 
-/* ---------- step-through unpacking ---------- */
-let stepAt = 0;
+/* ---------- step by step (picking and unpacking) ---------- */
+let stepAt = 0, stepMode = "unpack";
+const stepList = () => (stepMode === "pick" ? plan.picks : plan.unpack);
 function showStep() {
-  const total = plan.unpack.length, u = plan.unpack[stepAt];
+  const list = stepList(), total = list.length, u = list[stepAt];
   $("stepBar").style.width = `${((stepAt + 1) / total) * 100}%`;
-  $("stepCount").textContent = `Item ${stepAt + 1} of ${total}`;
-  $("stepBody").replaceChildren(
-    h("div", { class: "item" }, itemName(u)),
-    ...(u.details ? [h("div", { class: "details" }, u.details)] : []),
-    h("div", { class: "qty" }, u.qty > 1 ? `Take ${u.qty} of them` : "Take 1"),
-    h("div", { class: "to" }, "put on order"),
-    h("div", { class: "order" }, u.label),
-    h("div", { class: "small muted" }, `real order #${u.raw}`),
-    ...(u.last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []));
+  const what = h("div", null,
+    h("div", { class: "item" }, hl(itemName(u), u.marks)),
+    ...(u.details ? [h("div", { class: "details" }, hl(u.details, u.marks))] : []));
+  if (stepMode === "pick") {
+    $("stepCount").textContent = `Picking: ${stepAt + 1} of ${total}`;
+    const prev = list[stepAt - 1];
+    $("stepBody").replaceChildren(
+      h("div", { class: "to" }, prev && prev.box === u.box ? "same box" : "go to box"),
+      h("div", { class: "boxcode" }, u.box),
+      h("div", { class: "small muted" }, u.loc ? `${u.loc.unitName} · shelf ${u.loc.shelf} of ${u.loc.shelves}` : "not on your shelf map"),
+      h("div", { class: "qty", style: "margin-top:14px;color:var(--text);font-weight:700" }, `Take ${u.qty}`),
+      what,
+      ...(u.boxCount > 1 ? [h("div", { class: "note" }, `This box has ${u.boxCount} different items. This is ${u.boxIndex} of ${u.boxCount}; check the highlighted words.`)] : []));
+  } else {
+    $("stepCount").textContent = `Unpacking: ${stepAt + 1} of ${total}`;
+    $("stepBody").replaceChildren(
+      what,
+      h("div", { class: "qty" }, u.qty > 1 ? `Take ${u.qty} of them` : "Take 1"),
+      h("div", { class: "to" }, "put on order"),
+      h("div", { class: "order" }, u.label),
+      h("div", { class: "small muted" }, `real order #${u.raw}`),
+      ...(u.last ? [h("div", { class: "done-banner" }, `✓ That's the last item for order ${u.label}. Pack it now!`)] : []));
+  }
   $("stepPrev").disabled = stepAt === 0;
-  $("stepNext").textContent = stepAt === total - 1 ? "Finish ✓" : "Next ▶";
+  $("stepNext").textContent = stepAt === total - 1 ? "Finish ✓" : stepMode === "pick" ? "In the cart ▶" : "Next ▶";
 }
-$("stepBtn").onclick = () => { stepAt = 0; $("stepper").classList.remove("hidden"); showStep(); };
-$("stepClose").onclick = () => $("stepper").classList.add("hidden");
-$("stepPrev").onclick = () => { if (stepAt > 0) { stepAt--; showStep(); } };
-$("stepNext").onclick = () => { if (stepAt < plan.unpack.length - 1) { stepAt++; showStep(); } else $("stepper").classList.add("hidden"); };
+function openSteps(mode) { stepMode = mode; stepAt = 0; $("stepper").classList.remove("hidden"); showStep(); }
+function closeSteps() { $("stepper").classList.add("hidden"); if (stepMode === "pick") renderPick(); }
+$("stepBtn").onclick = () => openSteps("unpack");
+$("stepPickBtn").onclick = () => openSteps("pick");
+$("stepClose").onclick = closeSteps;
+$("stepPrev").onclick = () => { if (stepAt > 0) { stepAt--; if (stepMode === "pick") pickedDone.delete(stepList()[stepAt].step); showStep(); } };
+$("stepNext").onclick = () => {
+  if (stepMode === "pick") pickedDone.add(stepList()[stepAt].step); // ticks it on the list too
+  if (stepAt < stepList().length - 1) { stepAt++; showStep(); } else closeSteps();
+};
 document.addEventListener("keydown", e => {
   if ($("stepper").classList.contains("hidden")) return;
   if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); $("stepNext").click(); }
@@ -672,56 +742,93 @@ function docHeader(doc, title, sub) {
   return M + 54;
 }
 function stamp() { return `${plan.orders.length} orders · ${plan.totalUnits} items · ${today()}`; }
-/** Item name (bold) + details (small grey), wrapped to width. Returns lines to draw and their height. */
+/** Lay out words for the PDF, wrapping to width; "difference" words are flagged. */
+function layoutRich(doc, text, marks, width, size, bold) {
+  doc.setFontSize(size); doc.setFont("helvetica", "normal");
+  const space = doc.getTextWidth(" ");
+  const lines = [[]]; let w = 0;
+  String(text).split(/\s+/).filter(Boolean).forEach(word => {
+    const isHl = !!(marks && normWord(word) && marks.has(normWord(word)));
+    const [, pre, core, post] = isHl ? splitPunct(word) : [, "", word, ""];
+    const pieces = [[pre, false], [core, isHl], [post, false]].filter(x => x[0])
+      .map(([t, hlt]) => { doc.setFont("helvetica", bold || hlt ? "bold" : "normal"); return { word: t, isHl: hlt, ww: doc.getTextWidth(t) + (hlt ? 4 : 0) }; });
+    const ww = pieces.reduce((a, b) => a + b.ww, 0);
+    if (lines[lines.length - 1].length && w + space + ww > width) { lines.push([]); w = 0; }
+    const cur = lines[lines.length - 1];
+    let x = cur.length ? w + space : 0;
+    pieces.forEach(pc => { cur.push(Object.assign(pc, { x })); x += pc.ww; });
+    w = x;
+  });
+  return lines;
+}
+function drawRich(doc, lines, x, y, size, bold, lineH, grey) {
+  lines.forEach((line, i) => {
+    const base = y + (i + 1) * lineH - 3;
+    line.forEach(t => {
+      doc.setFontSize(size);
+      if (t.isHl) {
+        doc.setFillColor(255, 226, 122); doc.rect(x + t.x, base - size * 0.85, t.ww, size * 1.1, "F");
+        doc.setFont("helvetica", "bold"); doc.setTextColor(0); doc.text(t.word, x + t.x + 2, base);
+      } else {
+        doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setTextColor(grey ? 95 : 0); doc.text(t.word, x + t.x, base);
+      }
+    });
+  });
+  doc.setTextColor(0);
+}
+/** Item name (bold) + details (small grey), wrapped to width, differences highlighted. */
 function itemBlock(doc, t, width) {
-  doc.setFont("helvetica", "bold"); doc.setFontSize(12);
-  const nameLines = doc.splitTextToSize(itemName(t), width);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-  const detLines = t.details ? doc.splitTextToSize(t.details, width) : [];
+  const nameLines = layoutRich(doc, itemName(t), t.marks, width, 12, true);
+  const detLines = t.details ? layoutRich(doc, t.details, t.marks, width, 9, false) : [];
   return { nameLines, detLines, height: nameLines.length * 14 + detLines.length * 11 };
 }
 function drawItemBlock(doc, b, x, y) {
-  doc.setFont("helvetica", "bold"); doc.setFontSize(12);
-  b.nameLines.forEach(l => { y += 14; doc.text(l, x, y - 3); });
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(95);
-  b.detLines.forEach(l => { y += 11; doc.text(l, x, y - 2); });
-  doc.setTextColor(0);
+  drawRich(doc, b.nameLines, x, y, 12, true, 14, false);
+  drawRich(doc, b.detLines, x, y + b.nameLines.length * 14, 9, false, 11, true);
 }
 
 function pickPdf() {
   const doc = newDoc(); if (!doc) return;
   let y = docHeader(doc, "PICK LIST", `${stamp()} · go top to bottom, tick each box`);
-  const X = { take: M + 28, box: M + 76, item: M + 150, where: M + 432 }, itemW = 270;
+  const X = { take: M + 28, boxL: M + 70, boxW: 92, item: M + 172 }, itemW = PW - M - (M + 172) - 4;
   const colHead = () => {
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(110);
-    doc.text("TAKE", X.take, y); doc.text("BOX", X.box, y); doc.text("ITEM", X.item, y); doc.text("WHERE", X.where, y);
+    doc.text("TAKE", X.take, y); doc.text("BOX", X.boxL + X.boxW / 2, y, { align: "center" }); doc.text("ITEM", X.item, y);
     doc.setTextColor(0); y += 6;
   };
   colHead();
-  let lastUnit, lastBox;
-  plan.picks.forEach(p => {
-    const unitId = p.loc ? p.loc.unitId : "none";
-    const needHead = unitId !== lastUnit;
-    const b = itemBlock(doc, p, itemW);
-    const rowH = Math.max(28, b.height + 10);
-    if (y + rowH + (needHead ? 22 : 0) > PH - 40) { doc.addPage(); y = M; colHead(); lastBox = undefined; }
+  let lastUnit;
+  boxGroups().forEach(g => {
+    const blocks = g.items.map(p => itemBlock(doc, p, itemW));
+    const rowHs = blocks.map(b => Math.max(30, b.height + 10));
+    const gh = rowHs.reduce((a, b) => a + b, 0);
+    const needHead = g.uid !== lastUnit;
+    if (y + gh + (needHead ? 22 : 0) > PH - 40) { doc.addPage(); y = M; colHead(); }
     if (needHead) {
       doc.setFillColor(225, 235, 244); doc.rect(M, y, PW - 2 * M, 20, "F");
       doc.setFont("helvetica", "bold"); doc.setFontSize(11);
-      doc.text(p.loc ? p.loc.unitName : "NOT ON YOUR SHELF MAP", M + 6, y + 14);
-      y += 22; lastUnit = unitId; lastBox = undefined;
+      doc.text(g.loc ? g.loc.unitName : "NOT ON YOUR SHELF MAP", M + 6, y + 14);
+      y += 22; lastUnit = g.uid;
     }
-    const sameBox = p.box === lastBox; lastBox = p.box;
-    doc.setDrawColor(60); doc.setLineWidth(1); doc.rect(M + 4, y + 7, 14, 14, "S");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(16);
-    doc.text(`${p.qty} x`, X.take, y + 19);
-    if (sameBox) { doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(110); doc.text("same box", X.box, y + 18); doc.setTextColor(0); }
-    else doc.text(p.box, X.box, y + 19);
-    drawItemBlock(doc, b, X.item, y + 5);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-    if (!sameBox) doc.text(p.loc ? `shelf ${p.loc.shelf} of ${p.loc.shelves}` : "find by hand", X.where, y + 18);
-    doc.setDrawColor(215); doc.setLineWidth(0.5); doc.line(M, y + rowH, PW - M, y + rowH);
-    y += rowH;
+    // one box number, centred across all of its lines
+    const cx = X.boxL + X.boxW / 2;
+    if (g.items.length > 1) { doc.setFillColor(238, 244, 249); doc.rect(X.boxL, y + 2, X.boxW, gh - 4, "F"); }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(20);
+    doc.text(g.box, cx, y + gh / 2 + 1, { align: "center" });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(100);
+    doc.text(g.loc ? `shelf ${g.loc.shelf} of ${g.loc.shelves}` : "find by hand", cx, y + gh / 2 + 11, { align: "center" });
+    doc.setTextColor(0);
+    g.items.forEach((p, i) => {
+      const rowH = rowHs[i];
+      doc.setDrawColor(60); doc.setLineWidth(1); doc.rect(M + 4, y + 8, 14, 14, "S");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(16);
+      doc.text(`${p.qty} x`, X.take, y + 20);
+      drawItemBlock(doc, blocks[i], X.item, y + 5);
+      doc.setDrawColor(215); doc.setLineWidth(0.5);
+      if (i < g.items.length - 1) { doc.line(M, y + rowH, X.boxL - 2, y + rowH); doc.line(X.boxL + X.boxW + 2, y + rowH, PW - M, y + rowH); }
+      else doc.line(M, y + rowH, PW - M, y + rowH);
+      y += rowH;
+    });
   });
   footer(doc, "Pick list");
   download(doc.output("blob"), `pick-list-${fileStamp()}.pdf`);

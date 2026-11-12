@@ -40,8 +40,11 @@ One line per item works best:
 - **Item** and **Details** say what to take from the box. Any other columns
   (color, size…) are shown as details too. A box can hold more than one kind of
   item; each gets its own line.
-- The **pick list** shows box + item. The **unpack list** shows only the item
-  and which order it goes to.
+- The **pick list** shows box + item. When one box holds several items, the
+  box number is shown once across all of them, and the words that differ
+  (e.g. **Blue** vs **Gray**) are highlighted. The **unpack list** shows only
+  the item and which order it goes to.
+- Both lists come as a PDF and as a **step by step** screen (tap Next as you go).
 - Qty is optional (1 if left out). A blank order number means "same order as
   the line above".
 
