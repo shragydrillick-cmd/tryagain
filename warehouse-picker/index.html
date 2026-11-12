@@ -120,6 +120,28 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 .pickopt { display: grid; grid-template-columns: minmax(110px, 38%) 1fr; gap: 8px; align-items: center; font-size: 15px; }
 .pickopt select, .pickopt input { width: 100%; min-width: 0; }
 .endsrows { display: grid; gap: 6px; margin-top: 4px; }
+.backlink { display: block; margin-bottom: 8px; font-size: 16px; text-decoration: none; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 16px; border-radius: 14px;
+  border: 2px solid var(--accent); background: var(--accent-soft); color: var(--text); font: inherit; cursor: pointer; min-height: 130px; }
+.tile b { font-size: 22px; }
+.tileicon { font-size: 30px; }
+.aislelist { display: grid; gap: 8px; }
+.aislerow { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.wizard .wizq { font-size: 24px; margin: 8px 0; text-wrap: balance; }
+.bigin { font-size: 22px; min-height: 52px; width: 100%; max-width: 260px; }
+.biglabel { font-size: 26px; }
+.corners { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 420px; }
+.corner, .bigopt { font: inherit; color: var(--text); background: var(--card); border: 2px solid var(--line); border-radius: 14px; padding: 18px 12px; cursor: pointer; }
+.corner { font-size: 18px; font-weight: 700; min-height: 80px; }
+.corner.on, .bigopt.on { border-color: var(--accent); background: var(--accent-soft); }
+.bigopts { display: grid; gap: 10px; }
+.bigopt { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.bigopt b { font-size: 19px; }
+.endrow2 { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; }
+.askq { font-size: 18px; font-weight: 600; }
+.wiznav { margin-top: 18px; }
+.preview { display: grid; gap: 4px; font-variant-numeric: tabular-nums; margin-top: 6px; overflow-x: auto; }
 .endrow { display: grid; grid-template-columns: 96px 1fr auto 1fr; gap: 6px; align-items: center; font-size: 15px; }
 .endrow input { min-width: 0; width: 100%; }
 .sidebtn { white-space: nowrap; }
@@ -781,8 +803,9 @@ function aisleShelves(spec) {
     return ends.map(e => {
       const a = endNumber(e.first), b = endNumber(e.last);
       if (a == null) return { boxes: "", rtl: !!spec.rtl };
-      if (b == null || b === a) return { boxes: `${L}${a}`, rtl: !!spec.rtl };
-      return { boxes: `${L}${a}-${L}${b}${by > 1 ? "/" + by : ""}`, rtl: !!spec.rtl };
+      const rtl = e.rtl != null ? !!e.rtl : !!spec.rtl;
+      if (b == null || b === a) return { boxes: `${L}${a}`, rtl };
+      return { boxes: `${L}${a}-${L}${b}${by > 1 ? "/" + by : ""}`, rtl };
     });
   }
   const shelves = counts.map(() => ({ boxes: "", rtl: !!spec.rtl }));
@@ -1663,7 +1686,7 @@ $("navBtn").onclick = () => {
   $("homeView").classList.toggle("hidden", view !== "home");
   $("settingsView").classList.toggle("hidden", view !== "settings");
   $("navBtn").innerHTML = view === "home" ? "&#9881; Settings" : "&#10003; Done";
-  if (view === "settings") renderSettings(); else { showInvStatus(); rebuild(); }
+  if (view === "settings") { setPage = "home"; wiz = null; renderSettings(); } else { showInvStatus(); rebuild(); }
   window.scrollTo(0, 0);
 };
 function changed(rerender) { saveSettings(); if (rerender) renderSettings(); else renderChecks(); }
@@ -1673,7 +1696,7 @@ function numInput(value, onset) {
 }
 const quick = { letter: "A", count: 2, shelves: 5, per: "10", first: 1, rtl: false, fromBottom: false, vertical: false };
 
-function renderSettings() {
+function renderAdvanced() {
   const v = $("settingsView");
   const qIn = (key, attrs) => h("input", Object.assign({ value: quick[key], oninput: e => { quick[key] = e.target.type === "number" ? +e.target.value : e.target.value; } }, attrs));
   v.replaceChildren(
@@ -1894,6 +1917,380 @@ function allUnitsCard() {
     box);
 }
 
+/* =====================================================================
+   SETTINGS: a start screen with Map and Order, the Map questions one at
+   a time, the Order screen, and More (backup, look, everything-at-once).
+   ===================================================================== */
+let setPage = "home"; // home | map | wizard | order | orderAisle | more | advanced
+let orderAisleId = null, wiz = null;
+function go(page) { setPage = page; renderSettings(); window.scrollTo(0, 0); }
+function backRow(label, page) {
+  return h("button", { class: "link backlink", type: "button", onclick: () => go(page) }, `‹ ${label}`);
+}
+const shelfLabel = (i, S) => (i === 0 ? "Top shelf" : i === S - 1 ? "Bottom shelf" : `Shelf ${i + 1}`);
+/** "Aisle C · 6 shelves high · C1 – C96 (96 boxes)" */
+function unitSummary(u) {
+  const nums = u.shelves.flatMap(sh => expandBoxes(sh.boxes).boxes);
+  const sorted = nums.slice().sort(natural);
+  return { name: u.name, high: u.shelves.length, range: nums.length ? `${sorted[0]} – ${sorted[sorted.length - 1]}` : "no boxes yet", count: nums.length };
+}
+
+function renderSettings() {
+  const v = $("settingsView");
+  if (setPage === "advanced") { renderAdvanced(); v.prepend(backRow("More", "more")); return; }
+  if (setPage === "map") return renderMapPage(v);
+  if (setPage === "wizard" && wiz) return renderWizard(v);
+  if (setPage === "order") return renderOrderPage(v);
+  if (setPage === "orderAisle") return renderOrderAisle(v);
+  if (setPage === "more") return renderMorePage(v);
+  setPage = "home";
+  const boxes = buildLocator(settings).size;
+  v.replaceChildren(h("section", { class: "card" },
+    h("h2", null, "Settings"),
+    h("div", { class: "tiles" },
+      h("button", { class: "tile", type: "button", onclick: () => go("map") },
+        h("span", { class: "tileicon" }, "🗺"), h("b", null, "Map"),
+        h("span", { class: "small muted" }, `How the store is laid out. ${settings.units.length} aisle${settings.units.length === 1 ? "" : "s"}, ${boxes} boxes.`)),
+      h("button", { class: "tile", type: "button", onclick: () => go("order") },
+        h("span", { class: "tileicon" }, "🚶"), h("b", null, "Order"),
+        h("span", { class: "small muted" }, "Which aisle first, and how to pick each one."))),
+    h("button", { class: "link", type: "button", style: "margin-top:14px", onclick: () => go("more") }, "More: order numbers, backup, look, get the app")));
+}
+
+/* ---------- Map ---------- */
+function renderMapPage(v) {
+  v.replaceChildren(h("section", { class: "card" },
+    backRow("Settings", "home"),
+    h("h2", null, "Map"),
+    h("p", { class: "small muted" }, "Your aisles. Tap Edit to go through an aisle's questions again."),
+    h("div", { id: "checks" }),
+    h("div", { class: "aislelist" }, settings.units.length ? settings.units.map((u, ui) => {
+      const s = unitSummary(u);
+      return h("div", { class: "aislerow" },
+        h("div", null, h("b", null, s.name), h("div", { class: "small muted" }, `${s.high} shel${s.high === 1 ? "f" : "ves"} high · ${s.range} (${s.count} boxes)`)),
+        h("button", { class: "btn small", type: "button", onclick: () => startWizard("one", u) }, "Edit"),
+        h("button", { class: "btn secondary small", type: "button", "aria-label": `Delete ${s.name}`, onclick: e => tapTwice(e.currentTarget, "Delete?", () => {
+          settings.units.splice(ui, 1); settings.walk = settings.walk.filter(id => id !== u.id); saveSettings(); renderSettings(); }) }, "✕"));
+    }) : h("p", null, "No aisles yet.")),
+    h("div", { class: "row", style: "margin-top:12px" },
+      h("button", { class: "btn", type: "button", onclick: () => startWizard("add") }, "+ Add an aisle"),
+      h("button", { class: "btn secondary", type: "button", onclick: () => startWizard("all") }, "Change all")),
+    h("div", { class: "row", style: "margin-top:10px" },
+      h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace your map?", () => { if (buildMapFromBins()) renderSettings(); }) }, "Make a map from my bins")),
+    h("h3", null, "Find a box"),
+    h("div", { class: "row" }, h("input", { type: "text", id: "probe", placeholder: "e.g. C14", style: "width:120px", oninput: renderChecks }), h("span", { id: "probeOut" }))));
+  renderChecks();
+}
+
+/* ---------- the Map questions ---------- */
+/** The letter after this one: C -> D, Z -> AA. */
+function letterAfter(L) {
+  if (!L) return "A";
+  const n = [...L].reduce((a, ch) => a * 26 + (ch.charCodeAt(0) - 64), 0); // A=1 … Z=26, AA=27
+  let x = n + 1, out = "";
+  while (x > 0) { const r = (x - 1) % 26; out = String.fromCharCode(65 + r) + out; x = Math.floor((x - 1) / 26); }
+  return out;
+}
+function nextFreeLetter(used) { let i = 0; while (used.has(aisleLetter(i))) i++; return aisleLetter(i); }
+function blankDraft(base, letter) {
+  return { letter, shelves: base ? base.shelves : 5, first: 1, start: base ? base.start : "tl", vertical: base ? base.vertical : false, left: [], right: [], id: null };
+}
+/** What we know about an existing aisle, as answers to the questions. */
+function draftFromUnit(u) {
+  const rows = u.shelves.map(sh => shelfBoxes(sh).boxes);
+  const all = rows.flat(), nums = all.map(endNumber).filter(n => n != null);
+  const letter = (u.spec && specLetter(u.spec)) || ((all[0] || "").match(/^[A-Z]*/) || [""])[0];
+  const min = nums.length ? Math.min(...nums) : 1;
+  let start = "tl", vertical = !!(u.spec && u.spec.vertical);
+  rows.forEach((r, i) => {
+    const k = r.findIndex(c => endNumber(c) === min);
+    if (k >= 0) {
+      start = (i < rows.length / 2 ? "t" : "b") + (k < r.length / 2 ? "l" : "r");
+      if (!u.spec) vertical = !r.some(c => endNumber(c) === min + 1) && rows.length > 1;
+    }
+  });
+  return { id: u.id, letter, shelves: rows.length || 1, first: min, start, vertical,
+    left: rows.map(r => r[0] || ""), right: rows.map(r => r[r.length - 1] || "") };
+}
+function startWizard(mode, u) {
+  const used = new Set(settings.units.map(x => (x.spec && specLetter(x.spec)) || "").filter(Boolean));
+  if (mode === "one") wiz = { mode, drafts: [draftFromUnit(u)], ai: 0, step: "letter" };
+  else if (mode === "add") { const last = settings.units.length ? draftFromUnit(settings.units[settings.units.length - 1]) : null; wiz = { mode, drafts: [blankDraft(last, nextFreeLetter(used))], ai: 0, step: "letter" }; }
+  else wiz = { mode, drafts: [], ai: 0, step: "count", count: Math.max(1, settings.units.length || 1) };
+  go("wizard");
+}
+const STEPS = ["letter", "shelves", "first", "start", "dir", "left", "right", "check"];
+function wizNext() { const i = STEPS.indexOf(wiz.step); wiz.step = STEPS[Math.min(STEPS.length - 1, i + 1)]; if (wiz.step === "left" || wiz.step === "right") autofill(wcur()); renderSettings(); window.scrollTo(0, 0); }
+function wizBack() {
+  const i = STEPS.indexOf(wiz.step);
+  if (wiz.step === "count" || (i === 0 && wiz.ai === 0 && wiz.mode !== "all")) { wiz = null; return go("map"); }
+  if (i === 0 && wiz.mode === "all" && wiz.ai === 0) wiz.step = "count";
+  else if (i === 0) { wiz.ai--; wiz.step = "check"; }
+  else wiz.step = STEPS[i - 1];
+  renderSettings(); window.scrollTo(0, 0);
+}
+const wcur = () => wiz.drafts[wiz.ai];
+const codeOf = (d, n) => `${d.letter}${n}`;
+/** A shelf end typed or chosen by the person: kept as given, and the filled-in ones are worked out again. */
+function setEnd(d, side, i, value) {
+  d.auto = d.auto || { left: [], right: [] };
+  d[side][i] = value; d.auto[side][i] = false;
+  autofill(d);
+}
+/** Fill in the shelf ends that follow from what's known; never overwrites what was typed. */
+function autofill(d) {
+  const S = d.shelves, top = d.start[0] === "t", onLeft = d.start[1] === "l", n = endNumber;
+  d.auto = d.auto || { left: [], right: [] };
+  for (const side of ["left", "right"]) { // forget what was filled in before; keep what was typed
+    d[side] = Array.from({ length: S }, (_, i) => (d.auto[side][i] ? "" : d[side][i] || ""));
+    d.auto[side] = Array.from({ length: S }, () => false);
+  }
+  const set = (arr, i, val) => { if (!arr[i] && val > 0) { arr[i] = codeOf(d, val); d.auto[arr === d.left ? "left" : "right"][i] = true; } };
+  if (d.vertical) {
+    const startCol = onLeft ? d.left : d.right, otherCol = onLeft ? d.right : d.left;
+    for (let i = 0; i < S; i++) set(startCol, i, d.first + (top ? i : S - 1 - i)); // 1, 2, 3 … down (or up) the first column
+    const k = otherCol.findIndex(v => n(v) != null); // the far column also counts by one per shelf
+    if (k >= 0) for (let i = 0; i < S; i++) set(otherCol, i, n(otherCol[k]) + (top ? i - k : k - i));
+  } else {
+    const order = Array.from({ length: S }, (_, i) => (top ? i : S - 1 - i));
+    const startSide = onLeft ? d.left : d.right, endSide = onLeft ? d.right : d.left;
+    set(startSide, order[0], d.first);
+    for (let j = 1; j < S; j++) { const prev = n(endSide[order[j - 1]]); if (prev != null) set(startSide, order[j], prev + 1); }
+  }
+}
+/** The first thing that doesn't add up, as a question with likely answers (null = all good). */
+function checkDraft(d) {
+  const S = d.shelves, n = endNumber, top = d.start[0] === "t";
+  for (const side of ["left", "right"]) for (let i = 0; i < S; i++) if (n(d[side][i]) == null)
+    return { text: `What box is at the ${side} end of the ${shelfLabel(i, S).toLowerCase()}?`, typeStep: side };
+  if (d.vertical) {
+    for (const side of ["left", "right"]) {
+      const col = d[side].map(n);
+      for (let i = 1; i < S; i++) {
+        const want = col[i - 1] + (top ? 1 : -1);
+        if (col[i] !== want) return {
+          text: `At the ${side} end, ${top ? "under" : "above"} ${codeOf(d, col[i - 1])} (${shelfLabel(i - 1, S).toLowerCase()}) should be ${codeOf(d, want)}, but the ${shelfLabel(i, S).toLowerCase()} says ${codeOf(d, col[i])}. Which is right?`,
+          options: [
+            { label: `${codeOf(d, want)} is right`, apply: () => setEnd(d, side, i, codeOf(d, want)) },
+            { label: `${codeOf(d, col[i])} is right`, apply: () => setEnd(d, side, i - 1, codeOf(d, col[i] - (top ? 1 : -1))) }],
+          typeStep: side };
+      }
+    }
+    for (let i = 0; i < S; i++) {
+      const a = n(d.left[i]), b = n(d.right[i]);
+      if (Math.abs(b - a) % S) {
+        const step = b > a ? S : -S, lo = a + Math.trunc((b - a) / S) * S;
+        return { text: `The ${shelfLabel(i, S).toLowerCase()} goes from ${codeOf(d, a)} to ${codeOf(d, b)}. With ${S} shelves its boxes count by ${S} (${codeOf(d, a)}, ${codeOf(d, a + step)}, ${codeOf(d, a + 2 * step)}…), so it can't end on ${codeOf(d, b)}. What's at its right end?`,
+          options: [lo, lo + step].filter(x => x > 0 && x !== a).map(x => ({ label: codeOf(d, x), apply: () => setEnd(d, "right", i, codeOf(d, x)) })), typeStep: "right" };
+      }
+    }
+  } else {
+    const ranges = d.left.map((v, i) => { const a = n(v), b = n(d.right[i]); return [Math.min(a, b), Math.max(a, b), i]; });
+    for (const [a1, b1, i] of ranges) for (const [a2, b2, j] of ranges) if (i < j && a1 <= b2 && a2 <= b1)
+      return { text: `The ${shelfLabel(i, S).toLowerCase()} (${codeOf(d, a1)} – ${codeOf(d, b1)}) and the ${shelfLabel(j, S).toLowerCase()} (${codeOf(d, a2)} – ${codeOf(d, b2)}) share some numbers. One of them is typed wrong; please check them.`, typeStep: "left" };
+  }
+  return null;
+}
+function draftToSpec(d) {
+  const n = endNumber;
+  return { letter: d.letter, shelves: d.shelves, vertical: d.vertical, byEnds: true, rtl: d.start[1] === "r", fromBottom: d.start[0] === "b",
+    first: d.first, per: "10", manual: false,
+    ends: d.left.map((lv, i) => { const a = n(lv), b = n(d.right[i]); return { first: codeOf(d, Math.min(a, b)), last: codeOf(d, Math.max(a, b)), rtl: a > b }; }) };
+}
+function saveDraft(d, k) {
+  const spec = draftToSpec(d), shelves = aisleShelves(spec);
+  const pick = settings.units[0] || {};
+  const picking = { pattern: pick.pattern || "rows-down", dir: pick.dir || "ltr", block: pick.block || 3, inner: pick.inner || "same", zigzag: !!pick.zigzag };
+  if (wiz.mode === "one") {
+    const u = settings.units.find(x => x.id === d.id);
+    if (u) { u.spec = spec; u.shelves = shelves; if (!u.name || /^Aisle [A-Z]*$/.test(u.name) || /^Unit /.test(u.name)) u.name = `Aisle ${d.letter}`; }
+  } else if (wiz.mode === "add") {
+    const u = Object.assign({ id: nextId++, name: `Aisle ${d.letter}`, spec, shelves }, picking);
+    settings.units.push(u); settings.walk.push(u.id);
+  } else {
+    wiz.made = wiz.made || [];
+    wiz.made[k] = Object.assign({ id: nextId++, name: `Aisle ${d.letter}`, spec, shelves }, picking);
+    if (wiz.made.filter(Boolean).length === wiz.drafts.length) { settings.units = wiz.made; settings.walk = wiz.made.map(u => u.id); }
+  }
+  saveSettings();
+}
+function aislePreview(d) {
+  const spec = draftToSpec(d), S = d.shelves;
+  return h("div", { class: "preview" }, aisleShelves(spec).map((sh, i) => {
+    const row = shelfBoxes(sh).boxes;
+    return h("div", null, h("span", { class: "small muted" }, shelfLabel(i, S) + ": "),
+      row.length > 6 ? `${row.slice(0, 4).join("  ")}  …  ${row[row.length - 1]}` : row.join("  "), h("span", { class: "small muted" }, `  (${row.length})`));
+  }));
+}
+function renderWizard(v) {
+  const d = wiz.step === "count" ? null : wcur(), total = wiz.mode === "all" ? wiz.count : 1;
+  const next = h("button", { class: "btn", type: "button" }, "Next ▶");
+  next.onclick = () => wizNext(); // replaced on the first and last screens
+  const back = h("button", { class: "btn secondary", type: "button", onclick: () => wizBack() }, "◀ Back");
+  const askNumber = (label, value, min, onset) => h("input", { type: "number", min, value, inputmode: "numeric", class: "bigin", "aria-label": label,
+    oninput: e => onset(parseInt(e.target.value, 10)), onkeydown: e => { if (e.key === "Enter") next.click(); } });
+  const head = d ? h("div", { class: "small muted" }, wiz.mode === "one" ? `Editing aisle ${d.letter}` : `Aisle ${wiz.ai + 1} of ${total}`,
+    ` · question ${STEPS.indexOf(wiz.step) + 1} of ${STEPS.length}`) : null;
+  let q, help = null, body, nav = [back, next];
+  switch (wiz.step) {
+    case "count":
+      q = "How many aisles are there?";
+      help = "An aisle is one shelving unit with one letter (A, B, C…).";
+      body = askNumber("Number of aisles", wiz.count, 1, x => { wiz.count = Math.max(1, x || 1); });
+      next.onclick = () => {
+        const old = wiz.drafts;
+        wiz.drafts = Array.from({ length: wiz.count }, (_, i) => old[i] || blankDraft(old[i - 1] || null, i === 0 ? "A" : "")); // later letters follow the one before
+        wiz.ai = 0; wiz.step = "letter"; wiz.made = []; renderSettings();
+      };
+      break;
+    case "letter":
+      if (!d.letter) d.letter = wiz.ai > 0 ? letterAfter(wiz.drafts[wiz.ai - 1].letter) : "A";
+      q = "What's the aisle's letter?";
+      body = h("input", { type: "text", maxlength: 2, value: d.letter, class: "bigin", style: "text-transform:uppercase", "aria-label": "Aisle letter",
+        oninput: e => { d.letter = e.target.value.toUpperCase().replace(/[^A-Z]/g, ""); }, onkeydown: e => { if (e.key === "Enter") next.click(); } });
+      break;
+    case "shelves":
+      q = `How many shelves high is aisle ${d.letter}?`;
+      help = "Count the shelves stacked on top of each other.";
+      body = askNumber("Shelves high", d.shelves, 1, x => { const nS = Math.max(1, x || 1); if (nS !== d.shelves) { d.shelves = nS; d.left = []; d.right = []; d.auto = null; } });
+      break;
+    case "first":
+      q = `What's the first number in aisle ${d.letter}?`;
+      help = `Usually 1 (box ${d.letter}1).`;
+      body = h("div", { class: "row" }, h("b", { class: "biglabel" }, d.letter), askNumber("First number", d.first, 0, x => { const f = Number.isFinite(x) ? x : 1; if (f !== d.first) { d.first = f; if (d.auto) autofill(d); } }));
+      break;
+    case "start": {
+      q = `Where is box ${codeOf(d, d.first)}?`;
+      help = "Standing in front of the shelves.";
+      const corner = (k, label) => h("button", { class: "corner" + (d.start === k ? " on" : ""), type: "button", onclick: () => { if (d.start !== k) { d.start = k; d.left = []; d.right = []; d.auto = null; } wizNext(); } }, label);
+      body = h("div", { class: "corners" }, corner("tl", "Top left"), corner("tr", "Top right"), corner("bl", "Bottom left"), corner("br", "Bottom right"));
+      nav = [back];
+      break;
+    }
+    case "dir": {
+      const top = d.start[0] === "t", n1 = codeOf(d, d.first), n2 = codeOf(d, d.first + 1);
+      q = `Where is ${n2}?`;
+      const opt = (vert, label, sub) => h("button", { class: "bigopt" + (d.vertical === vert ? " on" : ""), type: "button", onclick: () => { if (d.vertical !== vert) { d.vertical = vert; d.left = []; d.right = []; d.auto = null; } wizNext(); } },
+        h("b", null, label), h("span", { class: "small muted" }, sub));
+      body = h("div", { class: "bigopts" },
+        opt(false, `Next to ${n1}`, `Numbers go along the shelf (${n1}, ${n2}, ${codeOf(d, d.first + 2)}… side by side)`),
+        opt(true, top ? `Under ${n1}` : `Above ${n1}`, `Numbers go ${top ? "down" : "up"} the shelves (${n2} ${top ? "under" : "above"} ${n1}, then the next column)`));
+      nav = [back];
+      break;
+    }
+    case "left": case "right": {
+      const side = wiz.step;
+      q = `What box is at the ${side.toUpperCase()} end of each shelf?`;
+      help = "Top shelf first. What could be worked out is filled in already; check it and fill in the rest.";
+      body = h("div", { class: "endsrows" }, Array.from({ length: d.shelves }, (_, i) => h("div", { class: "endrow2" },
+        h("span", { class: "lbl" }, shelfLabel(i, d.shelves)),
+        h("input", { type: "text", value: d[side][i] || "", placeholder: d.letter + "…", class: "bigin", style: "text-transform:uppercase", "aria-label": `${shelfLabel(i, d.shelves)}, ${side} end`,
+          onchange: e => { const t = normBox(e.target.value); setEnd(d, side, i, /^\d+$/.test(t) ? codeOf(d, t) : t); renderSettings(); } }))));
+      break;
+    }
+    case "check": {
+      const issue = checkDraft(d);
+      if (issue) {
+        q = "One question";
+        body = h("div", null, h("p", { class: "askq" }, issue.text),
+          h("div", { class: "row" }, (issue.options || []).map(o => h("button", { class: "btn", type: "button", onclick: () => { o.apply(); renderSettings(); } }, o.label)),
+            h("button", { class: "btn secondary", type: "button", onclick: () => { wiz.step = issue.typeStep; renderSettings(); } }, "Let me type it")));
+        nav = [back];
+      } else {
+        const boxes = aisleShelves(draftToSpec(d)).reduce((a, sh) => a + expandBoxes(sh.boxes).boxes.length, 0);
+        q = `✓ Aisle ${d.letter} makes sense`;
+        help = `${d.shelves} shel${d.shelves === 1 ? "f" : "ves"} high, ${boxes} boxes.`;
+        body = aislePreview(d);
+        const last = wiz.ai >= wiz.drafts.length - 1;
+        next.textContent = last ? "Save ✓" : `Next: aisle ${wiz.drafts[wiz.ai + 1].letter || letterAfter(d.letter)} ▶`;
+        next.onclick = () => {
+          saveDraft(d, wiz.ai);
+          if (last) { toast(wiz.mode === "all" ? "Map saved." : `Aisle ${d.letter} saved.`); wiz = null; go("map"); }
+          else { wiz.ai++; wiz.step = "letter"; const nd = wcur(); if (!nd.left.length) Object.assign(nd, { shelves: d.shelves, start: d.start, vertical: d.vertical }); renderSettings(); window.scrollTo(0, 0); }
+        };
+      }
+      break;
+    }
+  }
+  v.replaceChildren(h("section", { class: "card wizard" },
+    h("button", { class: "link backlink", type: "button", onclick: e => tapTwice(e.currentTarget, "Leave without saving?", () => { wiz = null; go("map"); }) }, "✕ Stop"),
+    head, h("h2", { class: "wizq" }, q), help ? h("p", { class: "muted" }, help) : null, body,
+    h("div", { class: "row wiznav" }, nav)));
+  const firstInput = v.querySelector("input.bigin");
+  if (firstInput && !firstInput.value) try { firstInput.focus(); } catch (e) {}
+}
+
+/* ---------- Order ---------- */
+function renderOrderPage(v) {
+  const first = settings.units[0];
+  if (first) Object.assign(allPick, { dir: first.dir, pattern: first.pattern, block: first.block, inner: first.inner, zigzag: first.zigzag });
+  const pickBox = h("div");
+  const drawPick = () => pickBox.replaceChildren(pickingControls(allPick, () => drawPick()),
+    h("button", { class: "btn", type: "button", style: "margin-top:10px", onclick: () => {
+      settings.units.forEach(u => Object.assign(u, { dir: allPick.dir, pattern: allPick.pattern, block: allPick.block, inner: allPick.inner, zigzag: allPick.zigzag }));
+      saveSettings(); toast("Saved for every aisle."); renderSettings(); } }, "Use for every aisle"));
+  drawPick();
+  const differs = settings.units.filter(u => first && (u.pattern !== first.pattern || u.dir !== first.dir || u.block !== first.block || u.inner !== first.inner || !!u.zigzag !== !!first.zigzag));
+  v.replaceChildren(
+    h("section", { class: "card" }, backRow("Settings", "home"),
+      h("h2", null, "Order"),
+      h("h3", null, "Which aisle first?"),
+      settings.walk.map((id, i) => {
+        const u = settings.units.find(x => x.id === id);
+        return h("div", { class: "walk-item" }, h("span", { class: "n" }, `${i + 1}.`), h("span", { class: "name" }, u.name),
+          h("button", { class: "btn secondary small", type: "button", disabled: i === 0, "aria-label": "Move up", onclick: () => { [settings.walk[i - 1], settings.walk[i]] = [settings.walk[i], settings.walk[i - 1]]; saveSettings(); renderSettings(); } }, "▲"),
+          h("button", { class: "btn secondary small", type: "button", disabled: i === settings.walk.length - 1, "aria-label": "Move down", onclick: () => { [settings.walk[i + 1], settings.walk[i]] = [settings.walk[i], settings.walk[i + 1]]; saveSettings(); renderSettings(); } }, "▼"));
+      })),
+    h("section", { class: "card" },
+      h("h3", { style: "margin-top:0" }, "How to pick (every aisle)"),
+      pickBox,
+      differs.length ? h("p", { class: "small muted" }, `Set differently: ${differs.map(u => u.name).join(", ")}.`) : null),
+    h("section", { class: "card" },
+      h("h3", { style: "margin-top:0" }, "Change one aisle only"),
+      h("div", { class: "row" }, settings.units.map(u => h("button", { class: "btn secondary small", type: "button", onclick: () => { orderAisleId = u.id; go("orderAisle"); } }, u.name)))));
+}
+function renderOrderAisle(v) {
+  const u = settings.units.find(x => x.id === orderAisleId);
+  if (!u) return go("order");
+  const grid = h("div");
+  const draw = () => grid.replaceChildren(pickingOrderGrid(u));
+  const controls = h("div");
+  const drawControls = () => controls.replaceChildren(pickingControls(u, () => { saveSettings(); drawControls(); draw(); }));
+  drawControls(); draw();
+  v.replaceChildren(h("section", { class: "card" }, backRow("Order", "order"),
+    h("h2", null, `How to pick ${u.name}`), controls,
+    h("h3", null, "Picking order"), grid));
+}
+
+/* ---------- More ---------- */
+function renderMorePage(v) {
+  v.replaceChildren(
+    h("section", { class: "card" }, backRow("Settings", "home"),
+      h("h2", null, "More"),
+      h("h3", null, "Order numbers"),
+      h("p", { class: "small muted" }, "Long order numbers get swapped for short ones: 1, 2, 3…"),
+      ["sorted", "file"].map(val => h("label", { style: "display:block;padding:6px 0" },
+        h("input", { type: "radio", name: "onum", checked: settings.orderNumbering === val, onchange: () => { settings.orderNumbering = val; saveSettings(); } }),
+        val === "sorted" ? " Lowest order number becomes 1" : " First order in the file becomes 1")),
+      h("h3", null, "Backup & other devices"),
+      h("p", { class: "small muted" }, "Settings are saved on this device. Save them to a file to copy them to another phone, tablet or computer."),
+      h("div", { class: "row" },
+        h("button", { class: "btn secondary", type: "button", onclick: () => download(new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" }), "pick-and-sort-settings.json") }, "Save settings file"),
+        h("label", { class: "btn secondary" }, "Load settings file", h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: async e => {
+          const f = e.target.files[0]; if (!f) return;
+          try { settings = fixSettings(JSON.parse(await f.text())); saveSettings(); renderSettings(); toast("Settings loaded."); } catch (err) { toast("That isn't a settings file."); }
+        } }))),
+      h("h3", null, "Look"),
+      h("select", { onchange: e => { settings.theme = e.target.value; applyTheme(); saveSettings(); } },
+        [["auto", "Match device"], ["light", "Light"], ["dark", "Dark"]].map(([val, t]) => h("option", { value: val, selected: settings.theme === val }, t))),
+      !inApp && !inClaude ? h("div", null, h("h3", null, "Get the app"),
+        h("p", { class: "small muted" }, "iPhone or iPad: open this page in Safari, tap Share, then Add to Home Screen. Android: in Chrome tap ⋮ then Install app, or download the Android app below."),
+        h("div", { class: "row", id: "appLinks" })) : null,
+      h("h3", null, "Advanced"),
+      h("button", { class: "btn secondary small", type: "button", onclick: () => go("advanced") }, "Everything on one page (shelf by shelf)")));
+  showAppLinks();
+}
+
 function renderChecks() {
   const loc = buildLocator(settings);
   const box = $("checks");
@@ -1910,7 +2307,12 @@ function renderChecks() {
 /** Phone back button (Android app): close what's open first; returns true if handled. */
 window.appBack = () => {
   if (!$("stepper").classList.contains("hidden")) { if (stepView !== "step") { $("stepPrev").click(); } else closeSteps(); return true; }
-  if (view === "settings") { $("navBtn").click(); return true; }
+  if (view === "settings") {
+    const up = { map: "home", order: "home", more: "home", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
+    if (setPage === "wizard" && wiz) { wizBack(); return true; }
+    if (up) { go(up); return true; }
+    $("navBtn").click(); return true;
+  }
   return false;
 };
 

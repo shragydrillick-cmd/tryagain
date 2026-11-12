@@ -97,6 +97,25 @@ Quick setup can build an aisle-style map (A1, A2… B1, B2…) in one go.
 inventory and orders: one unit per aisle, boxes in number order. Bins that aren't
 on the map yet are marked "not on map" and still listed by aisle and number.
 
+## Settings: Map and Order
+
+Settings opens with two buttons:
+
+- **Map**: the store's layout. It lists the aisles (e.g. "Aisle C · 6 shelves high
+  · C1 – C96"), with **Edit** for one aisle, **+ Add an aisle** and **Change all**.
+  Each of those asks simple questions one at a time: how many aisles, the
+  aisle's letter, how many shelves high, the first number, where box 1 is (top
+  left / top right / bottom left / bottom right), whether 2 is next to 1 or
+  under/above it, then the box at the left end and the right end of each shelf
+  (what can be worked out is filled in). Then it checks the maths: if it adds up
+  it says so and shows the aisle; if not, it asks one question at a time (with
+  the likely answers as buttons) until it does.
+- **Order**: which aisle first, how to pick (for every aisle at once, or one
+  aisle only), with a picture of the picking order.
+
+**More** has order numbers, backup, the look, getting the app, and **Advanced**
+(everything on one page, including editing shelves one by one).
+
 ## Setting up the shelves and the picking order
 
 **Aisles (how they really are).** Each aisle is one shelving unit with one
