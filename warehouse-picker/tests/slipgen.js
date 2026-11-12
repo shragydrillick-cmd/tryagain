@@ -1,6 +1,6 @@
 // Draws packing slips laid out like the photo (Letter page, points). Runs in the browser with jsPDF.
 window.makeSlips = function (orders, opts = {}) {
-  const doc = new jspdf.jsPDF({ unit: 'pt', format: 'letter' });
+  const doc = new jspdf.jsPDF({ unit: 'pt', format: opts.a4 ? 'a4' : 'letter' });
   const X = { name: 112, thumb: 80, bin: 392, binHead: 395, qty: 497, qtyHead: 470 }, NAME_W = opts.nameW || 262, LH = opts.lh || 14, BOTTOM = 740, FS = opts.fs || 10.5;
   let first = true;
   const head = (o, cont) => {
@@ -21,9 +21,9 @@ window.makeSlips = function (orders, opts = {}) {
   };
   const tableHead = y => {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-    doc.text('Bin', X.binHead, y); doc.text(opts.qtyWord || 'Quantity', X.qtyHead, y - 4);
-    doc.text('Items', 76, y + 22);
-    return y + 48;
+    doc.text('Bin', X.binHead, y); doc.text(opts.qtyWord || 'Quantity', X.qtyHead, opts.sameLineHeader ? y : y - 4);
+    doc.text('Items', opts.sameLineHeader ? 50 : 76, opts.sameLineHeader ? y : y + 22);
+    return y + (opts.sameLineHeader ? 26 : 48);
   };
   orders.forEach(o => {
     if (!first) doc.addPage(); first = false;
@@ -42,7 +42,7 @@ window.makeSlips = function (orders, opts = {}) {
       lines.forEach((t, i) => doc.text(t, X.name, y + i * LH));
       if (it.bin) doc.text(it.bin, X.bin, y + LH * (opts.binDy ?? 0.55));
       if (it.qty != null) doc.text(String(it.qty), X.qty, y + LH * (opts.qtyDy ?? 0.15));
-      y += h + 12;
+      y += h + (opts.itemGap ?? 12);
     });
     if (y + 40 > BOTTOM) { doc.addPage(); y = 80; }
     doc.line(92, y, 560, y - 6);

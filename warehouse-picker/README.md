@@ -30,8 +30,8 @@ need an account, Claude, or a server.
 
 The quickest way: choose the PDF with all the packing slips, or select many PDFs
 at once (one per order is fine); they're all read together into one pick list. For each slip the
-app reads the **order number**, every item's **name** (the part after the last
-" - " is kept as the colour/size), **SKU**, **barcode**, **Bin** and **Quantity**,
+app reads the **order number**, every item's **name** ("Product - Colour - Size": the part
+after the first " - " is kept as the colour/size), **SKU**, **barcode**, **Bin** and **Quantity**,
 and checks the count against the slip's **"Total items"**. Any slip that doesn't
 add up is named so it can be checked by hand. Slips that run onto a second page
 are joined up. Addresses and phone numbers are ignored, and nothing leaves the
