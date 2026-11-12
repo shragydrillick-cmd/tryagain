@@ -15,8 +15,9 @@ android {
         applicationId 'com.picksort.app'
         minSdk 26
         targetSdk 34
-        versionCode 2
-        versionName '1.1'
+        // The automatic build sets these from its run number, so every build is a newer version.
+        versionCode((System.getenv('VERSION_CODE') ?: '2') as Integer)
+        versionName(System.getenv('VERSION_NAME') ?: '1.1')
     }
 
     signingConfigs {

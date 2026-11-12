@@ -1100,6 +1100,11 @@ function renderSettings() {
       h("h2", null, "Find a box"),
       h("p", { class: "small muted" }, "Type a box number to see where your map puts it."),
       h("div", { class: "row" }, h("input", { type: "text", id: "probe", placeholder: "e.g. 12B", style: "width:120px", oninput: renderChecks }), h("span", { id: "probeOut" }))),
+    ...(!inApp && !inClaude ? [h("section", { class: "card" },
+      h("h2", null, "Get the app"),
+      h("p", { class: "small muted" }, "iPhone or iPad: open this page in Safari, tap Share, then Add to Home Screen. It then opens like an app and works without internet."),
+      h("p", { class: "small muted" }, "Android: in Chrome tap ⋮ then Install app, or download the Android app below."),
+      h("div", { class: "row", id: "appLinks" }))] : []),
     h("section", { class: "card" },
       h("h2", null, "Backup & other devices"),
       h("p", { class: "small muted" }, "Settings are saved on this device only. Save them to a file to copy them to another phone, tablet or computer."),
@@ -1114,6 +1119,18 @@ function renderSettings() {
         h("select", { onchange: e => { settings.theme = e.target.value; applyTheme(); saveSettings(); } },
           [["auto", "Match device"], ["light", "Light"], ["dark", "Dark"]].map(([val, t]) => h("option", { value: val, selected: settings.theme === val }, t))))));
   renderChecks();
+  showAppLinks();
+}
+
+/** On the hosted website, link to the newest app files if they're there. */
+function showAppLinks() {
+  const box = $("appLinks");
+  if (!box || !/^https?:$/.test(location.protocol)) return;
+  [["PickAndSort.apk", "⬇ Android app (APK)"], ["PickAndSort-unsigned.ipa", "⬇ iPhone app file (for Sideloadly / AltStore)"]].forEach(([file, label]) => {
+    fetch(file, { method: "HEAD" }).then(r => {
+      if (r.ok && $("appLinks")) $("appLinks").append(h("a", { class: "btn secondary", href: file, download: file }, label));
+    }).catch(() => {});
+  });
 }
 
 function unitCard(u, ui) {

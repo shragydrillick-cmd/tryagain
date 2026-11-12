@@ -1,8 +1,12 @@
-# Builds the Pick & Sort apps whenever warehouse-picker/ changes.
-#  - iOS: builds on a Mac, runs an automatic check in the iPhone simulator, and
-#    uploads an unsigned .ipa (to be signed with an Apple account to install).
-#  - Android: checks that the app builds. (The signed APK is built with the
-#    private signing key, which is not stored on GitHub.)
+# Pick & Sort: every change to warehouse-picker/ rebuilds all three versions.
+#
+#  ios      Builds the iPhone/iPad app on a Mac, runs an automatic check in the
+#           iPhone simulator, and makes PickAndSort-unsigned.ipa.
+#  android  Builds the Android app. If the signing key is saved in this repo's
+#           secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD), the APK is
+#           signed with it, so phones accept it as an update.
+#  website  Builds the installable website, adds the newest app files to it for
+#           download, and publishes it to the gh-pages branch (GitHub Pages).
 name: Pick & Sort apps
 
 on:
@@ -14,6 +18,15 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: pick-and-sort-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Each build gets a higher version number than the last.
+  VERSION_CODE: ${{ github.run_number }}
+  VERSION_NAME: 1.${{ github.run_number }}
 
 jobs:
   ios:
@@ -38,6 +51,7 @@ jobs:
         run: |
           xcodebuild -project PickAndSort.xcodeproj -scheme PickAndSort -configuration Release \
             -sdk iphoneos -derivedDataPath build \
+            MARKETING_VERSION="$VERSION_NAME" CURRENT_PROJECT_VERSION="$VERSION_CODE" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -n 30
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/PickAndSort.app Payload/
@@ -95,5 +109,79 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Build (unsigned check)
+
+      - name: Use the signing key (if it's saved in the repo's secrets)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::warning::No signing key in secrets: building an unsigned APK, which won't be published."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pick-and-sort.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/pick-and-sort.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=picksort"
+            echo "keyPassword=$KEYSTORE_PASSWORD"
+          } > keystore.properties
+
+      - name: Build the APK
         run: ./gradlew assembleRelease --no-daemon
+
+      - name: Check the signature
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          if [ -f keystore.properties ]; then
+            BT=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n 1)
+            "${BT}apksigner" verify --print-certs "$APK" | head -n 3
+            mkdir -p out && cp "$APK" out/PickAndSort.apk
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PickAndSort-Android
+          path: warehouse-picker/android/out/PickAndSort.apk
+          if-no-files-found: ignore
+
+  website:
+    needs: [ios, android]
+    # Publish only from the main working branches.
+    if: github.ref_name == github.event.repository.default_branch || github.ref_name == 'claude/warehouse-picking-app-6rf4zq'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the website
+        run: sh warehouse-picker/web/build.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: PickAndSort-iOS-unsigned
+          path: warehouse-picker/web/dist
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true # there's no APK when the signing key isn't set up
+        with:
+          name: PickAndSort-Android
+          path: warehouse-picker/web/dist
+
+      - name: Publish to the gh-pages branch
+        working-directory: warehouse-picker/web/dist
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          touch .nojekyll
+          echo "version $VERSION_NAME, built $(date -u +%Y-%m-%dT%H:%MZ) from ${GITHUB_SHA::7}" > version.txt
+          ls -la
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Publish Pick & Sort $VERSION_NAME (${GITHUB_SHA::7})"
+          git push -f -q "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+          echo "Published. Once GitHub Pages is switched on (Settings > Pages > gh-pages), it's at https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"

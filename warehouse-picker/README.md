@@ -150,3 +150,23 @@ the iPhone share menu (Save to Files, Print).
 
 Render: New → Static Site → this repo, build command
 `sh warehouse-picker/web/build.sh`, publish directory `warehouse-picker/web/dist`.
+
+## Automatic builds: website, Android and iPhone together
+
+Every change to `warehouse-picker/` runs **Pick & Sort apps**
+(`.github/workflows/pick-and-sort-apps.yml`):
+
+1. **iPhone/iPad:** built on a Mac and checked in the iPhone simulator.
+2. **Android:** built and signed with your key, with a higher version number
+   each time (so it installs as an update and keeps the saved shelf setup).
+3. **Website:** rebuilt, with the newest `PickAndSort.apk` and
+   `PickAndSort-unsigned.ipa` added for download (Settings → Get the app),
+   then published to the `gh-pages` branch.
+
+One-time setup on GitHub:
+
+- **Settings → Pages →** Source *Deploy from a branch*, Branch **gh-pages** / **(root)** → Save.
+  The site is then at `https://<owner>.github.io/<repo>/`.
+- **Settings → Secrets and variables → Actions →** add `ANDROID_KEYSTORE_BASE64`
+  (the .jks file, base64-encoded) and `ANDROID_KEYSTORE_PASSWORD`. Without
+  them the Android app is still built, but not signed or published.
