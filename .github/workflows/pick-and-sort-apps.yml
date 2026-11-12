@@ -5,8 +5,11 @@
 #  android  Builds the Android app. If the signing key is saved in this repo's
 #           secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD), the APK is
 #           signed with it, so phones accept it as an update.
-#  website  Builds the installable website, adds the newest app files to it for
-#           download, and publishes it to the gh-pages branch (GitHub Pages).
+#  website  Builds the installable website with the newest Android app and
+#           publishes it to the gh-pages branch (GitHub Pages) without waiting
+#           for the iPhone build, which can sit in GitHub's queue for a Mac.
+#  ios-file Adds the newest iPhone file to the published website once the
+#           iPhone build has passed.
 name: Pick & Sort apps
 
 on:
@@ -19,9 +22,10 @@ on:
 permissions:
   contents: read
 
+# A newer change cancels an older build that's still running or waiting.
 concurrency:
   group: pick-and-sort-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   # Each build gets a higher version number than the last.
@@ -155,11 +159,12 @@ jobs:
           if-no-files-found: ignore
 
   website:
-    needs: [ios, android]
+    needs: [android]
     # Publish only from the main working branches.
     if: github.ref_name == github.event.repository.default_branch || github.ref_name == 'claude/warehouse-picking-app-6rf4zq'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency: { group: pick-and-sort-publish, cancel-in-progress: false }
     permissions:
       contents: write
     steps:
@@ -168,10 +173,10 @@ jobs:
       - name: Build the website
         run: sh warehouse-picker/web/build.sh
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: PickAndSort-iOS-unsigned
-          path: warehouse-picker/web/dist
+      - name: Keep the iPhone file that's already published (a new one is added when its build passes)
+        run: |
+          git fetch -q origin gh-pages || exit 0
+          git show origin/gh-pages:PickAndSort-unsigned.ipa > warehouse-picker/web/dist/PickAndSort-unsigned.ipa 2>/dev/null || rm -f warehouse-picker/web/dist/PickAndSort-unsigned.ipa
 
       - uses: actions/download-artifact@v4
         continue-on-error: true # there's no APK when the signing key isn't set up
@@ -200,3 +205,29 @@ jobs:
           git commit -qm "Publish Pick & Sort $VERSION_NAME (${GITHUB_SHA::7})"
           git push -f -q "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
           echo "Published. Once GitHub Pages is switched on (Settings > Pages > gh-pages), it's at https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
+
+  ios-file:
+    needs: [ios, website]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency: { group: pick-and-sort-publish, cancel-in-progress: false }
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PickAndSort-iOS-unsigned
+          path: ipa
+
+      - name: Add the iPhone file to the published website
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone -q --depth 1 --branch gh-pages "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" site
+          cp ipa/PickAndSort-unsigned.ipa site/
+          cd site
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PickAndSort-unsigned.ipa
+          git commit -qm "Add iPhone file $VERSION_NAME (${GITHUB_SHA::7})" || { echo "No change"; exit 0; }
+          git push -q origin gh-pages
