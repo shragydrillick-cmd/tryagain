@@ -794,7 +794,7 @@ function showStep() {
     setNav("◀ List", "Not yet", stepMode === "pick" ? "In cart ✓" : "Placed ✓");
   } else {
     const wasSkipped = skipped.has(seq[stepAt]);
-    $("stepCount").textContent = stepMode === "pick" ? `${word}: ${stepAt + 1} of ${total}` : word; // no step numbers when unpacking
+    $("stepCount").textContent = `${word}: ${stepAt + 1} of ${total}`;
     $("stepBody").replaceChildren(
       ...(wasSkipped ? [h("div", { class: "note" }, "You skipped this earlier. Look for it again.")] : []),
       ...stepContent(seq[stepAt], true));
