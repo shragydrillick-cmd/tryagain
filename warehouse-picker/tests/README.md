@@ -26,7 +26,7 @@ question instead.
 
 `aisle-wide.test.js` does the same with 600 aisles of which about half have one
 wide box (a box taking up two spaces), with a pretend person who answers every
-question truthfully (types the wide box when asked, confirms real shelf lengths).
+question truthfully (taps the shelf each number is really on, confirms real shelf lengths).
 "WRONG map" must be 0. A wide box that is the last box of its shelf can't be
 told from a shorter shelf by the numbers, so those count as right when every box
 is in the right place. `node tests/aisle-wide.test.js plain` runs it without wide boxes.

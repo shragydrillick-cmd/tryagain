@@ -2064,7 +2064,7 @@ const codeOf = (d, n) => `${d.letter}${n}`;
 /** A shelf end typed, nudged or chosen by the person: only that box changes. Empty ones may still be filled in. */
 function setEnd(d, side, i, value) {
   d.auto = d.auto || { left: [], right: [] };
-  d[side][i] = value; d.auto[side][i] = false;
+  d[side][i] = value; d.auto[side][i] = false; d.where = [];
   autofill(d);
 }
 /** Fill in the shelf ends that follow from what's known; never overwrites what was typed. */
@@ -2240,30 +2240,73 @@ function wideQuestion(d, s, text) {
       const a = endNumber(d.left[s]), b = endNumber(d.right[s]);
       if (num < Math.min(a, b) || num > Math.max(a, b)) { d.wideBox = old; return `${code} isn't on ${theShelf(s, S)} (${codeOf(d, Math.min(a, b))} – ${codeOf(d, Math.max(a, b))}).`; }
     }
-    d.wideAsk = {}; d.noWide = false; d.chosen = null;
+    d.noWide = false; d.chosen = null; d.where = [];
     return null;
   } } };
 }
-/** Shelves that aren't the usual length: fine without asking when it's only the last shelf being
-    shorter; otherwise (or when it could be more than one shelf) confirm with the person. A shelf
-    may also have one box fewer because one box takes up two spaces: then ask which box. */
+/** Every place a wide box could be that gives exactly the typed ends (numbers down the columns, shelf
+    lengths as worked out), each with the shelf every number would then be on. */
+function wideCandidates(d, sol) {
+  const S = d.shelves, Lf = d.left.map(endNumber), Rt = d.right.map(endNumber);
+  const startCol = sol.startLeft ? Lf : Rt, farCol = sol.startLeft ? Rt : Lf, out = [];
+  for (let s = 0; s < S; s++) for (let k = 0; k <= sol.counts[s] - 2; k++) {
+    const wide = Array(S).fill(null); wide[s] = { col: k };
+    const r = simulateColumns(sol.counts, sol.first, sol.fromBottom, wide);
+    if (!r.ok || !r.start.every((x, i) => x === startCol[i]) || !r.end.every((x, i) => x === farCol[i])) continue;
+    const shelfOf = {}; r.rows.forEach((row, t) => row.forEach(x => { if (x != null) shelfOf[x] = t; }));
+    out.push({ s, num: r.rows[s][k], shelfOf });
+  }
+  return out;
+}
+/** One box fewer than even shelves would hold, and it could be any box: find it by asking which shelf
+    a number is on. A wide box moves every number after it along by one space, so each answer tells
+    whether the wide box comes before or after that number. */
+function findWideQuestion(d, sol) {
+  const S = d.shelves;
+  d.where = d.where || [];
+  let cands = wideCandidates(d, sol).filter(c => d.where.every(w => c.shelfOf[w.num] === w.shelf));
+  if (!cands.length && d.where.length) { d.where = []; cands = wideCandidates(d, sol); }
+  const typed = wideQuestion(d, null, "");
+  const noWide = { label: "No box is wide", secondary: true, apply: () => { d.noWide = true; d.chosen = null; d.where = []; } };
+  if (cands.length === 1 || (cands.length && cands.every(c => c.num === cands[0].num))) {
+    const c = cands[0];
+    return { title: "Found it", text: `Then ${codeOf(d, c.num)} on ${theShelf(c.s, S)} is the wide one (taking up two spaces). Is that right?`, typeStep: "right",
+      options: [{ label: "Yes", apply: () => { d.wideBox = codeOf(d, c.num); d.where = []; d.noWide = false; d.chosen = null; } },
+        { label: "↶ Undo last answer", secondary: true, apply: () => { d.where.pop(); } }, noWide] };
+  }
+  if (!cands.length) return null;
+  // the number that splits what's left most evenly
+  const nums = Object.keys(cands[0].shelfOf).map(Number), step = Math.max(1, Math.ceil(nums.length / 400));
+  let best = null;
+  for (let i = 0; i < nums.length; i += step) {
+    const n = nums[i], groups = {};
+    cands.forEach(c => { groups[c.shelfOf[n]] = (groups[c.shelfOf[n]] || 0) + 1; });
+    const worst = Math.max(...Object.values(groups));
+    if (Object.keys(groups).length > 1 && (!best || worst < best.worst)) best = { n, worst, shelves: Object.keys(groups).map(Number).sort((a, b) => a - b) };
+  }
+  if (!best) return null;
+  const left = Math.ceil(Math.log2(cands.length));
+  const text = (d.where.length ? "" : "The numbers show one box fewer than even shelves would hold, so one box probably takes up two spaces. A few quick questions will find it. ")
+    + `Which shelf is ${codeOf(d, best.n)} on?` + (d.where.length ? ` (${left <= 1 ? "nearly there" : `about ${left} more`})` : "");
+  return { text, find: best.n, typeStep: "right", input: Object.assign(typed.input, { label: "Or type the wide box if you can see it" }),
+    title: "Finding the wide box",
+    options: best.shelves.map(t => ({ label: shelfLabel(t, S), shelf: t, apply: () => { d.where.push({ num: best.n, shelf: t }); } }))
+      .concat(d.where.length ? [{ label: "↶ Undo last answer", secondary: true, apply: () => { d.where.pop(); } }] : [], noWide) };
+}
+/** Shelves that aren't the usual length. Along the shelves the two ends say it all: no questions.
+    Down the columns: fine without asking when it's only the last shelf being shorter; a shelf ending
+    early elsewhere is confirmed; one box fewer overall means a wide box somewhere: find which. */
 function lengthQuestion(d) {
+  if (!inferVertical(d)) return null;
   const L = shelfLengths(d); if (!L) return null;
   const S = d.shelves, name = i => theShelf(i, S);
-  d.wideAsk = d.wideAsk || {};
   if (L.choices) {
     const top = Math.max(...L.choices.flatMap(c => c.counts));
     const say = c => [...c.counts.map((x, i) => (x !== top ? `${shelfLabel(i, S)}: ${x} boxes` : null)), c.wide.some(w => w != null) ? "one box is wide (two spaces)" : null].filter(Boolean).join(", ") || `All ${top} boxes`;
     return { text: "The numbers add up in more than one way. Which is right?",
       options: L.choices.slice(0, 4).map(c => ({ label: say(c), apply: () => { d.chosen = JSON.stringify({ counts: c.counts, wide: c.wide }); } })), typeStep: "right" };
   }
-  if (L.guessed.some(Boolean)) {
-    const q = wideQuestion(d, null, "Every shelf reaches the end, but there's one box fewer than that would need, so one box probably takes up two spaces. Which box is the wide one?");
-    q.options = [{ label: "No box is wide", apply: () => { d.noWide = true; d.chosen = null; } }];
-    return q;
-  }
-  const ask = Object.keys(d.wideAsk).map(Number).find(i => i < S && L.wide[i] == null);
-  if (ask != null) return wideQuestion(d, ask, `Which box on ${name(ask)} is the wide one (taking up two spaces)?`);
+  if (L.guessed.some(Boolean)) { const q = findWideQuestion(d, solveColumns(d)); if (q) return q; }
   const tally = {}; L.spans.forEach(c => { tally[c] = (tally[c] || 0) + 1; });
   const most = +Object.keys(tally).sort((a, b) => tally[b] - tally[a] || b - a)[0];
   const odd = L.spans.map((c, i) => (c !== most ? i : -1)).filter(i => i >= 0);
@@ -2273,10 +2316,9 @@ function lengthQuestion(d) {
   const sig = L.spans.join(",") + "|" + L.wide.join(",");
   if (d.okLengths === sig) return null;
   const options = [{ label: "Yes, that's right", apply: () => { d.okLengths = sig; } }];
-  if (odd.length === 1 && L.spans[odd[0]] === most - 1 && !L.wide.some(w => w != null)) { // one box short: maybe a wide box rather than a shorter shelf
-    const i = odd[0];
-    if (L.far) { const last = d[L.far][i]; options.push({ label: `No, its last box (${last}) is wide`, apply: () => { d.wideBox = last; d.noWide = false; d.chosen = null; } }); }
-    else options.push({ label: "No, one of its boxes is wide", apply: () => { d.wideAsk = { [i]: true }; } });
+  if (odd.length === 1 && L.spans[odd[0]] === most - 1 && !L.wide.some(w => w != null)) { // one box short: maybe its last box is wide
+    const i = odd[0], last = d[L.far][i];
+    options.push({ label: `No, its last box (${last}) is wide`, apply: () => { d.wideBox = last; d.noWide = false; d.chosen = null; } });
   }
   return { text: `The numbers mean ${odd.map(i => `${name(i)} has ${L.counts[i]} boxes`).join(" and ")}, while the others have ${most}. Is that right?`,
     options, typeStep: "right" };
@@ -2399,7 +2441,7 @@ function renderWizard(v) {
     case "shelves":
       q = `How many shelves high is aisle ${d.letter}?`;
       help = "Count the shelves stacked on top of each other.";
-      body = askNumber("Shelves high", d.shelves, 1, x => { const nS = Math.max(1, x || 1); if (nS !== d.shelves) { d.shelves = nS; d.left = []; d.right = []; d.auto = null; d.wideBox = null; d.wideAsk = {}; d.noWide = false; d.chosen = null; } });
+      body = askNumber("Shelves high", d.shelves, 1, x => { const nS = Math.max(1, x || 1); if (nS !== d.shelves) { d.shelves = nS; d.left = []; d.right = []; d.auto = null; d.wideBox = null; d.where = []; d.noWide = false; d.chosen = null; } });
       break;
     case "left": case "right": {
       const side = wiz.step;
@@ -2419,13 +2461,17 @@ function renderWizard(v) {
     case "check": {
       const issue = checkDraft(d);
       if (issue) {
-        q = "One question";
+        q = issue.title || "One question";
         const inp = issue.input ? h("input", { type: "text", class: "bigin", style: "text-transform:uppercase", placeholder: issue.input.placeholder, "aria-label": issue.input.label,
           onkeydown: e => { if (e.key === "Enter") okBtn.click(); } }) : null;
         const errLine = h("p", { class: "small", style: "color:var(--danger);margin:4px 0" });
         const okBtn = issue.input ? h("button", { class: "btn", type: "button", onclick: () => { const err = issue.input.apply(inp.value); if (err) errLine.textContent = err; else renderSettings(); } }, "OK") : null;
-        body = h("div", null, h("p", { class: "askq" }, issue.text), inp ? h("div", { class: "row" }, inp, okBtn) : null, inp ? errLine : null,
-          h("div", { class: "row" }, (issue.options || []).map(o => h("button", { class: "btn", type: "button", onclick: () => { o.apply(); renderSettings(); } }, o.label)),
+        const optBtn = o => h("button", { class: "btn" + (o.secondary ? " secondary" : ""), type: "button", onclick: () => { o.apply(); renderSettings(); } }, o.label);
+        const main = (issue.options || []).filter(o => !o.secondary), extra = (issue.options || []).filter(o => o.secondary);
+        body = h("div", null, h("p", { class: "askq" }, issue.text),
+          main.length ? h("div", { class: "row" }, main.map(optBtn)) : null,
+          inp ? h("div", { style: "margin-top:12px" }, main.length ? h("div", { class: "small muted" }, issue.input.label) : null, h("div", { class: "row" }, inp, okBtn), errLine) : null,
+          h("div", { class: "row", style: "margin-top:8px" }, extra.map(optBtn),
             h("button", { class: "btn secondary", type: "button", onclick: () => { wiz.step = issue.typeStep; renderSettings(); } }, "Let me type it")));
         nav = [back];
       } else {

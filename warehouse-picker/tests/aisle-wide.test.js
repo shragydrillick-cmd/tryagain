@@ -27,18 +27,22 @@ const { chromium } = require('playwright');
       const d = { letter: 'C', shelves: S, left: (startRight ? last : first).map(x => 'C' + x), right: (startRight ? first : last).map(x => 'C' + x), dirForced: null };
       st.cases++;
       let q, guard = 0, stuck = false;
-      while ((q = checkDraft(d)) && guard++ < 6) {
-        st.questions++;
-        const kind = q.input ? 'which wide box' : q.options && q.options[0] && q.options[0].label === "Yes, that's right" ? 'confirm' : /could be more than one/.test(q.text) ? 'choose' : 'other';
+      const truthShelf = num => truth.findIndex(row => row.includes(num));
+      while ((q = checkDraft(d)) && guard++ < 25) {
+        st.questions++; st.perAisle = Math.max(st.perAisle || 0, guard);
+        const kind = q.find != null ? 'which shelf is it on' : /^Then /.test(q.text) ? 'found it' : q.options && q.options[0] && q.options[0].label === "Yes, that's right" ? 'confirm' : /more than one way/.test(q.text) ? 'choose' : 'other';
         st.kinds[kind] = (st.kinds[kind] || 0) + 1;
-        if (kind === 'which wide box') { const wn = wideNum.find(x => x != null);
-          if (wn == null) { const o = (q.options || []).find(o => /No box/.test(o.label)); if (o) { o.apply(); continue; } }
-          const err = wn != null ? q.input.apply('C' + wn) : 'no truth'; if (err) { stuck = true; if (st.samples.length < 8) st.samples.push(q.text + ' => ' + err + ' counts ' + counts + ' wide ' + wideNum); break; } }
-        else if (kind === 'confirm') {
+        if (kind === 'which shelf is it on') {
+          const o = q.options.find(o => o.shelf === truthShelf(q.find)) || q.options.find(o => /No box/.test(o.label));
+          o.apply();
+        } else if (kind === 'found it') {
+          const wn = wideNum.find(x => x != null);
+          if (wn != null && q.text.includes('C' + wn + ' ')) q.options[0].apply();
+          else { stuck = true; if (st.samples.length < 8) st.samples.push('found the wrong box: ' + q.text + ' truth ' + wideNum); break; }
+        } else if (kind === 'confirm') {
           const wideOpt = q.options.find(o => /wide/.test(o.label));
           const sh = [...Array(S).keys()].find(i => q.text.includes(theShelf(i, S)));
-          if (wideOpt && wideNum[sh] != null) { wideOpt.apply(); if (d.wideAsk && Object.keys(d.wideAsk).length) { const e = checkDraft(d).input.apply('C' + wideNum[sh]); if (e) { stuck = true; break; } } }
-          else q.options[0].apply();
+          (wideOpt && wideNum[sh] != null ? wideOpt : q.options[0]).apply();
         } else if (kind === 'choose') {
           // pick the choice matching the truth
           const o = q.options.find(o => { o.apply(); const sol = solveColumns(d); d.chosen = null; return sol && sol.counts.every((c, i) => c === counts[i]) && sol.wide.some(w => w != null) === wideNum.some(w => w != null); });
@@ -59,6 +63,6 @@ const { chromium } = require('playwright');
     return st;
   }, process.argv[2] !== 'plain');
   console.log(`random aisles: ${r.cases} | mapped exactly right: ${r.ok} | every box right but a wide box the numbers can't show: ${r.wideNotSeen} | stuck on a question: ${r.stuck} | WRONG map: ${r.wrong}`);
-  console.log('questions asked:', JSON.stringify(r.kinds)); if (r.wrong) console.log(r.samples.filter(x => /^WRONG/.test(x)).join('\n'));
+  console.log('questions asked:', JSON.stringify(r.kinds), '| most questions for one aisle:', r.perAisle); if (r.wrong) console.log(r.samples.filter(x => /^WRONG/.test(x)).join('\n'));
   await b.close();
 })();
