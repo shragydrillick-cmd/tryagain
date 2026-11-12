@@ -81,6 +81,7 @@ tr.done td:not(.box) { opacity: .4; text-decoration: line-through; }
 tr.last td { background: var(--good-soft); }
 .pile { display: inline-block; min-width: 42px; text-align: center; background: var(--accent); color: var(--accent-text);
   border-radius: 8px; padding: 2px 8px; font-size: 20px; font-weight: 800; }
+.invbox { border: 1px dashed var(--line); border-radius: 12px; padding: 12px; margin-bottom: 6px; }
 .lastnote { color: var(--good); font-weight: 700; font-size: 14px; }
 .iname { font-weight: 700; font-size: 17px; }
 .idet { color: var(--muted); font-size: 14px; }
@@ -146,7 +147,18 @@ mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-
 
 <main id="homeView">
   <section class="card no-print">
-    <h2>1. Add your orders file</h2>
+    <h2>1. Add your files</h2>
+    <div class="invbox">
+      <h3 style="margin-top:0">Inventory <span class="muted small">(optional, remembered on this phone)</span></h3>
+      <p class="muted small" style="margin-top:0">A file listing each <b>item number</b> and its <b>bin</b> (like A1), plus the item's name if you have it. Then the orders file only needs the order, item number and quantity: the bins are looked up for you.</p>
+      <div id="invStatus"></div>
+      <div class="row">
+        <label class="btn secondary">Choose inventory file<input id="invInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" hidden></label>
+        <button class="btn secondary" id="invExampleBtn" type="button">Try the two-file example</button>
+      </div>
+      <p class="small muted" style="margin-bottom:0"><button class="link" id="invTemplateBtn" type="button">Download an inventory template</button></p>
+    </div>
+    <h3>Orders</h3>
     <p class="muted small">A spreadsheet (Excel or CSV) with one line per item: <b>Order</b>, <b>Box</b> (like A1 = aisle A, box 1), <b>Item</b> (what it is), and optional <b>Details</b> and <b>Qty</b>. Any other columns are shown as details.</p>
     <div class="row">
       <label class="btn">Choose file<input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" hidden></label>
@@ -293,7 +305,55 @@ function findHeader(row) {
   return { oi, qi, bi, ni, di, labels: row.map(clean) };
 }
 
-/** Turn rows into order lines: [{order, box, name, details, qty}] */
+/** Item numbers: "#00123 " -> "123", "ab-12" -> "AB-12". */
+function normCode(v) {
+  const s = clean(v).replace(/^#\s*/, "").replace(/\s+/g, " ").toUpperCase();
+  return /^\d+$/.test(s) ? s.replace(/^0+(?=\d)/, "") : s;
+}
+const BIN_WORDS = /bin|box|loc|slot|shelf|position|aisle/;
+/** Read an inventory file: item number -> bin (+ name, details). */
+function parseInventory(rows) {
+  rows = rows.map(r => r.map(clean)).filter(r => r.some(Boolean));
+  const c = (rows[0] || []).map(x => x.toLowerCase()), used = new Set();
+  const pick = re => { const i = c.findIndex((x, j) => !used.has(j) && x && re.test(x)); if (i >= 0) used.add(i); return i; };
+  let bi = pick(BIN_WORDS);
+  let ii = pick(/sku|item ?(no|num|#|code|id)|part|upc|ean|barcode|code|number|^item$|^id$|^#$|product ?(no|num|code|id)/);
+  const ni = bi >= 0 && ii >= 0 ? pick(/name|desc|title|product|item|article/) : -1;
+  const header = bi >= 0 && ii >= 0;
+  if (!header) { ii = 0; bi = 1; }
+  const di = header ? c.map((x, i) => (!used.has(i) && x ? i : -1)).filter(i => i >= 0) : [];
+  const labels = rows[0] || [];
+  const out = [], seen = new Map(), warnings = [];
+  (header ? rows.slice(1) : rows).forEach(r => {
+    const code = normCode(r[ii]), bin = normBox(r[bi]);
+    if (!code || !bin) return;
+    if (seen.has(code)) { if (seen.get(code) !== bin) warnings.push(`${code} is in two bins (${seen.get(code)} and ${bin}); using ${seen.get(code)}.`); return; }
+    seen.set(code, bin);
+    const name = header && ni >= 0 ? r[ni] || "" : !header ? r[2] || "" : "";
+    const details = di.filter(i => r[i]).map(i => /detail|note|desc|info|comment|variant|option|extra/i.test(labels[i]) ? r[i] : `${labels[i]}: ${r[i]}`).join(" · ");
+    out.push([code, bin, name, details]);
+  });
+  return { rows: out, warnings };
+}
+/** Fill in each line's bin (and name) from the inventory. Lines whose item isn't in it get box "?". */
+function applyInventory(lines, inventory) {
+  const map = new Map(inventory.rows.map(r => [r[0], r]));
+  const missing = new Set();
+  lines.forEach(l => {
+    const code = normCode(l.code);
+    const hit = map.get(code);
+    if (hit) {
+      l.box = hit[1];
+      l.name = l.name || hit[2] || `Item ${code}`;
+      l.details = [hit[3], l.details].filter(Boolean).join(" · ");
+    } else {
+      missing.add(code); l.box = "?"; l.name = l.name || `Item ${code}`;
+    }
+  });
+  return [...missing];
+}
+
+/** Turn rows into order lines: [{order, box, code, name, details, qty}] */
 function rowsToLines(rows, format) {
   rows = rows.map(r => r.map(clean)).filter(r => r.some(Boolean));
   const warnings = [];
@@ -314,7 +374,7 @@ function rowsToLines(rows, format) {
       r.forEach((cell, i) => {
         if (i === oi || !cell) return;
         const m = cell.match(/^(.+?)\s*[x×*]\s*(\d+)$/i);
-        lines.push({ order, box: normBox(m ? m[1] : cell), name: "", details: "", qty: m ? parseInt(m[2], 10) : 1 });
+        lines.push({ order, box: normBox(m ? m[1] : cell), code: m ? m[1] : cell, name: "", details: "", qty: m ? parseInt(m[2], 10) : 1 });
       });
       return;
     }
@@ -329,9 +389,11 @@ function rowsToLines(rows, format) {
     const name = header && header.ni >= 0 ? r[header.ni] || "" : "";
     const details = header ? header.di.filter(i => r[i])
       .map(i => /detail|note|desc|info|comment|variant|option|extra/i.test(header.labels[i]) ? r[i] : `${header.labels[i]}: ${r[i]}`).join(" · ") : "";
-    if (qty > 0) lines.push({ order, box, name, details, qty });
+    if (qty > 0) lines.push({ order, box, code: r[bi], name, details, qty });
   });
-  return { lines, warnings, mode };
+  // Does the orders file name a bin itself? If not, an inventory can supply it.
+  const hasBin = !!header && BIN_WORDS.test(String(header.labels[header.bi]).toLowerCase());
+  return { lines, warnings, mode, hasBin };
 }
 
 /** Map every box code to its place in the walk. Returns {locate, problems, size}. */
@@ -597,24 +659,58 @@ function showLoadMsg(text, kind) { $("loadMsg").innerHTML = ""; if (text) $("loa
 function useRows(rows, name) {
   const r = rowsToLines(rows, $("formatSel").value);
   if (!r.lines.length) { showLoadMsg("Couldn't find any orders in that file. " + (r.warnings[0] || "Try the template.")); return; }
-  current = { lines: r.lines, warnings: r.warnings, name, src: rows };
+  const inv = settings.inventory;
+  const useInv = !!(inv && inv.rows && inv.rows.length && !r.hasBin);
+  const missing = useInv ? applyInventory(r.lines, inv) : [];
+  current = { lines: r.lines, warnings: r.warnings, name, src: rows, usedInventory: useInv, missing };
   showLoadMsg("");
   rebuild();
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/** Read a CSV / Excel file into rows of cells. */
+async function readTable(f) {
+  if (/\.xlsx?$/i.test(f.name)) {
+    if (!window.XLSX) throw new Error("Excel files need an internet connection. Save the sheet as CSV instead, or connect and reload.");
+    const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: "" });
+  }
+  return parseDelimited(await f.text());
+}
 $("fileInput").addEventListener("change", async e => {
   const f = e.target.files[0]; e.target.value = "";
   if (!f) return;
-  try {
-    if (/\.xlsx?$/i.test(f.name)) {
-      if (!window.XLSX) { showLoadMsg("Excel files need an internet connection. Save the sheet as CSV instead, or connect and reload."); return; }
-      const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      useRows(XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }), f.name);
-    } else useRows(parseDelimited(await f.text()), f.name);
-  } catch (err) { showLoadMsg("Couldn't read that file: " + err.message); }
+  try { useRows(await readTable(f), f.name); } catch (err) { showLoadMsg("Couldn't read that file: " + err.message); }
 });
+
+/* ---------- inventory (item number -> bin), kept with the settings on this phone ---------- */
+function useInventory(rows, name) {
+  const r = parseInventory(rows);
+  if (!r.rows.length) { showInvStatus("Couldn't find item numbers and bins in that file. It needs a column for the item number and one for the bin.", "warn"); return; }
+  settings.inventory = { name, loaded: new Date().toISOString(), rows: r.rows };
+  saveSettings();
+  showInvStatus(null, null, r.warnings);
+  if (current && current.src) useRows(current.src, current.name); // re-match the orders already loaded
+}
+function showInvStatus(msg, kind, warnings) {
+  const box = $("invStatus"); box.replaceChildren();
+  if (msg) { box.append(h("div", { class: `notice ${kind || "warn"}` }, msg)); return; }
+  const inv = settings.inventory;
+  if (!inv || !inv.rows || !inv.rows.length) return;
+  const when = new Date(inv.loaded).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  box.append(h("div", { class: "notice good" }, `✓ ${inv.rows.length.toLocaleString()} items from ${inv.name} (${when}). `,
+    h("button", { class: "link", type: "button", onclick: e => tapTwice(e.currentTarget, "Forget the inventory?", () => {
+      delete settings.inventory; saveSettings(); showInvStatus();
+      if (current && current.src) useRows(current.src, current.name);
+    }) }, "Remove")));
+  if (warnings && warnings.length) box.append(h("div", { class: "notice warn" }, warnings.slice(0, 4).join(" "), warnings.length > 4 ? ` (+${warnings.length - 4} more)` : ""));
+}
+$("invInput").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try { useInventory(await readTable(f), f.name); } catch (err) { showInvStatus("Couldn't read that file: " + err.message, "warn"); }
+});
+$("invTemplateBtn").onclick = () => download(new Blob(["Item Number,Bin,Name,Details\n"], { type: "text/csv" }), "inventory-template.csv");
 $("pasteToggle").onclick = () => $("pasteBox").classList.toggle("hidden");
 $("pasteGo").onclick = () => useRows(parseDelimited($("pasteText").value), "Pasted list");
 $("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name); };
@@ -634,6 +730,34 @@ const EXAMPLE = `Order,Box,Item,Details,Qty
 10455,A44,Sticky notes,Yellow,1
 10455,B5,Water bottle,750 ml,1`;
 $("exampleBtn").onclick = () => useRows(parseDelimited(EXAMPLE), "Example orders");
+const EXAMPLE_INVENTORY = `Item Number,Bin,Name,Details
+1001,A3,Fleece blanket,"Blue, 50x60 in"
+1002,A3,Fleece blanket,"Gray, 50x60 in"
+2001,A7,Pen set,Black ink
+3001,A14,Notebook,"Lined, A5"
+4001,A35,Desk lamp,White
+4002,A44,Sticky notes,Yellow
+5001,B5,Water bottle,750 ml
+5002,B26,Phone stand,Black
+5003,B33,Cable ties,Pack of 50`;
+const EXAMPLE_ORDERS_BY_ITEM = `Order,Item Number,Qty
+10452,1001,1
+10452,3001,2
+10449,1002,1
+10449,3001,1
+10449,4001,1
+10449,5002,1
+10460,5002,2
+10460,2001,1
+10451,5003,1
+10451,1001,1
+10455,4001,1
+10455,4002,1
+10455,5001,1`;
+$("invExampleBtn").onclick = () => {
+  useInventory(parseDelimited(EXAMPLE_INVENTORY), "Example inventory");
+  useRows(parseDelimited(EXAMPLE_ORDERS_BY_ITEM), "Example orders (item numbers only)");
+};
 $("templateBtn").onclick = () => download(new Blob(["Order,Box,Item,Details,Qty\n"], { type: "text/csv" }), "orders-template.csv");
 
 /* ---------- results ---------- */
@@ -649,8 +773,12 @@ function rebuild() {
     h("div", { class: "stat" }, h("b", null, plan.totalUnits), "items to pick"),
     h("div", { class: "stat" }, h("b", null, new Set(plan.picks.map(p => p.box)).size), "boxes to visit"));
   const w = $("warnings"); w.replaceChildren();
-  if (plan.unknown.length) w.append(h("div", { class: "notice warn" },
-    `${plan.unknown.length} box number(s) aren't on your shelf map, so they're listed at the end: ${plan.unknown.slice(0, 12).join(", ")}${plan.unknown.length > 12 ? "…" : ""}. You can add them in Settings.`));
+  if (current.usedInventory) w.append(h("div", { class: "notice good" }, `Bins looked up in your inventory (${settings.inventory.name}).`));
+  if (current.missing && current.missing.length) w.append(h("div", { class: "notice warn" },
+    `${current.missing.length} item number(s) aren't in your inventory, so they're listed at the end with bin "?": ${current.missing.slice(0, 12).join(", ")}${current.missing.length > 12 ? "…" : ""}.`));
+  const unknownBins = plan.unknown.filter(b => b !== "?");
+  if (unknownBins.length) w.append(h("div", { class: "notice warn" },
+    `${unknownBins.length} box number(s) aren't on your shelf map, so they're listed at the end: ${unknownBins.slice(0, 12).join(", ")}${unknownBins.length > 12 ? "…" : ""}. You can add them in Settings.`));
   if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""));
   renderPick(); renderUnpack(); renderKey();
 }
@@ -1060,7 +1188,7 @@ $("navBtn").onclick = () => {
   $("homeView").classList.toggle("hidden", view !== "home");
   $("settingsView").classList.toggle("hidden", view !== "settings");
   $("navBtn").innerHTML = view === "home" ? "&#9881; Settings" : "&#10003; Done";
-  if (view === "settings") renderSettings(); else rebuild();
+  if (view === "settings") renderSettings(); else { showInvStatus(); rebuild(); }
   window.scrollTo(0, 0);
 };
 function changed(rerender) { saveSettings(); if (rerender) renderSettings(); else renderChecks(); }
@@ -1153,7 +1281,7 @@ function renderSettings() {
           const f = e.target.files[0]; if (!f) return;
           try { settings = fixSettings(JSON.parse(await f.text())); changed(true); toast("Settings loaded."); } catch (err) { toast("That isn't a settings file."); }
         } })),
-        h("button", { class: "btn secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Start over?", () => { settings = defaultSettings(); changed(true); toast("Settings reset."); }) }, "Reset")),
+        h("button", { class: "btn secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Start over?", () => { const inv = settings.inventory; settings = defaultSettings(); if (inv) settings.inventory = inv; changed(true); toast("Shelf map reset."); }) }, "Reset")),
       h("p", { class: "small muted" }, "Look: ",
         h("select", { onchange: e => { settings.theme = e.target.value; applyTheme(); saveSettings(); } },
           [["auto", "Match device"], ["light", "Light"], ["dark", "Dark"]].map(([val, t]) => h("option", { value: val, selected: settings.theme === val }, t))))));
@@ -1225,6 +1353,7 @@ window.appBack = () => {
 };
 
 applyTheme();
+showInvStatus();
 </script>
 </body>
 </html>

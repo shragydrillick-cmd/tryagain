@@ -51,6 +51,23 @@ One line per item works best:
 
 See `example-orders.csv`.
 
+### Two files: inventory + orders
+
+If the orders only have **item numbers**, load an **inventory file** first:
+each item number with its **bin** (and its name/details if you have them).
+
+| Item Number | Bin | Name           | Details |
+|-------------|-----|----------------|---------|
+| 1001        | A3  | Fleece blanket | Blue    |
+| 1002        | A3  | Fleece blanket | Gray    |
+
+Then the orders file only needs `Order, Item Number, Qty`; each item's bin
+and name are looked up in the inventory. The inventory is remembered on the
+phone (and included in a saved settings file) until it's replaced or removed.
+Item numbers match regardless of capitals and leading zeros (`blk-100` =
+`BLK-100`, `777` = `00777`). Items not in the inventory are listed at the end
+with bin "?". An orders file that has its own Bin column ignores the inventory.
+
 ## The shelf map
 
 Each shelving unit can have its own number of shelves. For each shelf, type its
