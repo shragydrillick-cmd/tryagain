@@ -527,11 +527,17 @@ function parseSlips(pages) {
         // text lines, top to bottom: the name (it may wrap), then the SKU, then the barcode
         const rest = g.lines.filter(Boolean);
         let barcode = "", sku = "";
-        if (rest.length > 1 && /^\d{8,14}$/.test(rest[rest.length - 1].replace(/\s/g, ""))) barcode = rest.pop().replace(/\s/g, "");
+        // "Barcode: 7353…", "UPC 7353…", "SKU: LL2207" written out with a label
+        const labelled = re => { const i = rest.findIndex((t, k) => k > 0 && re.test(t)); if (i < 0) return ""; const v = rest[i].replace(re, "").trim(); rest.splice(i, 1); return v; };
+        barcode = labelled(/^\s*(barcode|upc|ean|gtin)\s*[:#]?\s*/i).replace(/\s/g, "");
+        const skuLabelled = labelled(/^\s*sku\s*[:#]?\s*/i);
+        // otherwise the barcode is the line of 8–14 digits under the name (usually the last; the lowest one wins)
+        if (!barcode) { let i = -1; rest.forEach((t, k) => { if (k > 0 && /^\d{8,14}$/.test(t.replace(/\s/g, ""))) i = k; }); if (i > 0) barcode = rest.splice(i, 1)[0].replace(/\s/g, ""); }
+        if (skuLabelled) sku = skuLabelled;
         const last = rest[rest.length - 1] || "";
         const letters = last.replace(/[^A-Za-z]/g, "").length, digits = last.replace(/\D/g, "").length;
         // a code like BO9019 (2+ letters and 2+ digits, no spaces); a size like 3-6M or 2XL stays in the name
-        if (rest.length > 1 && /^[A-Za-z0-9._\/-]{3,30}$/.test(last) && ((letters >= 2 && digits >= 2) || (barcode && /^\d{3,12}$/.test(last)))) sku = rest.pop();
+        if (!sku && rest.length > 1 && /^[A-Za-z0-9._\/-]{3,30}$/.test(last) && ((letters >= 2 && digits >= 2) || (barcode && /^\d{3,12}$/.test(last)))) sku = rest.pop();
         const nameText = rest.join(" ").replace(/\s+/g, " ").trim();
         const cut = nameText.indexOf(" - "); // "Product - Colour - Size": the product, then its options
         cur.items.push({
@@ -1381,6 +1387,8 @@ function rebuild() {
   if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.slips
     ? current.warnings.map(t => h("div", null, "• " + t))
     : [current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""]));
+  if (current.restoredAt && current.lines.length && current.lines.every(l => !("barcode" in l)) && /pdf/i.test(current.name || ""))
+    w.prepend(h("div", { class: "notice warn" }, "This list was made with an older version of the app, before it read barcodes, so items show no barcode and Scan to unpack can't find them. Choose the packing-slip PDFs again (it replaces this list)."));
   if (current.restoredAt) w.prepend(h("div", { class: "notice good" }, `Picked up where you left off (list from ${new Date(current.restoredAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}).`,
     current.openChecks ? ` ${current.openChecks} slip${current.openChecks === 1 ? " still needed" : "s still needed"} checking when it was saved: to check ${current.openChecks === 1 ? "it" : "them"}, choose the PDFs again.` : ""));
   renderReview();
@@ -2020,7 +2028,10 @@ async function openBarcodeScanner() {
   const video = h("video", { playsinline: true, muted: true, autoplay: true });
   let paused = false; // while "Which item is this?" is showing
   const result = h("div", { class: "scanresult" }, h("div", { class: "scanhint" }, "Scan an item's barcode.",
-    current && current.name === "Example orders" ? h("div", { class: "small", style: "margin-top:6px" }, "To try it: open shragydrillick-cmd.github.io/tryagain/barcodes.html on a computer and scan the barcodes there.") : null));
+    current && current.name === "Example orders" ? h("div", { class: "small", style: "margin-top:6px" }, "To try it: open shragydrillick-cmd.github.io/tryagain/barcodes.html on a computer and scan the barcodes there.") : null,
+    plan.unpack.every(u => !u.barcode) ? h("div", { class: "small", style: "margin-top:6px;color:#f0b45a" }, plan.unpack.some(u => u.sku)
+      ? "These orders have no barcode numbers, only SKUs. If a barcode isn't recognised, you'll be asked which item it is, once. (Made with an older version? Choose the PDFs again to get the barcodes.)"
+      : "These orders have no barcode numbers. If a barcode isn't recognised, you'll be asked which item it is, once.") : null));
   const prog = h("div", { class: "scanprog" }), msg = h("p", { class: "scanmsg small" }, "Starting the camera…");
   const typed = h("input", { type: "text", inputmode: "numeric", placeholder: "Or type the barcode / SKU", "aria-label": "Barcode or SKU",
     onkeydown: e => { if (e.key === "Enter") okBtn.click(); } });
