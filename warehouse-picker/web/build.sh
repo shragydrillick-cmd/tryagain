@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 rm -rf dist && mkdir -p dist/vendor
 cp ../android/app/src/main/assets/www/vendor/*.js dist/vendor/
-cp manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png dist/
+cp manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png barcodes.html dist/
 VERSION=$(cat ../index.html sw.js pwa.js manifest.webmanifest | cksum | cut -d' ' -f1)
 sed "s/__VERSION__/$VERSION/" sw.js > dist/sw.js
 # Point at the bundled libraries, and add the "install to home screen" bits.

@@ -121,6 +121,16 @@ underneath:
 - It beeps and buzzes for each scan, ticks the unpack list as it goes, and
   shows "Placed 12 of 40 items · 3 of 10 orders complete". Closing it keeps where
   it got to; ticks are shared with linked devices too.
+- **A barcode that isn't on the slips** (e.g. a slip with only the SKU) asks
+  **"Which item is it?"** with the items still to place. Tap the right one: it's
+  placed, and that barcode is remembered on this device from then on (kept with
+  the settings, so it's in the settings backup too).
+- A barcode that holds the SKU itself (some labels do) is matched by SKU.
+
+**To try it:** on a computer open
+https://shragydrillick-cmd.github.io/tryagain/barcodes.html (the example
+items' barcodes, plus one that isn't on any slip). On the phone tap **Try an
+example**, then **📷 Scan to unpack**, and scan them off the screen.
 
 
 

@@ -212,6 +212,11 @@ img.qr.big { width: 320px; }
 .scanresult .lastnote { color: #5fd08f; font-weight: 700; margin-top: 4px; }
 .scanprog { font-size: 14px; text-align: center; color: #c9d1db; margin-bottom: 6px; }
 .scanrow { flex-wrap: nowrap; } .scanrow input { flex: 1; min-width: 0; }
+.pickitems { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-height: 30vh; overflow: auto; }
+.scanresult.choose { flex-direction: column; align-items: stretch; gap: 6px; }
+.scanresult.choose .scanbig { display: none; }
+.scanresult .pickitems .btn { display: block; width: 100%; text-align: left; color: #fff; border-color: rgba(255,255,255,.5); background: transparent; font-weight: 400; padding: 8px 10px; }
+.scanresult .pickitems .btn span { color: #c9d1db; }
 </style>
 </head>
 <body>
@@ -1241,20 +1246,20 @@ $("pasteToggle").onclick = () => $("pasteBox").classList.toggle("hidden");
 $("pasteGo").onclick = () => useRows(parseDelimited($("pasteText").value), "Pasted list");
 $("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name); };
 
-const EXAMPLE = `Order,Box,Item,Details,Qty
-10452,A3,Fleece blanket,"Blue, 50x60 in",1
-10452,A14,Notebook,"Lined, A5",2
-10449,A3,Fleece blanket,"Gray, 50x60 in",1
-10449,A14,Notebook,"Lined, A5",1
-10449,A35,Desk lamp,White,1
-10449,B26,Phone stand,Black,1
-10460,B26,Phone stand,Black,2
-10460,A7,Pen set,Black ink,1
-10451,B33,Cable ties,Pack of 50,1
-10451,A3,Fleece blanket,"Blue, 50x60 in",1
-10455,A35,Desk lamp,White,1
-10455,A44,Sticky notes,Yellow,1
-10455,B5,Water bottle,750 ml,1`;
+const EXAMPLE = `Order,Box,Item,Details,Qty,Barcode,SKU
+10452,A3,Fleece blanket,"Blue, 50x60 in",1,5012345000015,FB-BLU
+10452,A14,Notebook,"Lined, A5",2,5012345000039,NB-A5
+10449,A3,Fleece blanket,"Gray, 50x60 in",1,5012345000022,FB-GRY
+10449,A14,Notebook,"Lined, A5",1,5012345000039,NB-A5
+10449,A35,Desk lamp,White,1,5012345000046,DL-WHT
+10449,B26,Phone stand,Black,1,5012345000053,PS-BLK
+10460,B26,Phone stand,Black,2,5012345000053,PS-BLK
+10460,A7,Pen set,Black ink,1,5012345000060,PEN-BLK
+10451,B33,Cable ties,Pack of 50,1,5012345000077,CT-50
+10451,A3,Fleece blanket,"Blue, 50x60 in",1,5012345000015,FB-BLU
+10455,A35,Desk lamp,White,1,5012345000046,DL-WHT
+10455,A44,Sticky notes,Yellow,1,5012345000084,SN-YEL
+10455,B5,Water bottle,750 ml,1,5012345000091,WB-750`;
 $("exampleBtn").onclick = () => useRows(parseDelimited(EXAMPLE), "Example orders");
 const EXAMPLE_INVENTORY = `Item Number,Bin,Name,Details
 1001,A3,Fleece blanket,"Blue, 50x60 in"
@@ -1931,9 +1936,24 @@ const placeHistory = [];
 /** Codes compared without spaces, case or leading zeros (a UPC-A reads as 12 or 13 digits). */
 const scanKey = c => { const t = String(c || "").trim().toUpperCase().replace(/\s+/g, ""); return /^\d+$/.test(t) ? t.replace(/^0+/, "") : t; };
 const leftOf = u => (unpackDone.has(u.step) ? 0 : Math.max(0, u.qty - (placed.get(u.step) || 0)));
+/** Which item a line is, for remembering barcodes: its SKU, or else its name and details. */
+const itemKeyOf = u => (u.sku ? "sku:" + scanKey(u.sku) : "item:" + `${u.name}|${u.details}`.toLowerCase());
 function matchLines(code) {
   const k = scanKey(code); if (!k) return [];
-  return plan.unpack.filter(u => (u.barcode && scanKey(u.barcode) === k) || (u.sku && scanKey(u.sku) === k));
+  const learned = settings.barcodes && settings.barcodes[k]; // a barcode taught earlier ("Which item is this?")
+  return plan.unpack.filter(u => (u.barcode && scanKey(u.barcode) === k) || (u.sku && scanKey(u.sku) === k) || (learned && itemKeyOf(u) === learned));
+}
+/** Remember that this barcode is this item (on this device, kept with the settings). */
+function learnBarcode(code, u) {
+  settings.barcodes = settings.barcodes || {};
+  settings.barcodes[scanKey(code)] = itemKeyOf(u);
+  saveSettings();
+}
+/** Items still to be placed, one button each, for "Which item is this?". */
+function itemsLeft() {
+  const seen = new Map();
+  plan.unpack.forEach(u => { if (leftOf(u) > 0 && !seen.has(itemKeyOf(u))) seen.set(itemKeyOf(u), u); });
+  return [...seen.values()].sort((a, b) => natural(itemName(a), itemName(b)) || natural(a.details, b.details));
 }
 /** One scanned item: which order it goes on. Counts it, ticks the unpack list, and says when an order is complete. */
 function placeItem(code) {
@@ -1998,7 +2018,9 @@ async function barcodeReader() {
 async function openBarcodeScanner() {
   if (!plan) return;
   const video = h("video", { playsinline: true, muted: true, autoplay: true });
-  const result = h("div", { class: "scanresult" }, h("div", { class: "scanhint" }, "Scan an item's barcode."));
+  let paused = false; // while "Which item is this?" is showing
+  const result = h("div", { class: "scanresult" }, h("div", { class: "scanhint" }, "Scan an item's barcode.",
+    current && current.name === "Example orders" ? h("div", { class: "small", style: "margin-top:6px" }, "To try it: open shragydrillick-cmd.github.io/tryagain/barcodes.html on a computer and scan the barcodes there.") : null));
   const prog = h("div", { class: "scanprog" }), msg = h("p", { class: "scanmsg small" }, "Starting the camera…");
   const typed = h("input", { type: "text", inputmode: "numeric", placeholder: "Or type the barcode / SKU", "aria-label": "Barcode or SKU",
     onkeydown: e => { if (e.key === "Enter") okBtn.click(); } });
@@ -2009,7 +2031,14 @@ async function openBarcodeScanner() {
   const show = r => {
     if (r.kind === "none") {
       beep(false); result.className = "scanresult bad";
-      result.replaceChildren(h("div", { class: "scanbig" }, "?"), h("div", null, h("b", null, "Not in these orders"), h("div", { class: "small" }, `Code ${r.code}. Check it's the right item, or type its code below.`)));
+      const left = itemsLeft();
+      paused = !!left.length; // hold the camera while choosing, or it would keep reading the same barcode
+      if (left.length) result.className = "scanresult bad choose";
+      result.replaceChildren(h("div", { class: "scanbig" }, "?"), h("div", { style: "flex:1;min-width:0" }, h("b", null, "This barcode isn't on the slips"),
+        h("div", { class: "small" }, `Code ${r.code}. If you know which item it is, tap it: it's placed, and this barcode is remembered from now on.`),
+        h("div", { class: "pickitems" }, left.map(u => h("button", { class: "btn secondary small", type: "button", onclick: () => { learnBarcode(r.code, u); paused = false; show(placeItem(r.code)); } },
+          h("b", null, itemName(u)), u.details ? h("span", null, " · " + u.details) : null, u.sku ? h("span", null, " · " + u.sku) : null))),
+        h("button", { class: "btn small", type: "button", style: "margin-top:6px", onclick: () => { paused = false; result.className = "scanresult"; result.replaceChildren(h("div", { class: "scanhint" }, "Scan an item's barcode.")); } }, "None of these")));
     } else if (r.kind === "full") {
       beep(false); result.className = "scanresult warn";
       result.replaceChildren(h("div", { class: "scanbig" }, "✓"), h("div", null, h("b", null, `All of these are already placed`),
@@ -2050,10 +2079,10 @@ async function openBarcodeScanner() {
   }
   msg.textContent = "Hold the barcode inside the box.";
   const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
-  let last = "", lastSeen = 0, pauseUntil = 0, busy = false;
+  let last = "", lastSeen = 0, busy = false;
   const tick = async () => {
     if (!scan.el) return;
-    if (!busy && video.readyState >= 2 && video.videoWidth && Date.now() > pauseUntil) {
+    if (!busy && !paused && video.readyState >= 2 && video.videoWidth) {
       busy = true;
       // the middle band of the picture, where the box is: barcodes are wide, so keep the width
       const vw = video.videoWidth, vh = video.videoHeight, sx = vw * 0.05, sw = vw * 0.9, sy = vh * 0.3, sh = vh * 0.4;
@@ -2063,7 +2092,7 @@ async function openBarcodeScanner() {
       const now = Date.now();
       if (code) {
         // the same barcode stays in view for a while: count it once, and again only after it has left the picture
-        if (code !== last || now - lastSeen > 1200) { show(placeItem(code)); pauseUntil = now + 900; }
+        if (code !== last || now - lastSeen > 700) show(placeItem(code)); // it keeps watching, so a barcode still in view never counts twice
         last = code; lastSeen = now;
       }
       busy = false;

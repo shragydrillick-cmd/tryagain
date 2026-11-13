@@ -49,3 +49,9 @@ codes, already placed), then draws real barcodes into a video (needs ffmpeg)
 that a second browser uses as its camera, and checks **Scan to unpack** places
 each item once on the right order. The iPhone app's self-test also draws an
 EAN-13 barcode and reads it with Safari's engine.
+
+`example-barcodes.test.js` films `web/barcodes.html` (the example items'
+barcodes) into a camera video and goes through **Try an example** →
+**Scan to unpack**: each barcode must go to the right order, two of the same
+must count twice (and a barcode still in view only once), and the barcode
+that isn't on the slips must ask which item it is and be remembered after.
