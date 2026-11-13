@@ -84,7 +84,7 @@ jobs:
             xcrun simctl terminate "$DEVICE" com.picksort.app 2>/dev/null || true
             xcrun simctl launch --console-pty "$DEVICE" com.picksort.app -selftest > console.log 2>&1 &
             PID=$!
-            for i in $(seq 1 60); do grep -q "SELFTEST QR OK\|SELFTEST QR FAIL\|SELFTEST PDF FAIL\|SELFTEST FAIL" console.log && break; sleep 2; done
+            for i in $(seq 1 60); do grep -q "SELFTEST BARCODE OK\|SELFTEST BARCODE FAIL\|SELFTEST QR FAIL\|SELFTEST PDF FAIL\|SELFTEST FAIL" console.log && break; sleep 2; done
             sleep 4
             kill $PID 2>/dev/null || true
             grep -q "SELFTEST OK\|SELFTEST FAIL" console.log && break
@@ -99,6 +99,7 @@ jobs:
           grep -q "SELFTEST-SETTINGS" console.log
           grep -q "SELFTEST PDF OK" console.log # a packing slip read with Safari's engine on the iPhone
           grep -q "SELFTEST QR OK" console.log # "Send to phone" codes made and read back with Safari's engine
+          grep -q "SELFTEST BARCODE OK" console.log # "Scan to unpack": a barcode read with Safari's engine
 
       - uses: actions/upload-artifact@v4
         with:

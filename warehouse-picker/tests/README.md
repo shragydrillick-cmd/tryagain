@@ -42,3 +42,10 @@ codes, films them into a video (needs ffmpeg), uses the video as a second
 browser's camera, and checks that **Scan from computer** rebuilds exactly the same
 list. The iPhone app's self-test on the build server also makes the codes and
 reads them back with Safari's engine.
+
+`scan-unpack.test.js` checks the barcode and SKU shown under items and which
+order each scan goes to (an item in two orders, two of one item, Undo, unknown
+codes, already placed), then draws real barcodes into a video (needs ffmpeg)
+that a second browser uses as its camera, and checks **Scan to unpack** places
+each item once on the right order. The iPhone app's self-test also draws an
+EAN-13 barcode and reads it with Safari's engine.

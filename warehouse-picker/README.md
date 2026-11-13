@@ -97,7 +97,32 @@ Quick setup can build an aisle-style map (A1, A2… B1, B2…) in one go.
 inventory and orders: one unit per aisle, boxes in number order. Bins that aren't
 on the map yet are marked "not on map" and still listed by aisle and number.
 
-## The list is remembered
+## Barcodes and Scan to unpack
+
+Every item shows its **barcode and SKU** under the name and details (e.g.
+"Barcode 735380754426 · SKU LL2207-2T"): on the pick and unpack lists, in step
+by step and in both PDFs. They come from the packing slips; from a spreadsheet,
+a column called Barcode / UPC / EAN and one called SKU are used.
+
+**📷 Scan to unpack** (next to the Unpack step by step) is another way to
+unpack, in any order: scan an item's barcode with the phone's camera and it
+shows straight away which order it goes on, in a big number, with the item
+underneath:
+
+- "Order 2: 1 more item to come", or **"✓ Order 3 is complete. Pack it!"**
+  for the last item of an order.
+- The same item in more than one order goes to each order in turn. Two of one
+  item for the same order says "Order 2 needs 1 more of these".
+- A barcode that isn't in the orders says **Not in these orders**. One that's
+  already all placed says **All of these are already placed** (scanned twice?).
+- Each item counts once, however long it's held in front of the camera; to
+  scan the next one that's the same, take the first away. **↶ Undo last**
+  takes a scan back. The barcode or SKU can also be typed.
+- It beeps and buzzes for each scan, ticks the unpack list as it goes, and
+  shows "Placed 12 of 40 items · 3 of 10 orders complete". Closing it keeps where
+  it got to; ticks are shared with linked devices too.
+
+
 
 The current list stays on the phone (or computer) until it's cleared: the orders,
 every tick on the pick and unpack lists, and where you were in step by step

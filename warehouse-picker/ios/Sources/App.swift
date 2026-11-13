@@ -210,6 +210,43 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
                 print("SELFTEST QR RESULT \(r)")
                 print(r.contains("\"orders\":5") && r.contains("\"want\":5") ? "SELFTEST QR OK" : "SELFTEST QR FAIL")
             }
+            self.selfTestBarcode()
+        }
+    }
+
+    /// "Scan to unpack" with Safari's engine: an EAN-13 barcode is drawn, read with the barcode
+    /// reader the app uses on iPhone, and the same item goes to its two orders one after the other.
+    private func selfTestBarcode() {
+        let js = """
+        useRows(parseDelimited('Order,Box,Item,Details,Barcode,SKU,Qty\\n53796,C87,Lil Legs Sweatshirt Set,Deep Red - 2T,735380754426,LL2207-2T,1\\n53797,C87,Lil Legs Sweatshirt Set,Deep Red - 2T,735380754426,LL2207-2T,1'), 'selftest.csv');
+        const L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+        const R = L.map(x => [...x].map(b => (b === '0' ? '1' : '0')).join('')), G = R.map(x => [...x].reverse().join(''));
+        const P = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+        const ean = '0735380754426', d = [...ean].map(Number);
+        let bits = '101';
+        for (let i = 1; i <= 6; i++) bits += (P[d[0]][i - 1] === 'L' ? L : G)[d[i]];
+        bits += '01010';
+        for (let i = 7; i <= 12; i++) bits += R[d[i]];
+        bits += '101';
+        const c = document.createElement('canvas'); c.width = bits.length * 3 + 80; c.height = 140;
+        const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.fillStyle = '#000';
+        [...bits].forEach((b, i) => { if (b === '1') x.fillRect(40 + i * 3, 20, 3, 100); });
+        const read = await barcodeReader();
+        const got = await read(c);
+        const first = placeItem(got), second = placeItem(got);
+        return JSON.stringify({ native: 'BarcodeDetector' in window, read: got,
+          first: first.kind === 'ok' ? first.u.label : first.kind, second: second.kind === 'ok' ? second.u.label : second.kind,
+          shown: codesText(plan.unpack[0]) });
+        """
+        webView.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .failure(let error): print("SELFTEST BARCODE FAIL \(error)")
+            case .success(let value):
+                let r = (value as? String) ?? ""
+                print("SELFTEST BARCODE RESULT \(r)")
+                let ok = r.contains("\"read\":\"735380754426\"") && r.contains("\"first\":1") && r.contains("\"second\":2") && r.contains("Barcode 735380754426")
+                print(ok ? "SELFTEST BARCODE OK" : "SELFTEST BARCODE FAIL")
+            }
         }
     }
 }

@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 const fs = require('fs'), path = require('path'), { execSync } = require('child_process');
 const SP = require('os').tmpdir() + '/pick-and-sort-qr';
 (async () => {
-  fs.mkdirSync(SP, { recursive: true });
+  fs.rmSync(SP, { recursive: true, force: true }); fs.mkdirSync(SP, { recursive: true }); // frames from an earlier run would mix in
   const b = await chromium.launch(); const errs = [];
   const pc = await (await b.newContext({ viewport: { width: 1200, height: 1000 } })).newPage(); pc.on('pageerror', e => errs.push('pc: ' + e.message));
   await pc.goto('http://localhost:8765/index.html');
@@ -23,15 +23,18 @@ const SP = require('os').tmpdir() + '/pick-and-sort-qr';
   // record the codes as they change: screenshot the QR every 350 ms for one full round
   const n = +((info.text.match(/of (\d+)/) || [0, 1])[1]);
   const seen = new Map(); let shot = 0;
-  for (let t = 0; t < n * 3 && seen.size < n; t++) {
-    const lbl = await pc.$eval('#sendBox p.muted', p => p.textContent).catch(() => 'Code 1 of 1');
+  for (let t = 0; t < n * 6 && seen.size < n; t++) {
+    // the label and the picture read together, so they always belong to the same code
+    const { lbl, src } = await pc.evaluate(() => { // the code at its own size, as a PNG
+      const img = document.querySelector('#sendBox img.qr'), c = document.createElement('canvas'); c.width = 420; c.height = 420; // same size every time (ffmpeg drops a frame when the size changes)
+      const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 420, 420); x.drawImage(img, (420 - img.naturalWidth) >> 1, (420 - img.naturalHeight) >> 1); return { lbl: document.querySelector('#sendBox p.muted').textContent, src: c.toDataURL('image/png') }; });
     const i = +lbl.match(/Code (\d+)/)[1];
-    if (!seen.has(i)) { const f = path.join(SP, `f${String(shot++).padStart(3, '0')}.png`); await (await pc.$('#sendBox img.qr')).screenshot({ path: f }); seen.set(i, f); }
-    await pc.waitForTimeout(350);
+    if (!seen.has(i)) { const f = path.join(SP, `f${String(i).padStart(3, '0')}.png`); fs.writeFileSync(f, Buffer.from(src.split(',')[1], 'base64')); seen.set(i, f); }
+    await pc.waitForTimeout(200);
   }
   console.log('codes captured off the screen:', seen.size, 'of', n);
   // a video like a phone camera sees it: each code for 0.7 s, smaller in a grey frame, slightly blurred
-  execSync(`ffmpeg -y -loglevel error -framerate 1/0.7 -pattern_type glob -i '${SP}/f*.png' -vf "scale=480:-1,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=gray,gblur=sigma=0.6,fps=15,format=yuv420p" ${SP}/cam.y4m`);
+  execSync(`ffmpeg -y -loglevel error -framerate 1 -pattern_type glob -i '${SP}/f*.png' -vf "scale=-2:560,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=gray,gblur=sigma=0.6,fps=15,format=yuv420p" ${SP}/cam.y4m`);
   await b.close();
   // the phone, with that video as its camera
   const b2 = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${SP}/cam.y4m`] });
