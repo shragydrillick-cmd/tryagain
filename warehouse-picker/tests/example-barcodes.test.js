@@ -40,8 +40,6 @@ const BASE = process.argv[2] || 'http://localhost:8765';
       await ph.waitForTimeout(1500); // the camera is held while choosing
       await ph.click('.pickitems button:has-text("Water bottle")'); taught = true;
     }
-    // a person reads the result, then taps Next for the next item
-    if (await ph.$('.scannext')) { await ph.waitForTimeout(400); if (!(await ph.$('.pickitems'))) await ph.click('.scannext').catch(() => {}); }
     await ph.waitForTimeout(150);
   }
   const res = await ph.evaluate(() => ({ remembered: settings.barcodes, again: (() => { const u = matchLines('5012345000107'); return u.map(x => itemName(x) + ' → order ' + x.label).join(', '); })() }));

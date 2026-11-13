@@ -215,7 +215,6 @@ img.qr.big { width: 320px; }
 .pickitems { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-height: 30vh; overflow: auto; }
 .scanmain { display: flex; gap: 14px; align-items: center; }
 .scanverdict { font-size: 18px; font-weight: 800; }
-.scannext { align-self: flex-end; min-width: 110px; }
 .scanresult .pickitems .btn { display: block; width: 100%; text-align: left; color: #fff; border-color: rgba(255,255,255,.5); background: transparent; font-weight: 400; padding: 8px 10px; }
 .scanresult .pickitems .btn span { color: #c9d1db; }
 </style>
@@ -2027,7 +2026,7 @@ async function barcodeReader() {
 async function openBarcodeScanner() {
   if (!plan) return;
   const video = h("video", { playsinline: true, muted: true, autoplay: true });
-  let paused = false; // while a result is showing (until "Next")
+  const paused = false;
   const result = h("div", { class: "scanresult" }, h("div", { class: "scanhint" }, "Scan an item's barcode.",
     current && current.name === "Example orders" ? h("div", { class: "small", style: "margin-top:6px" }, "To try it: open shragydrillick-cmd.github.io/tryagain/barcodes.html on a computer and scan the barcodes there.") : null,
     plan.unpack.every(u => !u.barcode) ? h("div", { class: "small", style: "margin-top:6px;color:#f0b45a" }, plan.unpack.some(u => u.sku)
@@ -2039,17 +2038,12 @@ async function openBarcodeScanner() {
   const okBtn = h("button", { class: "btn small", type: "button", onclick: () => { if (typed.value.trim()) { show(placeItem(typed.value)); typed.value = ""; } } }, "OK");
   const undoBtn = h("button", { class: "btn secondary small", type: "button", onclick: () => { const u = undoPlace(); if (u) { showUndo(u); } } }, "↶ Undo last");
   const showProgress = () => { const p = unpackProgress(); prog.textContent = `Placed ${p.placedUnits} of ${p.total} items · ${p.ordersDone} of ${p.orders} orders complete`; undoBtn.disabled = !placeHistory.length; saveList(); };
-  const showUndo = u => { paused = false; resumeAt = Date.now(); result.className = "scanresult"; result.replaceChildren(h("div", { class: "scanhint" }, `Undone: one ${itemName(u)} taken back off order ${u.label}. Scan the next item.`)); showProgress(); };
+  const showUndo = u => { result.className = "scanresult"; result.replaceChildren(h("div", { class: "scanhint" }, `Undone: one ${itemName(u)} taken back off order ${u.label}.`)); showProgress(); };
   const noCodes = plan.unpack.every(u => !u.barcode);
-  // after each scan the camera waits: the result stays until "Next ▶" is tapped
-  const nextBtn = () => h("button", { class: "btn small scannext", type: "button", onclick: () => next() }, "Next ▶");
-  const hint = () => h("div", { class: "scanhint" }, "Scan the next item's barcode.");
-  let resumeAt = 0, lastShown = "";
-  const next = () => { paused = false; resumeAt = Date.now(); result.className = "scanresult"; result.replaceChildren(hint()); };
+  // the camera stays live: each result shows until the next barcode is scanned
   const show = r => {
     const replaceChildren = result.replaceChildren.bind(result); // (empty parts are left out, not shown as "null")
     result.replaceChildren = (...kids) => replaceChildren(...kids.filter(k => k != null));
-    paused = true; lastShown = r.code || (r.u && r.u.barcode) || "";
     if (r.kind === "none") {
       beep(false);
       const left = itemsLeft();
@@ -2061,13 +2055,13 @@ async function openBarcodeScanner() {
         left.length ? h("div", { class: "small", style: "margin-top:6px" }, "Know which item it is? Tap it: it goes on its order, and this barcode is remembered from now on.") : null,
         left.length ? h("div", { class: "pickitems" }, left.map(u => h("button", { class: "btn secondary small", type: "button", onclick: () => { learnBarcode(r.code, u); show(placeItem(r.code)); } },
           h("b", null, itemName(u)), u.details ? h("span", null, " · " + u.details) : null, u.sku ? h("span", null, " · " + u.sku) : null))) : null,
-        nextBtn());
+        null);
     } else if (r.kind === "full") {
       beep(false); result.className = "scanresult warn";
       result.replaceChildren(h("div", { class: "scanmain" }, h("div", { class: "scanbig" }, "✓"), h("div", null,
           h("div", { class: "scanverdict" }, "Already placed"),
           h("div", { class: "small" }, `${itemName(r.item)}${r.item.details ? " · " + r.item.details : ""}: all of them are already on order${r.orders.length > 1 ? "s" : ""} ${r.orders.join(", ")}. Scanned twice? Use Undo.`))),
-        nextBtn());
+        null);
     } else {
       beep(true); const u = r.u, complete = r.orderLeft === 0;
       result.className = "scanresult " + (complete ? "good" : "ok");
@@ -2080,7 +2074,7 @@ async function openBarcodeScanner() {
             codesText(u) ? h("div", { class: "icode" }, codesText(u)) : null,
             r.sameLeft ? h("div", { class: "small" }, `Order ${u.label} needs ${r.sameLeft} more of these.`) : null,
             complete ? h("div", { class: "lastnote" }, `✓ Order ${u.label} is complete. Pack it!`) : h("div", { class: "small muted" }, `Order ${u.label}: ${r.orderLeft} more item${r.orderLeft === 1 ? "" : "s"} to come.`))),
-        nextBtn());
+        null);
     }
     showProgress();
   };
@@ -2106,7 +2100,7 @@ async function openBarcodeScanner() {
   }
   msg.textContent = "Hold the barcode inside the box.";
   const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
-  let busy = false;
+  let busy = false, last = "", lastSeen = 0;
   const tick = async () => {
     if (!scan.el) return;
     if (!busy && !paused && video.readyState >= 2 && video.videoWidth) {
@@ -2118,8 +2112,9 @@ async function openBarcodeScanner() {
       const code = await read(canvas);
       const now = Date.now();
       if (code) {
-        // after Next, the item just scanned may still be in view for a moment: give it a second before it can count again
-        if (!(code === lastShown && now - resumeAt < 1000)) show(placeItem(code));
+        // a barcode held in view counts once; the same one again only after it has left the picture
+        if (code !== last || now - lastSeen > 700) show(placeItem(code));
+        last = code; lastSeen = now;
       }
       busy = false;
     }
