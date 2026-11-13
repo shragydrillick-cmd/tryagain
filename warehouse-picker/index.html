@@ -217,6 +217,19 @@ img.qr.big { width: 320px; }
 .scanverdict { font-size: 18px; font-weight: 800; }
 .scanresult .pickitems .btn { display: block; width: 100%; text-align: left; color: #fff; border-color: rgba(255,255,255,.5); background: transparent; font-weight: 400; padding: 8px 10px; }
 .scanresult .pickitems .btn span { color: #c9d1db; }
+.ordershead { display: flex; align-items: center; gap: 8px; }
+.ordershead h2 { margin: 0; }
+.helpq { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--muted); background: transparent; color: var(--muted); font-size: 13px; font-weight: 700; line-height: 1; padding: 0; cursor: pointer; }
+.addtiles { display: grid; grid-template-columns: repeat(2, 1fr); grid-auto-rows: 1fr; gap: 10px; margin-top: 12px; }
+@media (min-width: 720px) { .addtiles { grid-template-columns: repeat(4, 1fr); } }
+.addtile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 76px; padding: 12px 8px; border-radius: 14px;
+  border: 1.5px solid var(--line); background: var(--accent-soft); color: var(--text); font: inherit; text-align: center; cursor: pointer; }
+.addtile b { font-size: 16px; line-height: 1.2; }
+.addtile .tileicon { font-size: 28px; }
+.addtile:active { transform: scale(.98); }
+.helpover { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.helpbox { background: var(--card); color: var(--text); border-radius: 14px; padding: 16px; max-width: 460px; max-height: 80vh; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,.3); font-size: 15px; }
+.helpbox p { margin: 0 0 10px; }
 </style>
 </head>
 <body>
@@ -227,41 +240,38 @@ img.qr.big { width: 320px; }
 
 <main id="homeView">
   <section class="card no-print">
-    <h2>1. Add your files</h2>
-    <div class="invbox">
-      <h3 style="margin-top:0">Inventory <span class="muted small">(optional, remembered on this phone)</span></h3>
-      <p class="muted small" style="margin-top:0">A file listing each <b>item number</b> and its <b>bin</b> (like A1), plus the item's name if you have it. Then the orders file only needs the order, item number and quantity: the bins are looked up for you.</p>
-      <div id="invStatus"></div>
-      <div class="row">
-        <label class="btn secondary">Choose inventory file<input id="invInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" hidden></label>
-        <button class="btn secondary" id="invExampleBtn" type="button">Try the two-file example</button>
-      </div>
-      <p class="small muted" style="margin-bottom:0"><button class="link" id="invTemplateBtn" type="button">Download an inventory template</button></p>
-    </div>
-    <h3>Orders</h3>
-    <p class="muted small"><b>Packing slips (PDF):</b> choose the PDF with all the slips, or select many PDFs at once (one per order is fine). The app reads each slip's order number, items, bins and quantities, and checks them against "Total items".</p>
-    <p class="muted small">Or a spreadsheet (Excel or CSV) with one line per item: <b>Order</b>, <b>Box</b> (like A1 = aisle A, box 1), <b>Item</b> (what it is), and optional <b>Details</b> and <b>Qty</b>. Any other columns are shown as details.</p>
-    <div class="row">
-      <label class="btn">Choose file<input id="fileInput" type="file" multiple accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls,.json,text/csv,application/pdf,application/json" hidden></label>
-      <button class="btn secondary" id="pasteToggle" type="button">Paste instead</button>
-      <button class="btn secondary" id="exampleBtn" type="button">Try an example</button>
-      <button class="btn secondary" id="scanBtn" type="button">&#128247; Scan from computer</button>
+    <div class="ordershead"><h2>Orders</h2><button class="helpq" id="ordersHelp" type="button" aria-label="How to add orders">?</button></div>
+    <div class="addtiles">
+      <label class="addtile"><b>Add file</b><input id="fileInput" type="file" multiple accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls,.json,text/csv,application/pdf,application/json" hidden></label>
+      <button class="addtile" id="exampleBtn" type="button"><b>Practice</b></button>
+      <button class="addtile" id="scanBtn" type="button"><b>Scan from computer</b></button>
+      <button class="addtile" id="pasteToggle" type="button"><b>Manual</b></button>
     </div>
     <div id="pasteBox" class="hidden" style="margin-top:12px">
+      <p class="small muted" style="margin:0 0 6px">One line per item: order, box, item, details, quantity.</p>
       <textarea id="pasteText" placeholder="Order,Box,Item,Details,Qty&#10;10452,A3,Blue mug,12 oz,1&#10;10452,A14,Notebook,Lined A5,2"></textarea>
       <div class="row" style="margin-top:8px"><button class="btn" id="pasteGo" type="button">Use this</button></div>
     </div>
-    <p class="small muted" style="margin-bottom:0">
-      <button class="link" id="templateBtn" type="button">Download a blank template</button>
-      &nbsp;·&nbsp; File layout:
-      <select id="formatSel" aria-label="File layout">
-        <option value="auto">Figure it out</option>
-        <option value="long">One line per item (Order, Box, Item, Qty)</option>
-        <option value="wide">One line per order (Order, box, box, …)</option>
-      </select>
-    </p>
     <div id="loadMsg"></div>
   </section>
+
+  <!-- shown under Settings → Inventory; kept here when that page isn't open -->
+  <div id="stash" hidden><div id="invPanel">
+    <p class="muted small" style="margin-top:0">A file listing each <b>item number</b> and its <b>bin</b> (like A1), plus the item's name if you have it. Then the orders file only needs the order, item number and quantity: the bins are looked up for you. Kept on this device.</p>
+    <div id="invStatus"></div>
+    <div class="row">
+      <label class="btn secondary">Choose inventory file<input id="invInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" hidden></label>
+      <button class="btn secondary" id="invExampleBtn" type="button">Try the two-file example</button>
+    </div>
+    <p class="small muted"><button class="link" id="invTemplateBtn" type="button">Download an inventory template</button></p>
+    <h3>Spreadsheet layout</h3>
+    <p class="small muted" style="margin-top:0">How an orders spreadsheet is laid out.</p>
+    <select id="formatSel" aria-label="File layout">
+      <option value="auto">Figure it out</option>
+      <option value="long">One line per item (Order, Box, Item, Qty)</option>
+      <option value="wide">One line per order (Order, box, box, …)</option>
+    </select>
+  </div></div>
 
   <section id="results" class="card hidden">
     <h2>2. Your lists</h2>
@@ -1295,7 +1305,19 @@ $("invExampleBtn").onclick = () => {
   useInventory(parseDelimited(EXAMPLE_INVENTORY), "Example inventory");
   useRows(parseDelimited(EXAMPLE_ORDERS_BY_ITEM), "Example orders (item numbers only)");
 };
-$("templateBtn").onclick = () => download(new Blob(["Order,Box,Item,Details,Qty\n"], { type: "text/csv" }), "orders-template.csv");
+/* "?" next to Orders: how to add orders, in a box that goes away with any tap */
+$("ordersHelp").onclick = () => {
+  const over = h("div", { class: "helpover", role: "dialog", "aria-label": "How to add orders" }, h("div", { class: "helpbox" },
+    h("p", null, h("b", null, "Add file: "), "the packing slips (PDF): one PDF with all of them, or many at once. The app reads each slip's order number, items, bins, quantities and barcodes, and checks them against \"Total items\". Or a spreadsheet (Excel or CSV), one line per item: Order, Box (like A1), Item, and if you have them Details, Qty, Barcode, SKU. A list sent from another device (a .json file) opens here too."),
+    h("p", null, h("b", null, "Practice: "), "example orders to try everything on, with barcodes for Scan to unpack."),
+    h("p", null, h("b", null, "Scan from computer: "), "on the computer tap Send to phone, then point this phone at the code."),
+    h("p", null, h("b", null, "Manual: "), "type or paste the lines yourself."),
+    h("p", { class: "small muted" }, "Inventory (item number → bin) and spreadsheet layout: Settings → Inventory."),
+    h("button", { class: "link small", type: "button", onclick: () => download(new Blob(["Order,Box,Item,Details,Qty,Barcode,SKU\n"], { type: "text/csv" }), "orders-template.csv") }, "Download a blank spreadsheet template"),
+    h("p", { class: "small muted", style: "margin:10px 0 0" }, "Tap anywhere to close.")));
+  over.addEventListener("click", () => over.remove()); // any tap closes it (after a tap on the template link has done its job)
+  document.body.append(over);
+};
 
 /* ---------- checking slips the app wasn't sure about ---------- */
 function renderReview() {
@@ -2594,14 +2616,17 @@ function unitSummary(u) {
   return { name: u.name, high: u.shelves.length, range: nums.length ? `${sorted[0]} – ${sorted[sorted.length - 1]}` : "no boxes yet", count: nums.length };
 }
 
+const invPanel = $("invPanel");
 function renderSettings() {
   const v = $("settingsView");
+  $("stash").append(invPanel); // back to its keeping place; the Inventory page takes it out again
   if (setPage === "advanced") { renderAdvanced(); v.prepend(backRow("More", "more")); return; }
   if (setPage === "map") return renderMapPage(v);
   if (setPage === "wizard" && wiz) return renderWizard(v);
   if (setPage === "order") return renderOrderPage(v);
   if (setPage === "orderAisle") return renderOrderAisle(v);
   if (setPage === "more") return renderMorePage(v);
+  if (setPage === "inventory") return renderInventoryPage(v);
   setPage = "home";
   const boxes = buildLocator(settings).size;
   v.replaceChildren(h("section", { class: "card" },
@@ -2612,8 +2637,17 @@ function renderSettings() {
         h("span", { class: "small muted" }, `How the store is laid out. ${settings.units.length} aisle${settings.units.length === 1 ? "" : "s"}, ${boxes} boxes.`)),
       h("button", { class: "tile", type: "button", onclick: () => go("order") },
         h("span", { class: "tileicon" }, "🚶"), h("b", null, "Order"),
-        h("span", { class: "small muted" }, "Which aisle first, and how to pick each one."))),
+        h("span", { class: "small muted" }, "Which aisle first, and how to pick each one.")),
+      h("button", { class: "tile", type: "button", onclick: () => go("inventory") },
+        h("span", { class: "tileicon" }, "📦"), h("b", null, "Inventory"),
+        h("span", { class: "small muted" }, settings.inventory && settings.inventory.rows ? `${settings.inventory.rows.length} items with their bins.` : "Item numbers and their bins (if your orders don't list the bin)."))),
     h("button", { class: "link", type: "button", style: "margin-top:14px", onclick: () => go("more") }, "More: order numbers, backup, look, get the app")));
+}
+
+/* ---------- Inventory ---------- */
+function renderInventoryPage(v) {
+  v.replaceChildren(h("section", { class: "card" }, backRow("Settings", "home"), h("h2", null, "Inventory"), invPanel));
+  showInvStatus();
 }
 
 /* ---------- Map ---------- */
@@ -3228,7 +3262,7 @@ window.appBack = () => {
   if (scan.el) { closeScanner(); return true; }
   if (!$("stepper").classList.contains("hidden")) { if (stepView !== "step") { $("stepPrev").click(); } else closeSteps(); return true; }
   if (view === "settings") {
-    const up = { map: "home", order: "home", more: "home", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
+    const up = { map: "home", order: "home", more: "home", inventory: "home", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
     if (setPage === "wizard" && wiz) { wizBack(); return true; }
     if (up) { go(up); return true; }
     $("navBtn").click(); return true;
