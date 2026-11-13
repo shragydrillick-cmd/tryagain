@@ -230,6 +230,7 @@ img.qr.big { width: 320px; }
 .helpover { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .helpbox { background: var(--card); color: var(--text); border-radius: 14px; padding: 16px; max-width: 460px; max-height: 80vh; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,.3); font-size: 15px; }
 .helpbox p { margin: 0 0 10px; }
+.bigbarcode { font-size: 28px; font-weight: 800; letter-spacing: .06em; font-variant-numeric: tabular-nums; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin: 4px 0 2px; }
 </style>
 </head>
 <body>
@@ -1528,7 +1529,8 @@ function stepContent(i, isCurrent) {
         h("div", null,
           h("div", { class: "iname" }, hl(itemName(p), p.marks)),
           ...(p.details ? [h("div", { class: "idet" }, hl(p.details, p.marks))] : []),
-          ...(codesText(p) ? [h("div", { class: "icode" }, codesText(p))] : [])))))];
+          ...(p.barcode ? [h("div", { class: "bigbarcode" }, p.barcode)] : []), // big and clear, to match against the label in the bin
+          ...(p.sku ? [h("div", { class: "icode" }, `SKU ${p.sku}`)] : [])))))];
   }
   // "last item" depends on what is still to come, so a skipped item keeps its order open
   const rest = (isCurrent ? seq.slice(stepAt + 1) : seq.slice(stepAt)).filter(j => j !== i && stepItems[j].label === u.label);
