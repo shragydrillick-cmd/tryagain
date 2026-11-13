@@ -1470,21 +1470,27 @@ function renderPick() {
     h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", { style: "text-align:center" }, "Box"), h("th", null, ""), h("th", null, "Take"), h("th", null, "Item"))), tb));
 }
 
+let unpackOnlyLeft = false; // "Show only what's left": just the lines not ticked yet
 function renderUnpack() {
   const tb = h("tbody");
   plan.unpack.forEach(u => {
+    if (unpackOnlyLeft && unpackDone.has(u.step)) return;
     const tr = h("tr", { class: (u.last ? "last" : "") + (unpackDone.has(u.step) ? " done" : "") },
       h("td", null,
         h("input", { type: "checkbox", "aria-label": `Put ${itemName(u)} on order ${u.label}`, checked: unpackDone.has(u.step),
-          onchange: e => { e.target.checked ? unpackDone.add(u.step) : unpackDone.delete(u.step); placed.delete(u.step); tr.classList.toggle("done", e.target.checked); } })),
-      h("td", { class: "big" }, `${u.qty}×`, !unpackDone.has(u.step) && placed.get(u.step) ? h("div", { class: "small muted" }, `${placed.get(u.step)} placed`) : null),
+          onchange: e => { e.target.checked ? unpackDone.add(u.step) : unpackDone.delete(u.step); placed.delete(u.step); tr.classList.toggle("done", e.target.checked); renderUnpack(); } })),
+      h("td", { class: "big" }, `${u.qty}×`, !unpackDone.has(u.step) && placed.get(u.step) ? h("div", { class: "small muted" }, `${placed.get(u.step)} of ${u.qty} scanned`) : null),
       itemCell(u, null),
       h("td", null, h("span", { class: "pile" }, u.label),
         u.last ? h("div", { class: "lastnote" }, `✓ Last item. Order ${u.label} is complete, pack it!`) : null));
     tb.append(tr);
   });
+  const leftLines = plan.unpack.filter(u => !unpackDone.has(u.step)), leftUnits = leftLines.reduce((a, u) => a + u.qty - (placed.get(u.step) || 0), 0);
   $("tab-unpack").replaceChildren(
-    h("p", { class: "small muted" }, "Start from the top of the cart (the last thing you picked). Put each item on the pile for its order number, and tick it off."),
+    h("p", { class: "small muted" }, "Start from the top of the cart (the last thing you picked). Put each item on the pile for its order number, and tick it off. Scanned items tick themselves."),
+    h("div", { class: "notice " + (leftUnits ? "warn" : "good"), style: "display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap" },
+      h("span", null, leftUnits ? `Not checked yet: ${leftUnits} item${leftUnits === 1 ? "" : "s"}` : "✓ Everything is checked."),
+      leftUnits || unpackOnlyLeft ? h("button", { class: "btn secondary small", type: "button", onclick: () => { unpackOnlyLeft = !unpackOnlyLeft; renderUnpack(); } }, unpackOnlyLeft ? "Show everything" : "Show only what's left") : null),
     h("table", { class: "list" }, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Qty"), h("th", null, "Item"), h("th", null, "Put on order"))), tb));
 }
 
@@ -2106,7 +2112,11 @@ async function openBarcodeScanner() {
     h("div", { class: "scanhead" }, h("b", null, "Scan to unpack"), h("button", { class: "btn secondary small", type: "button", onclick: closeScanner }, "✕ Done")),
     h("div", { class: "scanview" }, video, h("div", { class: "scanframe wide" })), msg, result, prog,
     h("div", { class: "row scanrow" }, typed, okBtn, undoBtn));
-  scan.onClose = () => { renderUnpack(); saveList(); };
+  scan.onClose = () => { // back on the Unpack list, so the ticks from the scans are what you see
+    renderUnpack(); saveList();
+    document.querySelector('.tabs button[data-tab="unpack"]').click();
+    $("tab-unpack").scrollIntoView({ block: "start" });
+  };
   document.body.append(scan.el); document.body.style.overflow = "hidden";
   showProgress();
   try { beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); beepCtx.resume(); } catch (e) {} // sound has to start from a tap on iPhone
