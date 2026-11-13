@@ -115,9 +115,10 @@ underneath:
   item for the same order says "Order 2 needs 1 more of these".
 - A barcode that isn't in the orders says **Not in these orders**. One that's
   already all placed says **All of these are already placed** (scanned twice?).
-- Each item counts once, however long it's held in front of the camera; to
-  scan the next one that's the same, take the first away. **↶ Undo last**
-  takes a scan back. The barcode or SKU can also be typed.
+- After each scan it stops and shows the result: **"Found: goes to order 2"**
+  (with the real order number and the item), or **"Not found in these
+  orders"**. Tap the small **Next ▶** to clear it and scan the next item.
+  **↶ Undo last** takes a scan back. The barcode or SKU can also be typed.
 - It beeps and buzzes for each scan, ticks the unpack list as it goes, and
   shows "Placed 12 of 40 items · 3 of 10 orders complete". Closing it keeps where
   it got to; ticks are shared with linked devices too.

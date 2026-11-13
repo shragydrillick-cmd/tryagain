@@ -54,6 +54,8 @@ const CSV = `Order,Box,Item,Details,Barcode,SKU,Qty
     const r = await ph.evaluate(() => ({ res: (document.querySelector('.scanresult') || {}).innerText || '', prog: (document.querySelector('.scanprog') || {}).textContent }));
     const line = r.res.replace(/\n+/g, ' | ') + '  [' + r.prog + ']';
     if (line !== last) { console.log(`  ${((Date.now() - t0) / 1000).toFixed(1)}s: ${line}`); last = line; }
+    // a person reads the result, then taps Next for the next item
+    if (await ph.$('.scannext')) { await ph.waitForTimeout(400); if (!(await ph.$('.pickitems'))) await ph.click('.scannext').catch(() => {}); }
     await ph.waitForTimeout(150);
   }
   await ph.click('.scanhead button');

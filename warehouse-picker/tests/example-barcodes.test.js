@@ -35,11 +35,13 @@ const BASE = process.argv[2] || 'http://localhost:8765';
     const r = await ph.evaluate(() => ({ res: (document.querySelector('.scanresult') || {}).innerText || '', prog: (document.querySelector('.scanprog') || {}).textContent }));
     const line = r.res.replace(/\n+/g, ' | ').slice(0, 170) + '  [' + r.prog + ']';
     if (line !== last) { console.log(`  ${((Date.now() - t0) / 1000).toFixed(1)}s: ${line}`); last = line; }
-    if (!taught && /isn't on the slips/.test(r.res)) {
+    if (!taught && /Not found in these orders/.test(r.res)) {
       if (!shot && process.argv[3]) { await ph.screenshot({ path: process.argv[3] }); shot = true; }
       await ph.waitForTimeout(1500); // the camera is held while choosing
       await ph.click('.pickitems button:has-text("Water bottle")'); taught = true;
     }
+    // a person reads the result, then taps Next for the next item
+    if (await ph.$('.scannext')) { await ph.waitForTimeout(400); if (!(await ph.$('.pickitems'))) await ph.click('.scannext').catch(() => {}); }
     await ph.waitForTimeout(150);
   }
   const res = await ph.evaluate(() => ({ remembered: settings.barcodes, again: (() => { const u = matchLines('5012345000107'); return u.map(x => itemName(x) + ' → order ' + x.label).join(', '); })() }));
