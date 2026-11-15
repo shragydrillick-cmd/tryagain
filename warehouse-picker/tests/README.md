@@ -55,3 +55,8 @@ barcodes) into a camera video and goes through **Try an example** →
 **Scan to unpack**: each barcode must go to the right order, two of the same
 must count twice (and a barcode still in view only once), and the barcode
 that isn't on the slips must ask which item it is and be remembered after.
+
+`packing.test.js` links two devices (pretend Firestore): one sorts items, the
+other has the Packing screen open; the order must come up green when its last
+item is sorted, Packed must move it to the bottom and show on the other device,
+and stay after reopening; Undo puts it back.

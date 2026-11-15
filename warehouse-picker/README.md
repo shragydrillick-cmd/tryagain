@@ -134,6 +134,18 @@ https://shragydrillick-cmd.github.io/tryagain/barcodes.html (the example
 items' barcodes, plus one that isn't on any slip). On the phone tap **Try an
 example**, then **📷 Scan to unpack**, and scan them off the screen.
 
+## Packing screen
+
+**Packing** (top right, next to Settings) is a screen for whoever packs. Every
+order whose items are all on its pile (scanned with Scan to unpack, or ticked
+on the unpack list) comes up there in green, with its short number, real order
+number and items. It beeps when a new one is ready. After packing it, tap
+**Packed**: it goes to the bottom of the list in grey, marked "Packed" with the time
+(**Undo** puts it back). With linked devices (Settings → More → Link devices)
+the packer can keep this screen open on their own phone: orders come up as
+they're sorted on the other phone, and Packed shows on every device, also in
+the Orders list. It's remembered when the app is closed.
+
 ## The list is remembered
 
 The current list stays on the phone (or computer) until it's cleared: the orders,
