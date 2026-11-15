@@ -253,6 +253,11 @@ img.qr.big { width: 320px; }
 .addpair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .addpair .addtile { min-height: 0; padding: 8px 4px; }
 .addpair .addtile b { font-size: 15px; }
+.actcols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; align-items: start; }
+.actcol { display: flex; flex-direction: column; gap: 8px; }
+.actcol > b { font-size: 18px; }
+.actcol .btn { width: 100%; justify-content: center; }
+.dbarcode { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 700; font-size: 16px; letter-spacing: .04em; color: #1b1f24; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -308,15 +313,15 @@ img.qr.big { width: 320px; }
     <div class="stats" id="stats"></div>
     <div id="warnings"></div>
     <div id="review"></div>
-    <div class="no-print" style="margin-bottom:6px">
-      <div class="grp"><b>Pick</b>
-        <button class="btn" id="pdfPick" type="button">&#11015; PDF</button>
-        <button class="btn secondary" id="stepPickBtn" type="button">&#9654; Step by step</button></div>
-      <div class="grp"><b>Unpack</b>
-        <button class="btn" id="pdfUnpack" type="button">&#11015; PDF</button>
-        <button class="btn secondary" id="stepBtn" type="button">&#9654; Step by step</button>
-        <button class="btn secondary" id="scanUnpackBtn" type="button">&#128247; Scan to unpack</button>
-        <button class="btn secondary" id="printBtn" type="button">Print</button></div>
+    <div class="no-print actcols">
+      <div class="actcol"><b>Pick</b>
+        <button class="btn" id="stepPickBtn" type="button">Step by step</button>
+        <button class="btn secondary" id="pdfPick" type="button">PDF</button></div>
+      <div class="actcol"><b>Unpack</b>
+        <button class="btn" id="stepBtn" type="button">Step by step</button>
+        <button class="btn secondary" id="pdfUnpack" type="button">PDF</button>
+        <button class="btn" id="scanUnpackBtn" type="button">Scan to unpack</button>
+        <button class="btn secondary small" id="printBtn" type="button">Print</button></div>
     </div>
     <div class="tabs" role="tablist">
       <button data-tab="pick" class="on" type="button">Pick list</button>
@@ -2233,7 +2238,8 @@ function drawDetail() {
   const itemText = (t, extra) => h("div", { style: "flex:1;min-width:0" },
     h("div", { class: "iname" }, itemName(t)),
     full && t.details ? h("div", { class: "idet" }, t.details) : (!full && t.details ? h("span", { class: "idet" }, t.details) : null),
-    full && codesText(t) ? h("div", { class: "icode" }, codesText(t)) : null,
+    t.barcode ? h("div", { class: "dbarcode" }, t.barcode) : null, // the barcode always shows, to find it by
+    full && t.sku ? h("div", { class: "icode" }, `SKU ${t.sku}`) : null,
     extra);
   let body;
   if (v.kind === "orders") {
