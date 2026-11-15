@@ -1058,7 +1058,7 @@ function saveList() {
     openChecks: (current.review || []).filter(r => !r.done).length + (current.openChecks || 0),
     lines: current.lines.map(l => { const o = {}; for (const k in l) if (k !== "slip" && typeof l[k] !== "function" && typeof l[k] !== "object") o[k] = l[k]; return o; }),
     sig: planSig(), picked: [...pickedDone], unpacked: [...unpackDone], placed: [...placed],
-    stepper: open ? { mode: stepMode, seq, stepAt, skipped: [...skipped] } : null };
+    stepper: open ? { mode: stepMode, skippedKeys: [...skipped].map(i => stepKey(stepMode, stepItems[i])) } : null };
   try { localStorage.setItem(LIST_KEY, JSON.stringify(savedList)); } catch (e) {}
   writeNative();
   syncChanged(); // linked devices get the change too
@@ -1085,12 +1085,7 @@ function restoreList() {
   pickedDone = new Set(s.picked || []); unpackDone = new Set(s.unpacked || []); placed = new Map(s.placed || []);
   renderPick(); renderUnpack();
   const st = s.stepper;
-  if (st) {
-    stepMode = st.mode; stepItems = st.mode === "pick" ? boxGroups() : plan.unpack;
-    if (st.seq.length !== stepItems.length) return;
-    seq = st.seq; stepAt = Math.min(st.stepAt, seq.length - 1); skipped = new Set(st.skipped || []); stepView = "step";
-    $("stepper").classList.remove("hidden"); document.body.style.overflow = "hidden"; showStep();
-  }
+  if (st) openSteps(st.mode, st.skippedKeys); // carries on with what isn't ticked yet
 }
 document.addEventListener("click", saveListSoon, true);
 document.addEventListener("change", saveListSoon, true);
@@ -1560,11 +1555,11 @@ function setNav(prev, skip, next) {
 }
 
 function showStep() {
-  const total = seq.length, waiting = waitingSkipped();
+  const total = seq.length, waiting = waitingSkipped(), off = stepOffset;
   const chip = $("skipChip");
   chip.classList.toggle("hidden", !waiting.length || stepView !== "step");
   chip.textContent = `Skipped (${waiting.length})`;
-  $("stepBar").style.width = `${((stepAt + 1) / total) * 100}%`;
+  $("stepBar").style.width = `${((stepAt + 1 + off) / (total + off)) * 100}%`;
   const word = stepMode === "pick" ? "Picking" : "Unpacking";
 
   if (stepView === "list") {
@@ -1588,7 +1583,7 @@ function showStep() {
     setNav("◀ List", "Not yet", stepMode === "pick" ? "In cart ✓" : "Placed ✓");
   } else {
     const wasSkipped = skipped.has(seq[stepAt]);
-    $("stepCount").textContent = `${word}: ${stepAt + 1} of ${total}`;
+    $("stepCount").textContent = `${word}: ${stepAt + 1 + off} of ${total + off}`;
     $("stepBody").replaceChildren(
       ...(wasSkipped ? [h("div", { class: "note" }, "You skipped this earlier. Look for it again.")] : []),
       ...stepContent(seq[stepAt], true));
@@ -1599,9 +1594,22 @@ function showStep() {
   if (stepView !== "step") $("stepPrev").disabled = false;
   $("stepBody").scrollTop = 0;
 }
-function openSteps(mode) {
-  stepMode = mode; stepItems = mode === "pick" ? boxGroups() : plan.unpack;
+let stepOffset = 0; // steps already ticked on the list when step by step opened (they're left out)
+/** What's still to do: boxes with items not yet ticked on the pick list, or unpack lines not yet ticked. */
+function stepsLeft(mode) {
+  if (mode === "pick") return boxGroups().map(g => Object.assign({}, g, { items: g.items.filter(p => !pickedDone.has(p.step)) })).filter(g => g.items.length);
+  return plan.unpack.filter(u => !unpackDone.has(u.step));
+}
+const stepKey = (mode, it) => (mode === "pick" ? "b:" + it.items.map(p => p.step).join(",") : "u:" + it.step);
+function openSteps(mode, skippedKeys) {
+  const all = mode === "pick" ? boxGroups().length : plan.unpack.length, left = stepsLeft(mode);
+  if (!left.length) { toast("Everything on this list is already ticked. Untick a line to do it again."); return; }
+  stepMode = mode; stepItems = left; stepOffset = all - left.length;
   seq = stepItems.map((_, i) => i); skipped = new Set(); stepAt = 0; stepView = "step";
+  if (skippedKeys && skippedKeys.length) { // skipped before the app was closed: still at the back of the line
+    const ks = new Set(skippedKeys), sk = seq.filter(i => ks.has(stepKey(mode, stepItems[i])));
+    seq = seq.filter(i => !sk.includes(i)).concat(sk); sk.forEach(i => skipped.add(i));
+  }
   $("stepper").classList.remove("hidden"); document.body.style.overflow = "hidden"; showStep();
 }
 function closeSteps() { $("stepper").classList.add("hidden"); document.body.style.overflow = ""; if (stepMode === "pick") renderPick(); else renderUnpack(); }
