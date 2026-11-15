@@ -230,7 +230,7 @@ img.qr.big { width: 320px; }
 .helpover { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .helpbox { background: var(--card); color: var(--text); border-radius: 14px; padding: 16px; max-width: 460px; max-height: 80vh; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,.3); font-size: 15px; }
 .helpbox p { margin: 0 0 10px; }
-.bigbarcode { font-size: 28px; font-weight: 800; letter-spacing: .06em; font-variant-numeric: tabular-nums; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin: 4px 0 2px; }
+.bigbarcode { font-size: clamp(17px, 5.6vw, 28px); font-weight: 800; letter-spacing: .02em; max-width: 100%; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin: 4px 0 2px; }
 .detailpanel { position: fixed; inset: 0; z-index: 40; background: var(--bg); overflow: auto; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px calc(env(safe-area-inset-bottom, 0px) + 16px); }
 .detailbox { max-width: 760px; margin: 0 auto; }
 .detailhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; background: var(--bg); padding: 6px 0 8px; z-index: 1; }
