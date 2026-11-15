@@ -274,7 +274,7 @@ aisle comes first.
 
 The page loads two free helper libraries the first time (for making PDFs and
 for reading Excel files). After that the browser usually caches them. CSV
-files and the Print button work without them.
+files work without them.
 
 ## Android app (APK)
 

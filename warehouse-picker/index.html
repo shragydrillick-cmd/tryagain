@@ -322,8 +322,7 @@ img.qr.big { width: 320px; }
       <div class="actcol"><b>Unpack</b>
         <div class="actrow"><button class="btn" id="stepBtn" type="button">Step by step</button>
           <button class="btn" id="pdfUnpack" type="button">PDF</button></div>
-        <button class="btn" id="scanUnpackBtn" type="button">Scan to unpack</button>
-        <button class="btn small" id="printBtn" type="button">Print</button></div>
+        <button class="btn" id="scanUnpackBtn" type="button">Scan to unpack</button></div>
     </div>
     <div class="tabs" role="tablist">
       <button data-tab="pick" class="on" type="button">Pick list</button>
@@ -1532,8 +1531,6 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
   document.querySelectorAll(".tabpane").forEach(p => p.classList.toggle("hidden", p.id !== "tab-" + b.dataset.tab));
 });
-$("printBtn").onclick = () => window.print();
-if (inClaude || inApp) $("printBtn").classList.add("hidden");
 
 /* ---------- step by step (picking and unpacking) ----------
    seq is the running order of steps. "Skip" moves the current step to the end,
