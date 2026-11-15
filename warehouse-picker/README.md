@@ -134,7 +134,7 @@ https://shragydrillick-cmd.github.io/tryagain/barcodes.html (the example
 items' barcodes, plus one that isn't on any slip). On the phone tap **Try an
 example**, then **📷 Scan to unpack**, and scan them off the screen.
 
-
+## The list is remembered
 
 The current list stays on the phone (or computer) until it's cleared: the orders,
 every tick on the pick and unpack lists, and where you were in step by step
@@ -143,6 +143,12 @@ says "Picked up where you left off" and carries on from the same step.
 **✕ Clear list & start new** (tap twice) wipes it, ready for the next orders.
 Choosing new order files also replaces it. If the shelf map changes so the pick
 order is different, the orders are kept but the ticks start again.
+
+Step by step and the lists work together both ways: each step done in step
+by step ticks its lines on the list, and anything already ticked on the list
+(by hand, or by Scan to unpack) is left out of step by step, which starts at
+the first thing not done ("Picking: 4 of 8"). If everything is ticked it says
+so instead of opening.
 
 ## Sending the list to a phone (scan, nothing else to send)
 
