@@ -257,7 +257,8 @@ img.qr.big { width: 320px; }
 .addpair .addtile b { font-size: 15px; }
 .actcols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; align-items: start; }
 .actcol { display: flex; flex-direction: column; gap: 8px; }
-.actcol > b { font-size: 18px; }
+.actcol > b { font-size: 18px; text-align: center; }
+.actcol + .actcol { border-left: 1px solid var(--line); padding-left: 12px; } /* thin line between Pick and Unpack */
 .actcol .btn { width: 100%; justify-content: center; }
 .actrow { display: grid; grid-template-columns: 1.6fr 1fr; gap: 6px; }
 .actrow .btn { padding-left: 6px; padding-right: 6px; font-size: 14px; line-height: 1.2; }
