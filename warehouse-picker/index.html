@@ -72,8 +72,10 @@ textarea { width: 100%; min-height: 140px; font-family: ui-monospace, Menlo, Con
 .fixrow input { min-width: 0; width: 100%; padding: 6px; }
 .fixrow input.missing { border: 2px solid var(--danger); background: var(--warn-soft); }
 @media (max-width: 480px) { .fixrow { grid-template-columns: 1fr 64px 56px auto; } .fixrow .fixdet { grid-column: 1 / 2; grid-row: 2; } }
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 12px; }
-.stat { background: var(--accent-soft); border-radius: 10px; padding: 10px 6px; border: 0; color: var(--text); font: inherit; font-size: 14px; line-height: 1.25; text-align: center; cursor: pointer; }
+.stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 8px 0 12px; } /* a box alone on its row sits in the middle */
+.stats .stat { flex: 1 1 120px; max-width: calc(50% - 5px); }
+@media (min-width: 560px) { .stats .stat { max-width: none; } }
+.stat { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; border: 0; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .stat b { display: block; font-size: 24px; }
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
 .tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 12px; font: inherit;
