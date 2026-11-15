@@ -813,6 +813,8 @@ function lineCodes(l) {
 }
 /** "Barcode 735380754426 · SKU LL2207-2T" for under an item ("" when neither is known). */
 const codesText = t => [t.barcode || "", t.sku ? `SKU ${t.sku}` : ""].filter(Boolean).join(" · "); // the barcode number on its own, then the SKU
+/** Under an item: the barcode number, and the SKU on the line below it. */
+const codesEls = t => [t.barcode ? h("div", { class: "icode" }, t.barcode) : null, t.sku ? h("div", { class: "icode" }, `SKU ${t.sku}`) : null];
 /** The whole plan: pick list (shelf order) + unpack list (last picked first). */
 function makePlan(lines, settings) {
   const { locate } = buildLocator(settings);
@@ -1483,7 +1485,7 @@ function itemCell(t, extra) {
   return h("td", null,
     h("div", { class: "iname" }, hl(itemName(t), t.marks)),
     t.details ? h("div", { class: "idet" }, hl(t.details, t.marks)) : null,
-    codesText(t) ? h("div", { class: "icode" }, codesText(t)) : null,
+    ...codesEls(t),
     extra ? h("div", { class: "idet" }, extra) : null);
 }
 /** Consecutive pick lines from the same box on the same unit. */
@@ -1587,7 +1589,7 @@ function stepContent(i, isCurrent) {
   return [
     h("div", { class: "item" }, hl(itemName(u), u.marks)),
     ...(u.details ? [h("div", { class: "details" }, hl(u.details, u.marks))] : []),
-    ...(codesText(u) ? [h("div", { class: "icode" }, codesText(u))] : []),
+    ...codesEls(u).filter(Boolean),
     h("div", { class: "qty" }, u.qty > 1 ? `Take ${u.qty} of them` : "Take 1"),
     h("div", { class: "to" }, "put on order"),
     h("div", { class: "order" }, u.label),
@@ -2078,7 +2080,7 @@ async function openBarcodeScanner() {
             h("div", { class: "small muted" }, `real order #${u.raw}`),
             h("div", { class: "iname" }, hl(itemName(u), u.marks)),
             u.details ? h("div", { class: "idet" }, hl(u.details, u.marks)) : null,
-            codesText(u) ? h("div", { class: "icode" }, codesText(u)) : null,
+            ...codesEls(u),
             r.sameLeft ? h("div", { class: "small" }, `Order ${u.label} needs ${r.sameLeft} more of these.`) : null,
             complete ? h("div", { class: "lastnote" }, `✓ Order ${u.label} is complete. Pack it!`) : h("div", { class: "small muted" }, `Order ${u.label}: ${r.orderLeft} more item${r.orderLeft === 1 ? "" : "s"} to come.`))),
         null);
@@ -2585,7 +2587,7 @@ function drawRich(doc, lines, x, y, size, bold, lineH, grey) {
 function itemBlock(doc, t, width) {
   const nameLines = layoutRich(doc, itemName(t), t.marks, width, 12, true);
   const detLines = t.details ? layoutRich(doc, t.details, t.marks, width, 9, false) : [];
-  const codeLines = codesText(t) ? layoutRich(doc, codesText(t), null, width, 9, false) : [];
+  const codeLines = [t.barcode, t.sku ? `SKU ${t.sku}` : ""].filter(Boolean).flatMap(x => layoutRich(doc, x, null, width, 9, false)); // barcode, SKU below
   return { nameLines, detLines, codeLines, height: nameLines.length * 14 + (detLines.length + codeLines.length) * 11 };
 }
 function drawItemBlock(doc, b, x, y) {
