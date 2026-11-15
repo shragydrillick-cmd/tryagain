@@ -812,7 +812,7 @@ function lineCodes(l) {
   return { barcode, sku };
 }
 /** "Barcode 735380754426 · SKU LL2207-2T" for under an item ("" when neither is known). */
-const codesText = t => [t.barcode ? `Barcode ${t.barcode}` : "", t.sku ? `SKU ${t.sku}` : ""].filter(Boolean).join(" · ");
+const codesText = t => [t.barcode || "", t.sku ? `SKU ${t.sku}` : ""].filter(Boolean).join(" · "); // the barcode number on its own, then the SKU
 /** The whole plan: pick list (shelf order) + unpack list (last picked first). */
 function makePlan(lines, settings) {
   const { locate } = buildLocator(settings);
