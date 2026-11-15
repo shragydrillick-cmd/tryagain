@@ -249,7 +249,9 @@ img.qr.big { width: 320px; }
 .drow.st-yellow { background: #fff7d6; border-color: #ead98a; } .stbadge.st-yellow, .st-yellow .stdot { color: #7a6000; } .stbadge.st-yellow { background: #fbeaa6; }
 .drow.st-orange { background: #ffeedd; border-color: #f0c79a; } .stbadge.st-orange, .st-orange .stdot { color: #8a4b00; } .stbadge.st-orange { background: #fbd8b4; }
 .drow.st-red { background: #fde6e4; border-color: #f0b3ad; } .stbadge.st-red, .st-red .stdot { color: #a3241c; } .stbadge.st-red { background: #f8cdc8; }
-.drow[class*="st-"] .iname, .drow[class*="st-"] b { color: #1b1f24; } .drow[class*="st-"] .idet, .drow[class*="st-"] .small, .drow[class*="st-"] .icode { color: #4a525d; }
+.drow[class*="st-"] { color: #1b1f24; } /* light coloured rows keep dark writing, also in night mode */
+.drow[class*="st-"] .iname, .drow[class*="st-"] b, .drow[class*="st-"] .dbox, .drow[class*="st-"] .dqty, .drow[class*="st-"] .dbarcode { color: #1b1f24; }
+.drow[class*="st-"] .chev { color: #4a525d; } .drow[class*="st-"] .packmore { color: #1d4f91; } .drow[class*="st-"] .idet, .drow[class*="st-"] .small, .drow[class*="st-"] .icode { color: #4a525d; }
 .addpair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .addpair .addtile { min-height: 0; padding: 8px 4px; }
 .addpair .addtile b { font-size: 15px; }
