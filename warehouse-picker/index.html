@@ -1563,7 +1563,6 @@ function stepContent(i, isCurrent) {
       h("div", { class: "to" }, "go to box"),
       h("div", { class: "boxcode" }, u.box),
       h("div", { class: "small muted" }, u.loc ? [u.loc.unitName, shelfText(u.loc)].filter(Boolean).join(" · ") : "not on your shelf map"),
-      ...(u.items.length > 1 ? [h("div", { class: "note" }, `Take ${u.items.length} different items from this box. Check the highlighted words.`)] : []),
       h("div", { class: "takes" }, u.items.map(p => h("div", { class: "take" },
         h("div", { class: "takeqty" }, `${p.qty}×`),
         h("div", null,
