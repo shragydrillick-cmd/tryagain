@@ -257,6 +257,8 @@ img.qr.big { width: 320px; }
 .actcol { display: flex; flex-direction: column; gap: 8px; }
 .actcol > b { font-size: 18px; }
 .actcol .btn { width: 100%; justify-content: center; }
+.actrow { display: grid; grid-template-columns: 1.6fr 1fr; gap: 6px; }
+.actrow .btn { padding-left: 6px; padding-right: 6px; font-size: 14px; line-height: 1.2; }
 .dbarcode { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 700; font-size: 16px; letter-spacing: .04em; color: #1b1f24; margin-top: 2px; }
 </style>
 </head>
@@ -315,11 +317,11 @@ img.qr.big { width: 320px; }
     <div id="review"></div>
     <div class="no-print actcols">
       <div class="actcol"><b>Pick</b>
-        <button class="btn" id="stepPickBtn" type="button">Step by step</button>
-        <button class="btn secondary" id="pdfPick" type="button">PDF</button></div>
+        <div class="actrow"><button class="btn" id="stepPickBtn" type="button">Step by step</button>
+          <button class="btn secondary" id="pdfPick" type="button">PDF</button></div></div>
       <div class="actcol"><b>Unpack</b>
-        <button class="btn" id="stepBtn" type="button">Step by step</button>
-        <button class="btn secondary" id="pdfUnpack" type="button">PDF</button>
+        <div class="actrow"><button class="btn" id="stepBtn" type="button">Step by step</button>
+          <button class="btn secondary" id="pdfUnpack" type="button">PDF</button></div>
         <button class="btn" id="scanUnpackBtn" type="button">Scan to unpack</button>
         <button class="btn secondary small" id="printBtn" type="button">Print</button></div>
     </div>
