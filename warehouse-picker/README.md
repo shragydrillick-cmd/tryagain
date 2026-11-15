@@ -182,29 +182,29 @@ orders and items load on the phone, with nothing else to send.
   This is a one-time copy: ticks on the phone don't go back to the computer
   (link the devices for that).
 
-## Linked devices (one shared list, live)
+## Accounts and companies (one shared list, live)
 
-**Settings → More → Link devices** links the computer and the phones so they
-share one list. Orders loaded on one device show up on the others within a few
-seconds. Ticks on the pick and unpack lists and **Clear list** are shared too.
-Each device keeps its own place in step by step. It uses a free Firebase
-(Google) database in your own account:
+Everything runs on the owner's own free Firebase project (`pick-and-sort`; the
+free plan needs no card and can't charge). Once switched on:
 
-1. On console.firebase.google.com create a project, then **Firestore Database
-   → Create database** (production mode).
-2. In **Rules**, paste the rules shown in the app and **Publish**. Each list
-   can only be read with its long secret code, and lists can't be browsed.
-3. In **Project settings → Your apps → Web (</>)**, register an app and copy
-   the **projectId** and **apiKey** into the app, then tap **Start linking**.
-4. On each other device tap **Receive** and scan the QR code
-   shown under Link devices, or paste the link text under **Join**.
-
-The list is sent to that database only while devices are linked. Without
-internet the app carries on as normal and sends the changes when it's back
-online ("🔗 Linked: …" under the list shows the state). If two people change
-the list at the same moment, the last change wins. **Unlink this device** stops
-linking. Anyone with the link can see and change the list, so only send it to
-your own devices.
+- **Signing in:** the app opens with a sign-in screen: **Sign in with Google**
+  (on the website) or **email and password** (everywhere, including the phone
+  apps; a new email account confirms its email first). Once signed in, a phone
+  stays signed in.
+- **Who gets in:** the owner's email (set in the database rules) is the
+  **Owner**. Everyone else must be added by email in **Settings → More →
+  Account → Admin**. Anyone not added sees "Not added yet".
+- **Companies:** the owner makes companies and adds people to them as **Worker** or
+  **Manager**. A manager can add, allow and block people in their own company.
+  Everyone in a company shares one live list: orders, ticks, scans and Packed
+  show up on the others' phones within a moment. Other companies can't see it:
+  the database itself refuses them.
+- **Block:** the person is shut out at once, and the list saved on their phone
+  is wiped.
+- **Setup:** paste `firebase/firestore.rules` into Firebase → Firestore Database →
+  Rules, with `OWNER_EMAIL` replaced by the owner's email, then switch
+  `ACCOUNTS_ON` to `true` in index.html. Until then the app works as before,
+  on each device alone.
 
 ## Settings: Map and Order
 

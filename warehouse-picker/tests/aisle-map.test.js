@@ -1,5 +1,5 @@
 // many random aisles: does the map built from just the two ends always match the real layout exactly?
-const { chromium } = require('playwright');
+const { chromium } = require('playwright'); require('./noauth')(chromium);
 (async () => {
   const b = await chromium.launch(); const p = await b.newPage(); await p.goto(process.argv[2] || 'http://localhost:8765/index.html');
   const r = await p.evaluate(() => {

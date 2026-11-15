@@ -1,6 +1,6 @@
 // "Scan to unpack": the barcode and SKU under each item, which order each scan goes to (an item in two orders, 2 of one, Undo,
 // unknown codes, already placed), then real barcodes drawn into a video (needs ffmpeg) used as a second browser's camera.
-const { chromium } = require('playwright');
+const { chromium } = require('playwright'); require('./noauth')(chromium);
 const fs = require('fs'), path = require('path'), { execSync } = require('child_process');
 const SP = require('os').tmpdir() + '/pick-and-sort-barcodes';
 const CSV = `Order,Box,Item,Details,Barcode,SKU,Qty

@@ -1,0 +1,51 @@
+rules_version = '2';
+// Pick & Sort: who may see and change what. Paste this into Firebase → Firestore Database → Rules.
+// OWNER_EMAIL is the owner's Google / login email (all lowercase).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function verified() { return signedIn() && request.auth.token.email_verified == true; }
+    function isOwner() { return verified() && myEmail() == "OWNER_EMAIL"; }
+    function meDoc() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function me() { return get(meDoc()).data; }
+    function active() { return verified() && exists(meDoc()) && me().status == "allowed"; }
+    function inCompany(c) { return active() && me().company == c; }
+    function manages(c) { return inCompany(c) && (me().role == "admin" || me().role == "owner"); }
+    function invite() { return get(/databases/$(database)/documents/invites/$(myEmail())); }
+
+    // people: themselves, their manager, or the owner
+    match /users/{uid} {
+      allow read: if isOwner() || (signedIn() && request.auth.uid == uid) || (resource.data.company != "" && manages(resource.data.company));
+      allow create: if isOwner()
+        || (verified() && request.auth.uid == uid
+            && exists(/databases/$(database)/documents/invites/$(myEmail()))
+            && request.resource.data.email == myEmail()
+            && request.resource.data.company == invite().data.company
+            && request.resource.data.role == invite().data.role
+            && request.resource.data.role != "owner"
+            && request.resource.data.status == "allowed");
+      // a manager can allow / block people in their own company and make them manager or worker, never owner
+      allow update: if isOwner()
+        || (manages(resource.data.company) && request.auth.uid != uid && resource.data.role != "owner"
+            && request.resource.data.company == resource.data.company
+            && request.resource.data.role in ["user", "admin"]
+            && request.resource.data.email == resource.data.email);
+      allow delete: if isOwner();
+    }
+    // someone added by email who hasn't signed in yet
+    match /invites/{email} {
+      allow read: if isOwner() || (verified() && myEmail() == email) || manages(resource.data.company);
+      allow create, update: if isOwner() || (manages(request.resource.data.company) && request.resource.data.role in ["user", "admin"]);
+      allow delete: if isOwner() || (verified() && myEmail() == email) || manages(resource.data.company);
+    }
+    // companies, and each company's shared list: only its own people
+    match /companies/{c} {
+      allow read: if isOwner() || inCompany(c);
+      allow write: if isOwner();
+      match /lists/{doc} {
+        allow read, write: if isOwner() || inCompany(c);
+      }
+    }
+  }
+}

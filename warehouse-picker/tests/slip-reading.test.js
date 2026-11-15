@@ -1,4 +1,4 @@
-const { chromium } = require('playwright');
+const { chromium } = require('playwright'); require('./noauth')(chromium);
 const fs = require('fs');
 (async () => {
   const url = process.argv[2] || 'http://localhost:8765/index.html';

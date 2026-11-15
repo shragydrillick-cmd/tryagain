@@ -31,12 +31,6 @@ question truthfully (taps the shelf each number is really on, confirms real shel
 told from a shorter shelf by the numbers, so those count as right when every box
 is in the right place. `node tests/aisle-wide.test.js plain` runs it without wide boxes.
 
-`linking.test.js` checks **Send to phone** (QR code, link, list file) and
-linked devices with three browsers and a pretend Firestore database that
-answers the same calls: joining with the link text, ticks going both ways, new
-orders and **Clear list** reaching the other device, a wrong key, and changes
-made offline being sent once the database is reachable again.
-
 `qr-scan.test.js` makes a big list (80 orders), shows it as several changing QR
 codes, films them into a video (needs ffmpeg), uses the video as a second
 browser's camera, and checks that **Scan from computer** rebuilds exactly the same
@@ -56,7 +50,16 @@ barcodes) into a camera video and goes through **Try an example** →
 must count twice (and a barcode still in view only once), and the barcode
 that isn't on the slips must ask which item it is and be remembered after.
 
-`packing.test.js` links two devices (pretend Firestore): one sorts items, the
-other has the Packing screen open; the order must come up green when its last
-item is sorted, Packed must move it to the bottom and show on the other device,
-and stay after reopening; Undo puts it back.
+
+`accounts.test.js` checks sign-in, companies, Admin, live sharing and blocking
+against the Firebase emulator, with `firebase/firestore.rules` (OWNER_EMAIL set
+to owner@test.com): the owner signs in with Google and makes a company, a
+worker makes an email account, a stranger is refused, the list and scans go
+both ways, the Packing screen, still signed in after reopening, blocking
+(live, and the phone's list is wiped), a manager who can only manage their own
+company, and people trying to read other companies or promote themselves.
+Start the emulator first, in a folder with that rules file and a firebase.json
+for the auth (9099) and firestore (8080) emulators:
+`firebase emulators:start --project pick-and-sort --only auth,firestore`.
+
+The other tests run with accounts switched off (`noauth.js`).

@@ -2,7 +2,7 @@
 // into a video (needs ffmpeg) that a second browser uses as its camera, with "Try an example" + "Scan to unpack".
 // Every known barcode must go to the right order; the unknown one asks "which item is it?", and once taught,
 // that barcode is remembered.
-const { chromium } = require('playwright');
+const { chromium } = require('playwright'); require('./noauth')(chromium);
 const fs = require('fs'), path = require('path'), { execSync } = require('child_process');
 const SP = require('os').tmpdir() + '/pick-and-sort-example-barcodes';
 const BASE = process.argv[2] || 'http://localhost:8765';

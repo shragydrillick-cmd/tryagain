@@ -276,6 +276,13 @@ header.top #title { white-space: nowrap; }
 .headbtns button { white-space: nowrap; }
 @media (max-width: 360px) { header.top #title { font-size: 18px; } .headbtns button, #packBtn { padding: 6px 9px; font-size: 14px; } }
 .packmore { text-decoration: underline; color: #1d4f91; }
+.gate { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 20px; overflow: auto; }
+.gatebox { width: 100%; max-width: 380px; background: var(--card); border-radius: 16px; padding: 22px; box-shadow: 0 6px 24px rgba(0,0,0,.12); }
+.gatebox h1 { margin: 0 0 6px; font-size: 26px; color: var(--accent); }
+.gatebox input { width: 100%; margin: 6px 0; box-sizing: border-box; }
+.gatebtn { width: 100%; justify-content: center; margin: 8px 0 4px; }
+.gateor { text-align: center; color: var(--muted); font-size: 13px; margin: 10px 0 2px; }
+.gateerr { color: var(--danger); min-height: 1em; }
 </style>
 </head>
 <body>
@@ -1772,7 +1779,7 @@ async function showSendBox() {
         navigator.share ? h("button", { class: "btn secondary small", type: "button", onclick: () => navigator.share({ title: "Pick list", url: link }).catch(() => {}) }, "Share link…") : null,
         h("button", { class: "btn secondary small", type: "button", onclick: e => copyText(link, e.currentTarget) }, "Copy link"),
         h("button", { class: "btn secondary small", type: "button", onclick: () => download(file, fileName) }, "Save as file")),
-      h("p", { class: "small muted" }, syncOn() ? "These devices are linked, so the list is already on the others." : "Or link the devices once (Settings → More → Link devices) and every list shows up on all of them by itself.")));
+      h("p", { class: "small muted" }, syncOn() ? "Everyone signed in to your company already has this list." : "Sign in to the same company on both devices and every list shows up on all of them by itself.")));
 }
 
 /* ---------- scanning a code from the computer's screen (in the apps and on the website) ---------- */
@@ -1782,7 +1789,7 @@ const scan = { parts: null, id: null, n: 0, stream: null, el: null, timer: null 
 /** What a scanned code says: a list link, a linked-devices link, or one part of a big list. Returns a message, or null when done. */
 async function handleScan(text) {
   text = String(text || "").trim();
-  if (/#link=/.test(text)) { const e = joinLink(text); closeScanner(); toast(e || "This device is now linked."); return null; }
+  if (/#link=/.test(text)) { closeScanner(); toast("Linking by code has been replaced by signing in: everyone in the same company shares the list."); return null; }
   let m = text.match(/#list=([A-Za-z0-9_-]+)/);
   if (m) {
     try { const data = JSON.parse(await unpackText(m[1])); closeScanner(); receiveList(data, "from the computer"); return null; }
@@ -1868,12 +1875,11 @@ function receiveList(data, how) {
 }
 
 /* ---------- linked devices: one shared list, kept in step through the owner's own free Firebase database ---------- */
-const sync = { rev: 0, dirty: false, lastStr: null, pushTimer: null, state: "", err: "" };
-const syncOn = () => !!(settings.sync && settings.sync.projectId && settings.sync.apiKey && settings.sync.code);
-const SYNC_KEY = "pick-and-sort-sync-v1";
-try { const o = JSON.parse(localStorage.getItem(SYNC_KEY) || "{}"); if (settings.sync && o.code === settings.sync.code) { sync.rev = o.rev || 0; sync.dirty = !!o.dirty; } } catch (e) {}
-const keepSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify({ rev: sync.rev, dirty: sync.dirty, code: settings.sync && settings.sync.code })); } catch (e) {} };
-const docUrl = () => `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(settings.sync.projectId)}/databases/(default)/documents/lists/${encodeURIComponent(settings.sync.code)}?key=${encodeURIComponent(settings.sync.apiKey)}`;
+const sync = { rev: 0, dirty: false, lastStr: null, pushTimer: null, state: "", err: "", unsub: null };
+const syncOn = () => !!(typeof acct !== "undefined" && acct && acct.status === "allowed" && acct.company && fb.db);
+const SYNC_KEY = "pick-and-sort-sync-v2";
+try { const o = JSON.parse(localStorage.getItem(SYNC_KEY) || "{}"); sync.rev = o.rev || 0; sync.dirty = !!o.dirty; sync.company = o.company || ""; } catch (e) {}
+const keepSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify({ rev: sync.rev, dirty: sync.dirty, company: acct && acct.company })); } catch (e) {} };
 const pickKey = p => `${p.box}|${p.name}|${p.details}`;
 const unpackKey = u => `${u.raw}|${u.box}|${u.name}|${u.details}`;
 /** What all linked devices share: the orders and the ticks (not where each one is in step by step). */
@@ -1891,38 +1897,21 @@ function syncChanged() {
   sync.lastStr = str; sync.dirty = true; keepSync();
   clearTimeout(sync.pushTimer); sync.pushTimer = setTimeout(syncPush, 600);
 }
-async function syncErr(r) { let m = ""; try { m = (await r.json()).error.message; } catch (e) {} return new Error(r.status === 403 ? "The database said no (check the rules, the project ID and the key)." : m || "Error " + r.status); }
 function setSync(state, err) { sync.state = state; sync.err = err || ""; showSyncLine(); }
 function showSyncLine() {
   const el = $("syncLine"); if (!el) return;
-  el.textContent = !syncOn() ? "" : sync.state === "ok" ? "🔗 Linked: up to date" : sync.state === "offline" ? `🔗 Linked: not reaching the database${sync.err ? " (" + sync.err + ")" : ""}. Changes are kept and sent later.` : "🔗 Linked";
+  el.textContent = !syncOn() ? "" : sync.state === "ok" ? `Shared with ${acct.companyName || "your company"}: up to date` : sync.state === "offline" ? `Shared with ${acct.companyName || "your company"}: not reaching the internet${sync.err ? " (" + sync.err + ")" : ""}. Changes are kept and sent later.` : `Shared with ${acct.companyName || "your company"}`;
   const m = $("syncStatus"); if (m) m.textContent = el.textContent || "";
 }
 async function syncPush() {
   if (!syncOn()) return;
   const rev = sync.rev + 1, data = sync.lastStr || JSON.stringify(sharedState());
   try {
-    const r = await fetch(docUrl(), { method: "PATCH", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ fields: { data: { stringValue: data }, rev: { integerValue: String(rev) }, at: { integerValue: String(Date.now()) } } }) });
-    if (!r.ok) throw await syncErr(r);
+    await listDoc().set({ data, rev, at: Date.now(), by: acct.uid });
     sync.rev = rev; sync.dirty = false; keepSync(); setSync("ok");
-  } catch (e) { setSync("offline", e.message); }
+  } catch (e) { setSync("offline", e.code === "permission-denied" ? "no access" : e.message); }
 }
-let pulling = false;
-async function syncPull() {
-  if (!syncOn() || pulling || document.visibilityState === "hidden") return;
-  pulling = true;
-  try {
-    const r = await fetch(docUrl(), { cache: "no-store" });
-    if (r.status === 404) { if (current) { sync.lastStr = null; syncChanged(); } setSync("ok"); return; }
-    if (!r.ok) throw await syncErr(r);
-    const f = (await r.json()).fields || {}, rev = parseInt(f.rev && f.rev.integerValue, 10) || 0;
-    if (rev > sync.rev) { sync.rev = rev; sync.dirty = false; keepSync(); applyRemote(JSON.parse(f.data.stringValue)); }
-    else if (sync.dirty) syncPush();
-    setSync("ok");
-  } catch (e) { setSync("offline", e.message); }
-  finally { pulling = false; }
-}
+function syncPull() {} // the company's list comes in by itself (startSync)
 /** Another device changed the list or ticked something: show it here. */
 function applyRemote(state) {
   sync.lastStr = JSON.stringify(state);
@@ -1944,75 +1933,12 @@ function applyRemote(state) {
   if (!$("stepper").classList.contains("hidden")) showStep();
   saveList(); sync.lastStr = JSON.stringify(state);
 }
-function newLinkCode() { const b = new Uint8Array(18); crypto.getRandomValues(b); return b64u(b); }
-/** The link to give another device: the database and the shared code, in one piece. */
-const linkText = () => siteUrl() + "#link=" + b64u(new TextEncoder().encode(JSON.stringify({ p: settings.sync.projectId, k: settings.sync.apiKey, c: settings.sync.code })));
-function joinLink(text) {
-  const m = String(text).trim().match(/#?link=([A-Za-z0-9_-]+)/);
-  if (!m) return "That isn't a link from Pick & Sort.";
-  try {
-    const o = JSON.parse(new TextDecoder().decode(unb64u(m[1])));
-    if (!o.p || !o.k || !o.c) throw new Error();
-    settings.sync = { projectId: o.p, apiKey: o.k, code: o.c }; saveSettings();
-    sync.rev = 0; sync.dirty = false; sync.lastStr = null; keepSync(); syncPull();
-    return null;
-  } catch (e) { return "That link is damaged. Copy it again."; }
-}
-function unlink() { settings.sync = null; saveSettings(); sync.rev = 0; sync.dirty = false; keepSync(); showSyncLine(); }
-function linkSection() {
-  const wrap = h("div");
-  const draw = async () => {
-    if (syncOn()) {
-      const link = linkText(), img = await qrImage(link);
-      wrap.replaceChildren(
-        h("p", { class: "small", id: "syncStatus" }, ""),
-        h("p", { class: "small muted" }, "To link another phone or computer: on it, tap Receive (on the main screen) and point it here. Or send it the link text and paste it under \"Join\"."),
-        img, h("div", { class: "row" },
-          h("button", { class: "btn secondary small", type: "button", onclick: e => copyText(link, e.currentTarget) }, "Copy link text"),
-          navigator.share ? h("button", { class: "btn secondary small", type: "button", onclick: () => navigator.share({ title: "Link Pick & Sort", url: link }).catch(() => {}) }, "Share…") : null,
-          h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Unlink this device?", () => { unlink(); draw(); }) }, "Unlink this device")),
-        h("p", { class: "small muted" }, "Anyone with this link can see and change the list, so only send it to your own devices."));
-      showSyncLine(); syncPull();
-      return;
-    }
-    const pid = h("input", { type: "text", placeholder: "Project ID, e.g. pick-and-sort-1a2b3", "aria-label": "Firebase project ID" });
-    const key = h("input", { type: "text", placeholder: "Web API key (starts with AIza…)", "aria-label": "Firebase web API key" });
-    const join = h("input", { type: "text", placeholder: "Paste the link from the other device", "aria-label": "Link from the other device" });
-    const msg = h("p", { class: "small", style: "color:var(--danger)" });
-    wrap.replaceChildren(
-      h("p", { class: "small muted" }, "Link the computer and the phones so they share one list: orders added on one show up on the others, and ticks too. It uses a free database in your own Google account (Firebase). Set it up once on one device, then join the others."),
-      h("details", null, h("summary", { class: "small" }, "How to make the free database (about 5 minutes)"),
-        h("ol", { class: "small" },
-          h("li", null, "Go to console.firebase.google.com and sign in with a Google account."),
-          h("li", null, "Create a project (any name, e.g. pick-and-sort). Google Analytics isn't needed."),
-          h("li", null, "Open Build → Firestore Database → Create database. Pick a location near you, start in production mode."),
-          h("li", null, "Open the Rules tab, replace everything with the rules below, and tap Publish."),
-          h("li", null, "Open Project settings (the gear) → General → Your apps → the web button </>. Register an app (any nickname). Copy the apiKey and projectId it shows into the boxes here.")),
-        h("pre", { class: "small", style: "white-space:pre-wrap;user-select:all" }, "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /lists/{code} {\n      allow get, create, update, delete: if code.size() >= 20;\n    }\n  }\n}")),
-      h("h4", null, "First device"), pid, key,
-      h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: async () => {
-        const p = pid.value.trim(), k = key.value.trim();
-        if (!p || !k) { msg.textContent = "Fill in both boxes."; return; }
-        settings.sync = { projectId: p, apiKey: k, code: newLinkCode() };
-        try {
-          const r = await fetch(docUrl(), { cache: "no-store" });
-          if (!r.ok && r.status !== 404) throw await syncErr(r);
-        } catch (e) { settings.sync = null; msg.textContent = "Couldn't reach the database: " + e.message; return; }
-        saveSettings(); sync.rev = 0; sync.dirty = false; sync.lastStr = null; keepSync(); syncChanged(); toast("Linked. Now join your other devices."); draw();
-      } }, "Start linking")),
-      h("h4", null, "Join (the other devices)"), join,
-      h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => { const e = joinLink(join.value); if (e) msg.textContent = e; else { toast("Linked."); draw(); } } }, "Join")),
-      msg);
-  };
-  draw();
-  return wrap;
-}
 /** Opened from a link: #list=… (a list sent from another device) or #link=… (join linked devices). */
 async function openFromLink() {
   const hsh = location.hash;
   if (!/^#(list|link)=/.test(hsh)) return;
   try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
-  if (hsh.startsWith("#link=")) { const e = joinLink(hsh); toast(e || "This device is now linked."); return; }
+  if (hsh.startsWith("#link=")) { toast("Linking by code has been replaced by signing in: everyone in the same company shares the list."); return; }
   try { receiveList(JSON.parse(await unpackText(hsh.slice(6))), "from another device"); }
   catch (e) { showLoadMsg("That list link is damaged. Send it again."); }
 }
@@ -2351,6 +2277,250 @@ function drawPacking() {
           h("div", { class: "small" }, `${o.units} item${o.units === 1 ? "" : "s"} · Packed ${new Date(packed.get(o.raw)).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`), items(o)),
         h("span", { class: "stbadge st-grey" }, "Packed"),
         h("button", { class: "link small", type: "button", onclick: () => setPacked(o.raw, false) }, "Undo"))))));
+}
+
+/* ---------- Accounts: sign in (Google or email), allowed / blocked, companies, admin ----------
+   Everything is in the owner's own Firebase project. The database rules (firebase/firestore.rules)
+   decide who may see what; the screens here only follow them. */
+const FIREBASE_CONFIG = { apiKey: "AIzaSyA7t4nGvilLjmpVGS7ECN63m-P2ikpz5Ao", authDomain: "pick-and-sort.firebaseapp.com", projectId: "pick-and-sort",
+  storageBucket: "pick-and-sort.firebasestorage.app", messagingSenderId: "702275381347", appId: "1:702275381347:web:fc1e0ab3bb2c232ded7056" };
+const fb = { ready: null, auth: null, db: null };
+const ACCT_KEY = "pick-and-sort-account-v1";
+let acct = (() => { try { return JSON.parse(localStorage.getItem(ACCT_KEY) || "null"); } catch (e) { return null; } })(); // last known, so the app opens offline
+const keepAcct = () => { try { acct ? localStorage.setItem(ACCT_KEY, JSON.stringify(acct)) : localStorage.removeItem(ACCT_KEY); } catch (e) {} };
+// Sign-in is switched on once the database rules (firebase/firestore.rules) are in the Firebase project:
+// before that, the database refuses everyone and nobody could get in.
+const ACCOUNTS_ON = false;
+const accountsOn = () => { try { return ACCOUNTS_ON || localStorage.getItem("pick-and-sort-accounts-on") === "1"; } catch (e) { return ACCOUNTS_ON; } };
+const testNoAuth = (() => { try { return localStorage.getItem("pick-and-sort-test-noauth") === "1"; } catch (e) { return false; } })(); // the automatic tests only
+const useEmulator = (() => { try { return localStorage.getItem("pick-and-sort-emulator") === "1"; } catch (e) { return false; } })();
+function loadFirebase() {
+  if (!fb.ready) fb.ready = loadScript("https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js")
+    .then(() => Promise.all([loadScript("https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"), loadScript("https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-firestore-compat.js")]))
+    .then(() => {
+      const app = firebase.initializeApp(FIREBASE_CONFIG);
+      fb.auth = app.auth(); fb.db = app.firestore();
+      if (useEmulator) { fb.auth.useEmulator("http://127.0.0.1:9099", { disableWarnings: true }); fb.db.useEmulator("127.0.0.1", 8080); }
+      else fb.db.settings({ experimentalAutoDetectLongPolling: true, merge: true });
+      return fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {}); // stays signed in for good
+    });
+  return fb.ready;
+}
+const userDoc = uid => fb.db.collection("users").doc(uid);
+const emailKey = e => String(e || "").trim().toLowerCase();
+
+/* the sign-in screen, in front of everything until the account is allowed */
+function gate(view) {
+  let g = $("gate");
+  if (!view) { if (g) g.remove(); document.body.style.overflow = ""; return; }
+  if (!g) { g = h("div", { id: "gate", class: "gate" }); document.body.append(g); }
+  document.body.style.overflow = "hidden";
+  g.replaceChildren(h("div", { class: "gatebox" }, h("h1", null, "Pick & Sort"), view));
+}
+function signInView(msg) {
+  const email = h("input", { type: "email", placeholder: "Email", autocomplete: "email", "aria-label": "Email" });
+  const pass = h("input", { type: "password", placeholder: "Password", autocomplete: "current-password", "aria-label": "Password" });
+  const out = h("p", { class: "small gateerr" }, msg || "");
+  const busy = async (fn) => { out.textContent = ""; try { await fn(); } catch (e) { out.textContent = friendlyAuthError(e); } };
+  return h("div", null,
+    h("p", { class: "muted" }, "Sign in to continue."),
+    inApp ? null : h("button", { class: "btn gatebtn", type: "button", onclick: () => busy(async () => {
+      await loadFirebase(); await fb.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }) }, "Sign in with Google"),
+    inApp ? null : h("div", { class: "gateor" }, "or with email"),
+    email, pass,
+    h("div", { class: "row" },
+      h("button", { class: "btn", type: "button", onclick: () => busy(async () => { await loadFirebase(); await fb.auth.signInWithEmailAndPassword(emailKey(email.value), pass.value); }) }, "Sign in"),
+      h("button", { class: "btn secondary", type: "button", onclick: () => busy(async () => {
+        await loadFirebase();
+        if (pass.value.length < 6) throw { code: "auth/weak-password" };
+        const c = await fb.auth.createUserWithEmailAndPassword(emailKey(email.value), pass.value);
+        await c.user.sendEmailVerification();
+      }) }, "New account")),
+    h("button", { class: "link small", type: "button", onclick: () => busy(async () => {
+      await loadFirebase(); if (!email.value.trim()) throw { code: "auth/missing-email" };
+      await fb.auth.sendPasswordResetEmail(emailKey(email.value)); out.textContent = "We sent you an email to set a new password."; }) }, "Forgot password?"),
+    out);
+}
+function friendlyAuthError(e) {
+  const c = (e && e.code) || "";
+  if (/wrong-password|invalid-credential|user-not-found|invalid-login/.test(c)) return "That email and password don't match. New here? Tap New account.";
+  if (/email-already-in-use/.test(c)) return "There's already an account with that email: tap Sign in (or Forgot password).";
+  if (/weak-password/.test(c)) return "Use a password of at least 6 characters.";
+  if (/invalid-email|missing-email/.test(c)) return "Type your email address.";
+  if (/popup-closed|cancelled-popup/.test(c)) return "";
+  if (/popup-blocked/.test(c)) return "The sign-in window was blocked. Allow pop-ups for this page, or sign in with email.";
+  if (/network/.test(c)) return "No internet. Connect and try again.";
+  if (/too-many-requests/.test(c)) return "Too many tries. Wait a minute and try again.";
+  return (e && e.message) || "Something went wrong. Try again.";
+}
+function waitView(title, text, extra) {
+  return h("div", null, h("h2", null, title), h("p", null, text), extra || null,
+    h("div", { class: "row", style: "margin-top:12px" },
+      h("button", { class: "btn", type: "button", onclick: () => checkAccount(true) }, "Check again"),
+      h("button", { class: "btn secondary", type: "button", onclick: signOut }, "Sign out")));
+}
+/** Who is signed in, and are they allowed in? Opens the app, or says why not. */
+async function checkAccount(showProgress) {
+  const u = fb.auth && fb.auth.currentUser;
+  if (!u) { acct = null; keepAcct(); gate(signInView()); return; }
+  if (showProgress) gate(h("p", { class: "muted" }, "Checking…"));
+  try {
+    await u.reload();
+    const email = emailKey(u.email);
+    if (!u.emailVerified) {
+      gate(waitView("Check your email", `We sent a link to ${email}. Tap it, then come back and tap Check again.`,
+        h("button", { class: "link small", type: "button", onclick: () => u.sendEmailVerification().then(() => toast("Sent again.")).catch(() => {}) }, "Send the email again")));
+      return;
+    }
+    await u.getIdToken(true); // so the database sees the confirmed email
+    let snap = await userDoc(u.uid).get();
+    if (!snap.exists) {
+      // first time: the owner, or someone an admin has added (an invite for this email)
+      let made = null;
+      try { await userDoc(u.uid).set({ email, name: u.displayName || "", company: "", role: "owner", status: "allowed", at: Date.now() }); made = "owner"; } catch (e) {}
+      if (!made) {
+        const inv = await fb.db.collection("invites").doc(email).get().catch(() => null);
+        if (inv && inv.exists) {
+          await userDoc(u.uid).set({ email, name: u.displayName || "", company: inv.data().company, role: inv.data().role || "user", status: "allowed", at: Date.now() });
+          await fb.db.collection("invites").doc(email).delete().catch(() => {});
+        }
+      }
+      snap = await userDoc(u.uid).get();
+    }
+    if (!snap.exists) { gate(waitView("Not added yet", `${email} hasn't been added to a company yet. Ask your manager to add this email in Admin, then tap Check again.`)); acct = null; keepAcct(); return; }
+    const d = snap.data();
+    if (d.status !== "allowed") return blocked();
+    let companyName = "";
+    if (d.company) { const c = await fb.db.collection("companies").doc(d.company).get().catch(() => null); companyName = c && c.exists ? c.data().name : ""; }
+    const was = acct && acct.company;
+    acct = { uid: u.uid, email, name: d.name || "", company: d.company || "", companyName, role: d.role || "user", status: "allowed" };
+    keepAcct();
+    gate(null);
+    if (was !== acct.company) { sync.rev = 0; sync.dirty = !!current; sync.lastStr = null; keepSync(); }
+    watchAccount(); startSync(); showSyncLine();
+    if (view === "settings") renderSettings();
+  } catch (e) {
+    if (acct && acct.status === "allowed") { setSync("offline", "can't check the account right now"); gate(null); return; } // offline: carry on as last time
+    gate(waitView("Can't check your account", friendlyAuthError(e)));
+  }
+}
+/** Blocked or removed: the saved list is wiped from this phone and nothing more comes in. */
+function blocked() {
+  stopSync();
+  try { if (current) clearList(true); } catch (e) {}
+  acct = null; keepAcct();
+  gate(h("div", null, h("h2", null, "No access"), h("p", null, "This account has been turned off. Ask your manager if that's a mistake."),
+    h("button", { class: "btn secondary", type: "button", onclick: signOut }, "Sign out")));
+}
+let unwatchAccount = null;
+function watchAccount() {
+  if (unwatchAccount) unwatchAccount();
+  unwatchAccount = userDoc(acct.uid).onSnapshot(s => {
+    if (!s.exists || s.data().status !== "allowed") return blocked();
+    const d = s.data();
+    if (d.company !== acct.company || d.role !== acct.role) checkAccount(false); // moved to another company, or made admin
+  }, e => { if (e && e.code === "permission-denied") blocked(); });
+}
+async function signOut() {
+  stopSync(); if (unwatchAccount) { unwatchAccount(); unwatchAccount = null; }
+  acct = null; keepAcct();
+  try { await loadFirebase(); await fb.auth.signOut(); } catch (e) {}
+  gate(signInView());
+}
+async function accountsInit() {
+  if (inClaude || testNoAuth || !accountsOn()) return; // the private preview page and the automatic tests run without accounts
+  if (!(acct && acct.status === "allowed")) gate(h("p", { class: "muted" }, "Loading…"));
+  try { await loadFirebase(); }
+  catch (e) { if (!(acct && acct.status === "allowed")) gate(waitView("No internet", "Connect to the internet once to sign in.")); return; }
+  fb.auth.onAuthStateChanged(u => { if (u) checkAccount(!(acct && acct.status === "allowed")); else if (acct) signOut(); else gate(signInView()); });
+}
+
+/* ---------- the company's shared list, live ---------- */
+const listDoc = () => fb.db.collection("companies").doc(acct.company).collection("lists").doc("current");
+function startSync() {
+  stopSync();
+  if (!syncOn()) return;
+  sync.unsub = listDoc().onSnapshot({ includeMetadataChanges: false }, snap => {
+    if (snap.metadata.hasPendingWrites) return;
+    if (!snap.exists) { if (current) { sync.lastStr = null; syncChanged(); } setSync("ok"); return; }
+    const d = snap.data(), rev = d.rev || 0;
+    if (rev > sync.rev) { sync.rev = rev; sync.dirty = false; keepSync(); applyRemote(JSON.parse(d.data)); }
+    else if (sync.dirty) syncPush();
+    setSync("ok");
+  }, e => setSync("offline", e.code === "permission-denied" ? "no access" : e.message));
+}
+function stopSync() { if (sync.unsub) { sync.unsub(); sync.unsub = null; } }
+
+/* ---------- Admin: companies, people, allowed / blocked ---------- */
+let adminCompany = null; // the company the owner is looking at
+async function renderAdminPage(v) {
+  const box = h("section", { class: "card" }, backRow("Settings", "home"), h("h2", null, "Admin"), h("p", { class: "muted" }, "Loading…"));
+  v.replaceChildren(box);
+  const isOwner = acct.role === "owner";
+  let companies = [];
+  try {
+    if (isOwner) companies = (await fb.db.collection("companies").get()).docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => natural(a.name, b.name));
+    else companies = [{ id: acct.company, name: acct.companyName }];
+  } catch (e) { box.replaceChildren(backRow("Settings", "home"), h("h2", null, "Admin"), h("p", null, "Couldn't load: " + e.message)); return; }
+  if (!adminCompany || !companies.some(c => c.id === adminCompany)) adminCompany = isOwner ? (acct.company || (companies[0] && companies[0].id) || null) : acct.company;
+  const parts = [backRow("Settings", "home"), h("h2", null, "Admin")];
+  if (isOwner) {
+    const name = h("input", { type: "text", placeholder: "New company name", "aria-label": "New company name" });
+    parts.push(h("h3", null, "Companies"),
+      companies.length ? h("div", { class: "row" }, companies.map(c => h("button", { class: "btn small" + (c.id === adminCompany ? "" : " secondary"), type: "button", onclick: () => { adminCompany = c.id; renderSettings(); } }, c.name))) : h("p", { class: "small muted" }, "No companies yet. Make the first one."),
+      h("div", { class: "row", style: "margin-top:8px" }, name, h("button", { class: "btn small", type: "button", onclick: async () => {
+        const n = name.value.trim(); if (!n) return;
+        const ref = await fb.db.collection("companies").add({ name: n, at: Date.now() });
+        adminCompany = ref.id;
+        if (!acct.company) await userDoc(acct.uid).update({ company: ref.id }); // the owner works in their first company
+        renderSettings();
+      } }, "Add company")),
+      adminCompany && acct.company !== adminCompany ? h("button", { class: "link small", type: "button", onclick: async () => { await userDoc(acct.uid).update({ company: adminCompany }); } }, "Use this company's list on this device") : null);
+  }
+  if (adminCompany) {
+    const comp = companies.find(c => c.id === adminCompany) || { name: acct.companyName };
+    let people = [], invites = [];
+    try {
+      people = (await fb.db.collection("users").where("company", "==", adminCompany).get()).docs.map(d => ({ id: d.id, ...d.data() }));
+      invites = (await fb.db.collection("invites").where("company", "==", adminCompany).get()).docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) { parts.push(h("p", null, "Couldn't load the people: " + e.message)); }
+    const set = (id, data) => userDoc(id).update(data).then(() => renderSettings()).catch(e => toast(e.message));
+    const newEmail = h("input", { type: "email", placeholder: "their@email.com", "aria-label": "Email to add" });
+    const newRole = h("select", { "aria-label": "Role" }, h("option", { value: "user" }, "Worker"), h("option", { value: "admin" }, "Manager (can add people)"));
+    parts.push(h("h3", null, `People in ${comp.name || "this company"}`),
+      h("div", { class: "dlist" }, people.sort((a, b) => natural(a.email, b.email)).map(p => {
+        const me = p.id === acct.uid, ok = p.status === "allowed";
+        return h("div", { class: "drow static " + (ok ? "st-green" : "st-red") },
+          h("div", { style: "flex:1;min-width:0" }, h("b", null, p.email), h("div", { class: "small" }, p.role === "owner" ? "Owner" : p.role === "admin" ? "Manager" : "Worker", me ? " · you" : "")),
+          me || p.role === "owner" ? null : h("div", { class: "row", style: "gap:6px" },
+            h("button", { class: "btn small" + (ok ? " secondary" : ""), type: "button", onclick: () => set(p.id, { status: ok ? "blocked" : "allowed" }) }, ok ? "Block" : "Allow"),
+            h("button", { class: "btn small secondary", type: "button", onclick: () => set(p.id, { role: p.role === "admin" ? "user" : "admin" }) }, p.role === "admin" ? "Make worker" : "Make manager")));
+      })),
+      invites.length ? h("div", null, h("h3", null, "Added, not signed in yet"), invites.map(i => h("div", { class: "row small", style: "justify-content:space-between" }, i.id,
+        h("button", { class: "link small", type: "button", onclick: () => fb.db.collection("invites").doc(i.id).delete().then(() => renderSettings()) }, "Remove")))) : null,
+      h("h3", null, "Add someone"),
+      h("p", { class: "small muted" }, "Type the email they'll sign in with (their Google email, or the one they make an account with)."),
+      h("div", { class: "row" }, newEmail, newRole, h("button", { class: "btn small", type: "button", onclick: async () => {
+        const e = emailKey(newEmail.value); if (!/^\S+@\S+\.\S+$/.test(e)) return toast("Type their email.");
+        // the owner can also move someone who already has an account; a manager adds new people
+        const existing = acct.role === "owner" ? (await fb.db.collection("users").where("email", "==", e).get().catch(() => ({ docs: [] }))).docs[0] : null;
+        if (existing) await userDoc(existing.id).update({ company: adminCompany, role: newRole.value, status: "allowed" });
+        else await fb.db.collection("invites").doc(e).set({ company: adminCompany, role: newRole.value, at: Date.now() });
+        toast(existing ? "Added." : "Added. They can sign in now."); renderSettings();
+      } }, "Add")));
+  }
+  box.replaceChildren(...parts.filter(Boolean));
+}
+function accountSection() {
+  if (!accountsOn()) return h("p", { class: "small muted" }, "Sign-in and sharing with your company are being set up, and will be switched on soon.");
+  if (!acct) return h("p", { class: "small muted" }, testNoAuth || inClaude ? "Accounts are off on this page." : "Not signed in.");
+  return h("div", null,
+    h("p", null, h("b", null, acct.email), h("br"), h("span", { class: "small muted" },
+      `${acct.role === "owner" ? "Owner" : acct.role === "admin" ? "Manager" : "Worker"}${acct.companyName ? " · " + acct.companyName : ""}`)),
+    h("p", { class: "small", id: "syncStatus" }, ""),
+    h("div", { class: "row" },
+      acct.role === "owner" || acct.role === "admin" ? h("button", { class: "btn small", type: "button", onclick: () => go("admin") }, "Admin") : null,
+      h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Sign out?", signOut) }, "Sign out")));
 }
 
 /* ---------- PDFs ---------- */
@@ -2835,6 +3005,7 @@ function renderSettings() {
   if (setPage === "orderAisle") return renderOrderAisle(v);
   if (setPage === "more") return renderMorePage(v);
   if (setPage === "inventory") return renderInventoryPage(v);
+  if (setPage === "admin" && acct && (acct.role === "owner" || acct.role === "admin")) return renderAdminPage(v);
   setPage = "home";
   const boxes = buildLocator(settings).size;
   v.replaceChildren(h("section", { class: "card" },
@@ -3439,8 +3610,8 @@ function renderMorePage(v) {
           const f = e.target.files[0]; if (!f) return;
           try { settings = fixSettings(JSON.parse(await f.text())); saveSettings(); renderSettings(); toast("Settings loaded."); } catch (err) { toast("That isn't a settings file."); }
         } }))),
-      h("h3", null, "Link devices"),
-      linkSection(),
+      h("h3", null, "Account"),
+      accountSection(),
       h("h3", null, "Look"),
       h("select", { onchange: e => { settings.theme = e.target.value; applyTheme(); saveSettings(); } },
         [["auto", "Match device"], ["light", "Light"], ["dark", "Dark"]].map(([val, t]) => h("option", { value: val, selected: settings.theme === val }, t))),
@@ -3472,7 +3643,7 @@ window.appBack = () => {
   if (detailView) { if (detailView.kind === "order") { detailView = { kind: "orders" }; drawDetail(); } else closeDetail(); return true; }
   if (!$("stepper").classList.contains("hidden")) { if (stepView !== "step") { $("stepPrev").click(); } else closeSteps(); return true; }
   if (view === "settings") {
-    const up = { map: "home", order: "home", more: "home", inventory: "home", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
+    const up = { map: "home", order: "home", more: "home", inventory: "home", admin: "home", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
     if (setPage === "wizard" && wiz) { wizBack(); return true; }
     if (up) { go(up); return true; }
     $("navBtn").click(); return true;
@@ -3490,9 +3661,7 @@ $("scanUnpackBtn").onclick = openBarcodeScanner;
 restoreList();
 openFromLink();
 window.addEventListener("hashchange", openFromLink);
-showSyncLine(); syncPull();
-setInterval(syncPull, 4000);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncPull(); });
+accountsInit();
 </script>
 </body>
 </html>

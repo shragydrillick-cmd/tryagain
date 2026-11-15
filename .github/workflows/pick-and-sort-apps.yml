@@ -170,6 +170,8 @@ jobs:
     concurrency: { group: pick-and-sort-publish, cancel-in-progress: false }
     permissions:
       contents: write
+    env:
+      FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -208,6 +210,17 @@ jobs:
           git commit -qm "Publish Pick & Sort $VERSION_NAME (${GITHUB_SHA::7})"
           git push -f -q "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
           echo "Published. Once GitHub Pages is switched on (Settings > Pages > gh-pages), it's at https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
+
+      - name: Publish to Firebase Hosting (https://pick-and-sort.web.app), when its key is set up
+        if: env.FIREBASE_SA != ''
+        continue-on-error: true # the GitHub Pages copy above is already published
+        working-directory: warehouse-picker/web
+        run: |
+          rm -rf dist/.git
+          printf '%s' "$FIREBASE_SA" > "$RUNNER_TEMP/firebase-key.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-key.json"
+          npx -y firebase-tools@15.36.0 deploy --only hosting --project pick-and-sort --non-interactive
+          rm -f "$RUNNER_TEMP/firebase-key.json"
 
   ios-file:
     needs: [ios, website]

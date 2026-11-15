@@ -1,5 +1,5 @@
 // "Send to phone" with a big list: 80 orders become several QR codes that change by themselves; they're filmed into a video (needs ffmpeg) that a second browser uses as its camera, and "Scan from computer" must rebuild the exact same list.
-const { chromium } = require('playwright');
+const { chromium } = require('playwright'); require('./noauth')(chromium);
 const fs = require('fs'), path = require('path'), { execSync } = require('child_process');
 const SP = require('os').tmpdir() + '/pick-and-sort-qr';
 (async () => {

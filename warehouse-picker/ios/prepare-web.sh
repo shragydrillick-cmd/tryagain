@@ -10,6 +10,7 @@ sed -e 's#https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js#ve
     -e 's#https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/#vendor/#g' \
     -e 's#https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/#vendor/#g' \
     -e 's#https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js#vendor/zxing.min.js#g' \
+    -e 's#https://cdn.jsdelivr.net/npm/firebase@10.14.1/#vendor/#g' \
     ../index.html > Resources/www/index.html
 cp ../android/app/src/main/assets/www/vendor/*.js Resources/www/vendor/
 if grep -q "cdnjs\|jsdelivr" Resources/www/index.html; then echo "index.html still points at the internet" >&2; exit 1; fi
