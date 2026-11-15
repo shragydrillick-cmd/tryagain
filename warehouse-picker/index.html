@@ -73,7 +73,7 @@ textarea { width: 100%; min-height: 140px; font-family: ui-monospace, Menlo, Con
 .fixrow input.missing { border: 2px solid var(--danger); background: var(--warn-soft); }
 @media (max-width: 480px) { .fixrow { grid-template-columns: 1fr 64px 56px auto; } .fixrow .fixdet { grid-column: 1 / 2; grid-row: 2; } }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 8px 0 12px; }
-.stat { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; }
+.stat { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; border: 0; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .stat b { display: block; font-size: 24px; }
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
 .tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 12px; font: inherit;
@@ -231,6 +231,25 @@ img.qr.big { width: 320px; }
 .helpbox { background: var(--card); color: var(--text); border-radius: 14px; padding: 16px; max-width: 460px; max-height: 80vh; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,.3); font-size: 15px; }
 .helpbox p { margin: 0 0 10px; }
 .bigbarcode { font-size: 28px; font-weight: 800; letter-spacing: .06em; font-variant-numeric: tabular-nums; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin: 4px 0 2px; }
+.detailpanel { position: fixed; inset: 0; z-index: 40; background: var(--bg); overflow: auto; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px calc(env(safe-area-inset-bottom, 0px) + 16px); }
+.detailbox { max-width: 760px; margin: 0 auto; }
+.detailhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; background: var(--bg); padding: 6px 0 8px; z-index: 1; }
+.detailhead h2 { margin: 0; font-size: 22px; }
+.dlist { display: flex; flex-direction: column; gap: 8px; }
+.drow { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; width: 100%; text-align: left; cursor: pointer; }
+.drow.static { cursor: default; }
+.drow .pile { flex: none; }
+.dqty { font-weight: 800; font-size: 18px; min-width: 34px; }
+.dbox { font-weight: 800; font-size: 20px; min-width: 54px; }
+.chev { font-size: 22px; color: var(--muted); }
+.stdot { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.stbadge { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.drow.st-green { background: #e3f6e9; border-color: #a9dcb9; } .stbadge.st-green, .st-green .stdot { color: #1e7a46; } .stbadge.st-green { background: #c9ecd5; }
+.drow.st-blue { background: #e3eefc; border-color: #a9c6ee; } .stbadge.st-blue, .st-blue .stdot { color: #1d4f91; } .stbadge.st-blue { background: #cadcf7; }
+.drow.st-yellow { background: #fff7d6; border-color: #ead98a; } .stbadge.st-yellow, .st-yellow .stdot { color: #7a6000; } .stbadge.st-yellow { background: #fbeaa6; }
+.drow.st-orange { background: #ffeedd; border-color: #f0c79a; } .stbadge.st-orange, .st-orange .stdot { color: #8a4b00; } .stbadge.st-orange { background: #fbd8b4; }
+.drow.st-red { background: #fde6e4; border-color: #f0b3ad; } .stbadge.st-red, .st-red .stdot { color: #a3241c; } .stbadge.st-red { background: #f8cdc8; }
+.drow[class*="st-"] .iname, .drow[class*="st-"] b { color: #1b1f24; } .drow[class*="st-"] .idet, .drow[class*="st-"] .small, .drow[class*="st-"] .icode { color: #4a525d; }
 </style>
 </head>
 <body>
@@ -275,7 +294,7 @@ img.qr.big { width: 320px; }
   </div></div>
 
   <section id="results" class="card hidden">
-    <h2>2. Your lists</h2>
+    <h2>Your lists</h2>
     <div class="row no-print" style="justify-content:space-between;align-items:center"><p class="muted small" id="fileName" style="margin:0"></p>
       <button class="btn secondary small" id="clearBtn" type="button">&#10005; Clear list &amp; start new</button></div>
     <p class="small muted no-print" id="syncLine" style="margin:4px 0 0"></p>
@@ -1384,9 +1403,9 @@ function rebuild() {
   $("results").classList.remove("hidden");
   $("fileName").textContent = current.name;
   $("stats").replaceChildren(
-    h("div", { class: "stat" }, h("b", null, plan.orders.length), "orders"),
-    h("div", { class: "stat" }, h("b", null, plan.totalUnits), "items to pick"),
-    h("div", { class: "stat" }, h("b", null, new Set(plan.picks.map(p => p.box)).size), "boxes to visit"));
+    h("button", { class: "stat", type: "button", onclick: () => openDetail({ kind: "orders" }) }, h("b", null, plan.orders.length), "orders ›"),
+    h("button", { class: "stat", type: "button", onclick: () => openDetail({ kind: "items" }) }, h("b", null, plan.totalUnits), "items to pick ›"),
+    h("button", { class: "stat", type: "button", onclick: () => openDetail({ kind: "boxes" }) }, h("b", null, new Set(plan.picks.map(p => p.box)).size), "boxes to visit ›"));
   const w = $("warnings"); w.replaceChildren();
   if (current.slips) {
     const sl = current.slips, open = (current.review || []).filter(r => !r.done).length;
@@ -2163,6 +2182,99 @@ async function openBarcodeScanner() {
     scan.timer = setTimeout(tick, 80);
   };
   tick();
+}
+
+/* ---------- tapping Orders / Items / Boxes: the lists with where each one is up to ---------- */
+let detailFull = (() => { try { return localStorage.getItem("pick-and-sort-full-detail") === "1"; } catch (e) { return false; } })();
+let detailView = null; // { kind: "orders" | "order" | "items" | "boxes", label }
+/** Has this order line's item been picked (its pick line ticked)? */
+function pickOf(u) { return plan.picks.find(p => p.box === u.box && p.name === u.name && p.details === u.details); }
+/** One item for one order: how far it's got. */
+function lineStatus(u) {
+  const placedN = unpackDone.has(u.step) ? u.qty : (placed.get(u.step) || 0), p = pickOf(u), picked = p && pickedDone.has(p.step);
+  if (placedN >= u.qty) return { cls: "st-green", text: "On its order" };
+  if (placedN > 0) return { cls: "st-yellow", text: `${placedN} of ${u.qty} on its order` };
+  if (picked) return { cls: "st-blue", text: "Picked" };
+  return { cls: "st-red", text: "Not picked yet" };
+}
+/** A whole order: ready to pack, part sorted, all picked, part picked, or not started. */
+function orderStatus(label) {
+  const lines = plan.unpack.filter(u => u.label === label), units = lines.reduce((a, u) => a + u.qty, 0);
+  const on = lines.reduce((a, u) => a + (unpackDone.has(u.step) ? u.qty : Math.min(u.qty, placed.get(u.step) || 0)), 0);
+  const pickedUnits = lines.reduce((a, u) => { const p = pickOf(u); return a + (p && pickedDone.has(p.step) ? u.qty : 0); }, 0);
+  if (on >= units) return { cls: "st-green", text: "Ready to pack" };
+  if (on > 0) return { cls: "st-yellow", text: `Partly sorted: ${on} of ${units} items on the pile` };
+  if (pickedUnits >= units) return { cls: "st-blue", text: "All picked, not sorted yet" };
+  if (pickedUnits > 0) return { cls: "st-orange", text: `Partly picked: ${pickedUnits} of ${units} items` };
+  return { cls: "st-red", text: "Not started" };
+}
+const badge = st => h("span", { class: "stbadge " + st.cls }, st.text);
+function openDetail(view) {
+  detailView = view;
+  let el = $("detailPanel");
+  if (!el) { el = h("div", { id: "detailPanel", class: "detailpanel", role: "dialog" }); document.body.append(el); }
+  document.body.style.overflow = "hidden";
+  drawDetail();
+}
+function closeDetail() { const el = $("detailPanel"); if (el) el.remove(); detailView = null; document.body.style.overflow = ""; }
+function drawDetail() {
+  const el = $("detailPanel"); if (!el || !detailView || !plan) return;
+  const v = detailView, full = detailFull;
+  const fullBtn = h("button", { class: "btn secondary small", type: "button", onclick: () => {
+    detailFull = !detailFull; try { localStorage.setItem("pick-and-sort-full-detail", detailFull ? "1" : "0"); } catch (e) {} drawDetail(); } }, full ? "Less detail" : "Full detail");
+  const head = (title, back) => h("div", { class: "detailhead" },
+    back ? h("button", { class: "link", type: "button", onclick: () => { detailView = back; drawDetail(); } }, "‹ Orders") : null,
+    h("h2", null, title), h("span", { style: "flex:1" }), fullBtn,
+    h("button", { class: "btn small", type: "button", onclick: closeDetail }, "✕ Close"));
+  const itemText = (t, extra) => h("div", { style: "flex:1;min-width:0" },
+    h("div", { class: "iname" }, itemName(t)),
+    full && t.details ? h("div", { class: "idet" }, t.details) : (!full && t.details ? h("span", { class: "idet" }, t.details) : null),
+    full && codesText(t) ? h("div", { class: "icode" }, codesText(t)) : null,
+    extra);
+  let body;
+  if (v.kind === "orders") {
+    body = [h("p", { class: "small muted" }, "Write the short number on each order's paper. Tap an order to see its items."),
+      h("div", { class: "dlist" }, plan.orders.map(o => {
+        const st = orderStatus(o.label);
+        return h("button", { class: "drow " + st.cls, type: "button", onclick: () => { detailView = { kind: "order", label: o.label }; drawDetail(); } },
+          h("span", { class: "pile" }, o.label),
+          h("div", { style: "flex:1;min-width:0;text-align:left" }, h("b", null, `Order #${o.raw}`),
+            h("div", { class: "small" }, `${o.units} item${o.units === 1 ? "" : "s"}`), full ? h("div", { style: "margin-top:4px" }, badge(st)) : null),
+          full ? null : h("span", { class: "stdot" }, st.text.split(":")[0]), h("span", { class: "chev" }, "›"));
+      }))];
+    el.replaceChildren(h("div", { class: "detailbox" }, head("Orders"), ...body));
+  } else if (v.kind === "order") {
+    const o = plan.orders.find(x => x.label === v.label), st = orderStatus(v.label);
+    const lines = plan.unpack.filter(u => u.label === v.label);
+    body = [h("div", { class: "drow static " + st.cls }, h("span", { class: "pile" }, o.label), h("div", { style: "flex:1;text-align:left" }, h("b", null, `Order #${o.raw}`), h("div", { class: "small" }, `${o.units} item${o.units === 1 ? "" : "s"}`), h("div", { style: "margin-top:4px" }, badge(st)))),
+      h("div", { class: "dlist" }, lines.map(u => {
+        const ls = lineStatus(u);
+        return h("div", { class: "drow static " + ls.cls }, h("span", { class: "dqty" }, `${u.qty}×`),
+          itemText(u, full ? h("div", { class: "small" }, `Box ${u.box}`) : null), badge(ls));
+      }))];
+    el.replaceChildren(h("div", { class: "detailbox" }, head(`Order ${o.label}`, { kind: "orders" }), ...body));
+  } else if (v.kind === "items") {
+    body = [h("p", { class: "small muted" }, `Every item to pick, ${plan.totalUnits} in all.`),
+      h("div", { class: "dlist" }, plan.picks.map(p => {
+        const lines = plan.unpack.filter(u => u.box === p.box && u.name === p.name && u.details === p.details);
+        const on = lines.reduce((a, u) => a + (unpackDone.has(u.step) ? u.qty : Math.min(u.qty, placed.get(u.step) || 0)), 0);
+        const st = on >= p.qty ? { cls: "st-green", text: "All on their orders" } : on > 0 ? { cls: "st-yellow", text: `${on} of ${p.qty} on their orders` }
+          : pickedDone.has(p.step) ? { cls: "st-blue", text: "Picked" } : { cls: "st-red", text: "Not picked yet" };
+        return h("div", { class: "drow static " + st.cls }, h("span", { class: "dqty" }, `${p.qty}×`),
+          itemText(p, h("div", { class: "small" }, `Box ${p.box}`, full ? ` · for order${p.orders.length > 1 ? "s" : ""} ${p.orders.map(o => o.qty > 1 ? `${o.label} (${o.qty})` : o.label).join(", ")}` : "")), badge(st));
+      }))];
+    el.replaceChildren(h("div", { class: "detailbox" }, head("Items"), ...body));
+  } else {
+    body = [h("p", { class: "small muted" }, "The boxes to visit, in walking order."),
+      h("div", { class: "dlist" }, boxGroups().map(g => {
+        const done = g.items.every(p => pickedDone.has(p.step)), some = g.items.some(p => pickedDone.has(p.step));
+        const st = done ? { cls: "st-blue", text: "Picked" } : some ? { cls: "st-orange", text: "Partly picked" } : { cls: "st-red", text: "Not picked yet" };
+        return h("div", { class: "drow static " + st.cls }, h("span", { class: "dbox" }, g.box),
+          h("div", { style: "flex:1;min-width:0;text-align:left" }, g.items.map(p => h("div", null, `${p.qty}× ${itemName(p)}`, full && p.details ? h("span", { class: "idet" }, ` · ${p.details}`) : null)),
+            full && g.loc ? h("div", { class: "small" }, [g.loc.unitName, shelfText(g.loc)].filter(Boolean).join(" · ")) : null), badge(st));
+      }))];
+    el.replaceChildren(h("div", { class: "detailbox" }, head("Boxes"), ...body));
+  }
 }
 
 /* ---------- PDFs ---------- */
@@ -3280,6 +3392,7 @@ function renderChecks() {
 /** Phone back button (Android app): close what's open first; returns true if handled. */
 window.appBack = () => {
   if (scan.el) { closeScanner(); return true; }
+  if (detailView) { if (detailView.kind === "order") { detailView = { kind: "orders" }; drawDetail(); } else closeDetail(); return true; }
   if (!$("stepper").classList.contains("hidden")) { if (stepView !== "step") { $("stepPrev").click(); } else closeSteps(); return true; }
   if (view === "settings") {
     const up = { map: "home", order: "home", more: "home", inventory: "home", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
