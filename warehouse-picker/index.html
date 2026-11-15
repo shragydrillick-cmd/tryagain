@@ -272,6 +272,7 @@ img.qr.big { width: 320px; }
 header.top #title { white-space: nowrap; }
 .headbtns button { white-space: nowrap; }
 @media (max-width: 360px) { header.top #title { font-size: 18px; } .headbtns button, #packBtn { padding: 6px 9px; font-size: 14px; } }
+.packmore { text-decoration: underline; color: #1d4f91; }
 </style>
 </head>
 <body>
@@ -2307,6 +2308,7 @@ function drawDetail() {
 /* ---------- Packing: orders ready to pack come up green; the packer taps Packed ---------- */
 let packed = new Map(); // real order number -> when it was packed (shared with linked devices)
 let packSeen = null;    // orders already shown as ready on this screen (to point out new ones)
+const packOpen = new Set(); // orders tapped open to show their items
 const orderLines = label => plan.unpack.filter(u => u.label === label);
 const orderReady = label => orderLines(label).every(u => unpackDone.has(u.step) || (placed.get(u.step) || 0) >= u.qty);
 function openPacking() {
@@ -2329,9 +2331,11 @@ function drawPacking() {
   const fresh = packSeen ? ready.filter(o => !packSeen.has(o.raw)) : [];
   if (fresh.length) beep(true); // a new order is ready
   packSeen = new Set(ready.map(o => o.raw));
-  const items = o => h("div", { class: "packitems" }, orderLines(o.label).map(u => h("div", null,
+  // just the order and how many items; tap it to see the items in full
+  const items = o => packOpen.has(o.raw) ? h("div", { class: "packitems" }, orderLines(o.label).map(u => h("div", null,
     h("b", null, `${u.qty}× `), itemName(u), u.details ? h("span", { class: "idet" }, ` · ${u.details}`) : null,
-    u.barcode ? h("div", { class: "dbarcode small" }, u.barcode) : null)));
+    u.barcode ? h("div", { class: "dbarcode small" }, u.barcode) : null, u.sku ? h("div", { class: "icode" }, `SKU ${u.sku}`) : null))) : null;
+  const toggle = o => () => { packOpen.has(o.raw) ? packOpen.delete(o.raw) : packOpen.add(o.raw); drawPacking(); };
   el.replaceChildren(h("div", { class: "detailbox" }, head,
     h("p", { class: "small muted", style: "margin-top:0" }, syncOn()
       ? "Orders come up here as soon as every item is on its pile, on any linked phone. Pack it, then tap Packed."
@@ -2341,12 +2345,13 @@ function drawPacking() {
     h("div", { class: "dlist" },
       ready.map(o => h("div", { class: "drow static st-green packcard" + (fresh.includes(o) ? " fresh" : "") },
         h("span", { class: "pile big" }, o.label),
-        h("div", { style: "flex:1;min-width:0" }, h("b", null, `Order #${o.raw}`), h("div", { class: "small" }, `${o.units} item${o.units === 1 ? "" : "s"} · Ready to pack`), items(o)),
+        h("div", { style: "flex:1;min-width:0;cursor:pointer", onclick: toggle(o) }, h("b", null, `Order #${o.raw}`),
+          h("div", { class: "small" }, `${o.units} item${o.units === 1 ? "" : "s"} · `, h("span", { class: "packmore" }, packOpen.has(o.raw) ? "hide items" : "show items")), items(o)),
         h("button", { class: "btn packbtn", type: "button", onclick: () => setPacked(o.raw, true) }, "Packed ✓"))),
       done.map(o => h("div", { class: "drow static st-grey" },
         h("span", { class: "pile" }, o.label),
-        h("div", { style: "flex:1;min-width:0" }, h("b", null, `Order #${o.raw}`),
-          h("div", { class: "small" }, `Packed ${new Date(packed.get(o.raw)).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`)),
+        h("div", { style: "flex:1;min-width:0;cursor:pointer", onclick: toggle(o) }, h("b", null, `Order #${o.raw}`),
+          h("div", { class: "small" }, `${o.units} item${o.units === 1 ? "" : "s"} · Packed ${new Date(packed.get(o.raw)).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`), items(o)),
         h("span", { class: "stbadge st-grey" }, "Packed"),
         h("button", { class: "link small", type: "button", onclick: () => setPacked(o.raw, false) }, "Undo"))))));
 }
