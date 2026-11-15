@@ -250,6 +250,9 @@ img.qr.big { width: 320px; }
 .drow.st-orange { background: #ffeedd; border-color: #f0c79a; } .stbadge.st-orange, .st-orange .stdot { color: #8a4b00; } .stbadge.st-orange { background: #fbd8b4; }
 .drow.st-red { background: #fde6e4; border-color: #f0b3ad; } .stbadge.st-red, .st-red .stdot { color: #a3241c; } .stbadge.st-red { background: #f8cdc8; }
 .drow[class*="st-"] .iname, .drow[class*="st-"] b { color: #1b1f24; } .drow[class*="st-"] .idet, .drow[class*="st-"] .small, .drow[class*="st-"] .icode { color: #4a525d; }
+.addpair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.addpair .addtile { min-height: 0; padding: 8px 4px; }
+.addpair .addtile b { font-size: 15px; }
 </style>
 </head>
 <body>
@@ -264,14 +267,18 @@ img.qr.big { width: 320px; }
     <div class="addtiles">
       <label class="addtile"><b>Add file</b><input id="fileInput" type="file" multiple accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls,.json,text/csv,application/pdf,application/json" hidden></label>
       <button class="addtile" id="exampleBtn" type="button"><b>Practice</b></button>
-      <button class="addtile" id="scanBtn" type="button"><b>Scan from computer</b></button>
       <button class="addtile" id="pasteToggle" type="button"><b>Manual</b></button>
+      <div class="addpair">
+        <button class="addtile" id="sendBtn" type="button"><b>Send</b><span class="small muted">QR code</span></button>
+        <button class="addtile" id="scanBtn" type="button"><b>Receive</b><span class="small muted">scan QR</span></button>
+      </div>
     </div>
     <div id="pasteBox" class="hidden" style="margin-top:12px">
       <p class="small muted" style="margin:0 0 6px">One line per item: order, box, item, details, quantity.</p>
       <textarea id="pasteText" placeholder="Order,Box,Item,Details,Qty&#10;10452,A3,Blue mug,12 oz,1&#10;10452,A14,Notebook,Lined A5,2"></textarea>
       <div class="row" style="margin-top:8px"><button class="btn" id="pasteGo" type="button">Use this</button></div>
     </div>
+    <div id="sendBox" class="hidden no-print sendbox"></div>
     <div id="loadMsg"></div>
   </section>
 
@@ -310,10 +317,7 @@ img.qr.big { width: 320px; }
         <button class="btn secondary" id="stepBtn" type="button">&#9654; Step by step</button>
         <button class="btn secondary" id="scanUnpackBtn" type="button">&#128247; Scan to unpack</button>
         <button class="btn secondary" id="printBtn" type="button">Print</button></div>
-      <div class="grp"><b>Phone</b>
-        <button class="btn secondary" id="sendBtn" type="button">&#128241; Send to phone</button></div>
     </div>
-    <div id="sendBox" class="hidden no-print sendbox"></div>
     <div class="tabs" role="tablist">
       <button data-tab="pick" class="on" type="button">Pick list</button>
       <button data-tab="unpack" type="button">Unpack list</button>
@@ -1325,7 +1329,7 @@ $("ordersHelp").onclick = () => {
   const over = h("div", { class: "helpover", role: "dialog", "aria-label": "How to add orders" }, h("div", { class: "helpbox" },
     h("p", null, h("b", null, "Add file: "), "the packing slips (PDF): one PDF with all of them, or many at once. The app reads each slip's order number, items, bins, quantities and barcodes, and checks them against \"Total items\". Or a spreadsheet (Excel or CSV), one line per item: Order, Box (like A1), Item, and if you have them Details, Qty, Barcode, SKU. A list sent from another device (a .json file) opens here too."),
     h("p", null, h("b", null, "Practice: "), "example orders to try everything on, with barcodes for Scan to unpack."),
-    h("p", null, h("b", null, "Scan from computer: "), "on the computer tap Send to phone, then point this phone at the code."),
+    h("p", null, h("b", null, "Send / Receive: "), "move the list between a computer and a phone, or two phones. On the one that has the orders tap Send: it shows a QR code. On the other tap Receive and point it at the code."),
     h("p", null, h("b", null, "Manual: "), "type or paste the lines yourself."),
     h("p", { class: "small muted" }, "Inventory (item number → bin) and spreadsheet layout: Settings → Inventory."),
     h("button", { class: "link small", type: "button", onclick: () => download(new Blob(["Order,Box,Item,Details,Qty,Barcode,SKU\n"], { type: "text/csv" }), "orders-template.csv") }, "Download a blank spreadsheet template"),
@@ -1732,7 +1736,7 @@ async function showSendBox() {
   let codeArea;
   if (link.length <= 1000) { // one code: works with the in-app scanner, and with the phone's own camera (opens the website)
     codeArea = h("div", null, await qrImage(link),
-      h("p", { class: "small" }, "On the phone: Pick & Sort → ", h("b", null, "📷 Scan from computer"), ", and point it here. (Or the phone's camera app: opens the list on the website.)"));
+      h("p", { class: "small" }, "On the other phone or computer: Pick & Sort → ", h("b", null, "Receive"), ", and point it here. (Or a phone's camera app: opens the list on the website.)"));
   } else { // several codes, shown one after another: the scanner collects them in any order
     const id = Math.random().toString(36).slice(2, 7), n = Math.ceil(packed.length / QR_PART);
     const urls = [];
@@ -1742,11 +1746,11 @@ async function showSendBox() {
     const pause = h("button", { class: "btn secondary small", type: "button", onclick: () => { paused = !paused; pause.textContent = paused ? "▶ Play" : "❚❚ Pause"; } }, "❚❚ Pause");
     qrAnim = setInterval(() => { if (paused || box.classList.contains("hidden") || !document.body.contains(img)) return; i = (i + 1) % n; img.src = urls[i]; label.textContent = `Code ${i + 1} of ${n}`; }, 700);
     codeArea = h("div", null, img, label,
-      h("p", { class: "small" }, `This list is big, so it's ${n} codes that change by themselves. On the phone: Pick & Sort → `, h("b", null, "📷 Scan from computer"),
+      h("p", { class: "small" }, `This list is big, so it's ${n} codes that change by themselves. On the other phone or computer: Pick & Sort → `, h("b", null, "Receive"),
         ", and hold it on the codes until it says it has them all (it catches them in any order)."), pause);
   }
   box.replaceChildren(
-    h("h3", { style: "margin-top:0" }, "Send this list to a phone"), codeArea,
+    h("h3", { style: "margin-top:0" }, "Send this list"), codeArea,
     h("details", null, h("summary", { class: "small" }, "Other ways"),
       h("div", { class: "row", style: "margin-top:8px" },
         navigator.share ? h("button", { class: "btn secondary small", type: "button", onclick: () => navigator.share({ title: "Pick list", url: link }).catch(() => {}) }, "Share link…") : null,
@@ -1789,8 +1793,8 @@ function closeScanner() {
 async function openScanner() {
   const video = h("video", { playsinline: true, muted: true, autoplay: true }), msg = h("p", { class: "scanmsg" }, "Starting the camera…");
   const bar = h("div", { class: "scanbar" }, h("div"));
-  scan.el = h("div", { class: "scanner", role: "dialog", "aria-label": "Scan from computer" },
-    h("div", { class: "scanhead" }, h("b", null, "Scan from computer"), h("button", { class: "btn secondary small", type: "button", onclick: closeScanner }, "✕ Close")),
+  scan.el = h("div", { class: "scanner", role: "dialog", "aria-label": "Receive" },
+    h("div", { class: "scanhead" }, h("b", null, "Receive: scan the QR code"), h("button", { class: "btn secondary small", type: "button", onclick: closeScanner }, "✕ Close")),
     h("div", { class: "scanview" }, video, h("div", { class: "scanframe" })), msg, bar);
   document.body.append(scan.el); document.body.style.overflow = "hidden";
   try {
@@ -1944,7 +1948,7 @@ function linkSection() {
       const link = linkText(), img = await qrImage(link);
       wrap.replaceChildren(
         h("p", { class: "small", id: "syncStatus" }, ""),
-        h("p", { class: "small muted" }, "To link another phone or computer: on it, tap 📷 Scan from computer (on the main screen) and point it here. Or send it the link text and paste it under \"Join\"."),
+        h("p", { class: "small muted" }, "To link another phone or computer: on it, tap Receive (on the main screen) and point it here. Or send it the link text and paste it under \"Join\"."),
         img, h("div", { class: "row" },
           h("button", { class: "btn secondary small", type: "button", onclick: e => copyText(link, e.currentTarget) }, "Copy link text"),
           navigator.share ? h("button", { class: "btn secondary small", type: "button", onclick: () => navigator.share({ title: "Link Pick & Sort", url: link }).catch(() => {}) }, "Share…") : null,
@@ -3406,7 +3410,7 @@ window.appBack = () => {
 applyTheme();
 showInvStatus();
 $("clearBtn").onclick = e => tapTwice(e.currentTarget, syncOn() ? "Clear it on all linked devices?" : "Clear everything?", () => clearList());
-$("sendBtn").onclick = showSendBox;
+$("sendBtn").onclick = () => { if (!current || !plan) { toast("Load orders first, then Send shows them as a QR code for the other phone or computer."); return; } showSendBox(); };
 $("scanBtn").onclick = openScanner;
 $("scanUnpackBtn").onclick = openBarcodeScanner;
 restoreList();

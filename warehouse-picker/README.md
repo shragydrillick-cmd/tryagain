@@ -152,9 +152,9 @@ so instead of opening.
 
 ## Sending the list to a phone (scan, nothing else to send)
 
-On the computer tap **📱 Send to phone**: it shows a QR code. On the phone, in
+On the main screen, under Orders, the bottom-right box is split in two: **Send** and **Receive**. On the computer (or phone) that has the orders tap **Send**: it shows a QR code. On the other one, in
 Pick & Sort (the iPhone app, the Android app or the website), tap
-**📷 Scan from computer** on the main screen and point it at the code. All
+**Receive** and point it at the code. All
 orders and items load on the phone, with nothing else to send.
 
 - A big list doesn't fit in one QR code, so the computer shows several codes
@@ -184,7 +184,7 @@ Each device keeps its own place in step by step. It uses a free Firebase
    can only be read with its long secret code, and lists can't be browsed.
 3. In **Project settings → Your apps → Web (</>)**, register an app and copy
    the **projectId** and **apiKey** into the app, then tap **Start linking**.
-4. On each other device tap **📷 Scan from computer** and scan the QR code
+4. On each other device tap **Receive** and scan the QR code
    shown under Link devices, or paste the link text under **Join**.
 
 The list is sent to that database only while devices are linked. Without
