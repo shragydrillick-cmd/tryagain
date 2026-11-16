@@ -13,6 +13,14 @@ sent to "Check these": the number of mistakes NOT flagged must be 0.
     cd warehouse-picker && python3 -m http.server 8765 &
     node tests/slip-reading.test.js   # needs Playwright (npm i playwright)
 
+`real-slips.test.js` reads the real slips sent in so far (only their item tables are kept, in
+`fixtures/real-slips.json`: no names or addresses), one at a time and all together, and checks every
+field exactly, including an item kept in two boxes and barcodes printed in letters (like `PJ131PNK 6M`),
+then scans each barcode and checks it finds its item. It must print `mistakes: 0`. When a new slip
+reads wrong, add its item table there.
+
+    node tests/real-slips.test.js
+
 `check-these.test.js` makes slips with problems (wrong total, missing bin,
 missing quantity, no "Total items", an order printed twice, a page with no
 order number), checks each is flagged under "Check these", fixes them the way
