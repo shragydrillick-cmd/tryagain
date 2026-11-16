@@ -1992,7 +1992,9 @@ const itemKeyOf = u => (u.sku ? "sku:" + scanKey(u.sku) : "item:" + `${u.name}|$
 function matchLines(code) {
   const k = scanKey(code); if (!k) return [];
   const learned = settings.barcodes && settings.barcodes[k]; // a barcode taught earlier ("Which item is this?")
-  return plan.unpack.filter(u => (u.barcode && scanKey(u.barcode) === k) || (u.sku && scanKey(u.sku) === k) || (learned && itemKeyOf(u) === learned));
+  const hit = plan.unpack.filter(u => (u.barcode && scanKey(u.barcode) === k) || (u.sku && scanKey(u.sku) === k) || (learned && itemKeyOf(u) === learned));
+  // a code that ended up as an item's name (a slip that didn't read cleanly) still finds it
+  return hit.length ? hit : plan.unpack.filter(u => k.length >= 5 && scanKey(u.name) === k);
 }
 /** Remember that this barcode is this item (on this device, kept with the settings). */
 function learnBarcode(code, u) {
