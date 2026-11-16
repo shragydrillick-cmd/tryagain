@@ -105,12 +105,14 @@ tr.last td { background: var(--good-soft); }
 .iname { font-weight: 700; font-size: 17px; }
 .idet { color: var(--muted); font-size: 14px; }
 td.box { font-size: 22px; font-weight: 800; white-space: nowrap; text-align: center; vertical-align: middle; }
+td.box.two { font-size: 16px; }
 td.box.multi { background: var(--accent-soft); border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 td.box .where { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
 mark.diff { background: var(--hl); color: var(--text); font-weight: 800; border-radius: 4px; padding: 0 3px; }
 .grp { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
 .grp > b { width: 64px; }
 #stepper .boxcode { font-size: 96px; font-weight: 900; line-height: 1; color: var(--accent); }
+#stepper .boxcode.two { font-size: clamp(44px, 15vw, 80px); white-space: nowrap; } /* two boxes side by side: D91 / D97 */
 #stepper .takes { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; width: 100%; max-width: 460px; }
 #stepper .take { display: flex; align-items: center; gap: 14px; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 #stepper .take .iname { font-size: 22px; }
@@ -210,7 +212,6 @@ img.qr.big { width: 320px; }
 .scanmsg { margin: 10px 0 6px; font-size: 17px; text-align: center; }
 .scanbar { height: 8px; background: rgba(255,255,255,.2); border-radius: 4px; overflow: hidden; }
 .scanbar > div { height: 100%; width: 0; background: #5fd08f; transition: width .2s; }
-.alsobox { font-size: 13.5px; font-weight: 700; color: var(--accent); margin-top: 2px; }
 .icode { font-size: 13.5px; color: var(--text); opacity: .85; font-variant-numeric: tabular-nums; letter-spacing: .02em; margin-top: 1px; }
 .scanner.barcode .scanview { flex: 0 0 34vh; }
 .scanframe.wide { width: 90%; aspect-ratio: auto; height: 40%; }
@@ -863,9 +864,8 @@ function lineCodes(l) {
 const codesText = t => [t.barcode || "", t.sku ? `SKU ${t.sku}` : ""].filter(Boolean).join(" · "); // the barcode number on its own, then the SKU
 /** Under an item: the barcode number, and the SKU on the line below it. */
 const codesEls = t => [t.barcode ? h("div", { class: "icode" }, t.barcode) : null, t.sku ? h("div", { class: "icode" }, `SKU ${t.sku}`) : null];
-/** An item kept in two boxes: "Also in box D97". */
-const alsoText = t => (t.also ? `Also in box ${t.also}` : "");
-const alsoEl = t => (t.also ? h("div", { class: "alsobox" }, alsoText(t)) : null);
+/** The box an item is in; an item kept in two boxes shows both, side by side: "D91 / D97". */
+const boxLabel = t => (t.also ? `${t.box} / ${t.also}` : t.box);
 /** The whole plan: pick list (shelf order) + unpack list (last picked first). */
 function makePlan(lines, settings) {
   const { locate } = buildLocator(settings);
@@ -1549,7 +1549,6 @@ function itemCell(t, extra) {
     h("div", { class: "iname" }, hl(itemName(t), t.marks)),
     t.details ? h("div", { class: "idet" }, hl(t.details, t.marks)) : null,
     ...codesEls(t),
-    alsoEl(t),
     extra ? h("div", { class: "idet" }, extra) : null);
 }
 /** Consecutive pick lines from the same box on the same unit. */
@@ -1557,8 +1556,8 @@ function boxGroups() {
   const groups = [];
   plan.picks.forEach(p => {
     const uid = p.loc ? p.loc.unitId : "none", g = groups[groups.length - 1];
-    if (g && g.box === p.box && g.uid === uid) g.items.push(p);
-    else groups.push({ box: p.box, uid, loc: p.loc, items: [p] });
+    if (g && g.boxes === boxLabel(p) && g.uid === uid) g.items.push(p);
+    else groups.push({ box: p.box, boxes: boxLabel(p), uid, loc: p.loc, items: [p] });
   });
   return groups;
 }
@@ -1573,7 +1572,7 @@ function renderPick() {
     }
     g.items.forEach((p, i) => {
       const tr = h("tr", { class: pickedDone.has(p.step) ? "done" : "" },
-        i === 0 ? h("td", { class: "box" + (g.items.length > 1 ? " multi" : ""), rowspan: g.items.length }, g.box,
+        i === 0 ? h("td", { class: "box" + (g.items.length > 1 ? " multi" : "") + (g.boxes.length > 5 ? " two" : ""), rowspan: g.items.length }, g.boxes,
           h("span", { class: "where" }, g.loc ? shelfText(g.loc) : g.box === "?" ? (current.slips ? "no bin" : "not in inventory") : "not on map")) : null,
         h("td", null, h("input", { type: "checkbox", "aria-label": `Picked ${itemName(p)}`, checked: pickedDone.has(p.step),
           onchange: e => { e.target.checked ? pickedDone.add(p.step) : pickedDone.delete(p.step); tr.className = e.target.checked ? "done" : ""; } })),
@@ -1637,7 +1636,7 @@ function stepContent(i, isCurrent) {
   if (stepMode === "pick") {
     return [
       h("div", { class: "to" }, "go to box"),
-      h("div", { class: "boxcode" }, u.box),
+      h("div", { class: "boxcode" + (u.boxes.length > 5 ? " two" : "") }, u.boxes),
       h("div", { class: "small muted" }, u.loc ? [u.loc.unitName, shelfText(u.loc)].filter(Boolean).join(" · ") : "not on your shelf map"),
       h("div", { class: "takes" }, u.items.map(p => h("div", { class: "take" },
         h("div", { class: "takeqty" }, `${p.qty}×`),
@@ -1645,8 +1644,7 @@ function stepContent(i, isCurrent) {
           h("div", { class: "iname" }, hl(itemName(p), p.marks)),
           ...(p.details ? [h("div", { class: "idet" }, hl(p.details, p.marks))] : []),
           ...(p.barcode ? [h("div", { class: "bigbarcode" }, p.barcode)] : []), // big and clear, to match against the label in the bin
-          ...(p.sku ? [h("div", { class: "icode" }, `SKU ${p.sku}`)] : []),
-          ...(p.also ? [alsoEl(p)] : [])))))];
+          ...(p.sku ? [h("div", { class: "icode" }, `SKU ${p.sku}`)] : []),))))];
   }
   // "last item" depends on what is still to come, so a skipped item keeps its order open
   const rest = (isCurrent ? seq.slice(stepAt + 1) : seq.slice(stepAt)).filter(j => j !== i && stepItems[j].label === u.label);
@@ -1686,7 +1684,7 @@ function showStep() {
         const u = stepItems[i];
         return h("button", { class: "take sk", type: "button", onclick: () => { detailIdx = i; stepView = "detail"; showStep(); } },
           stepMode === "pick"
-            ? [h("div", { class: "takeqty" }, u.box), h("div", null, u.items.map(p => h("div", { class: "idet" }, `${p.qty}× `, hl(itemName(p), p.marks))))]
+            ? [h("div", { class: "takeqty" }, u.boxes), h("div", null, u.items.map(p => h("div", { class: "idet" }, `${p.qty}× `, hl(itemName(p), p.marks))))]
             : [h("span", { class: "pile" }, u.label), h("div", { style: "flex:1" },
                 h("div", { class: "iname" }, `${u.qty}× `, hl(itemName(u), u.marks)),
                 ...(u.details ? [h("div", { class: "idet" }, hl(u.details, u.marks))] : []))]);
@@ -1761,7 +1759,7 @@ $("stepSkip").onclick = () => {
   if (stepView === "detail") { stepView = "step"; return showStep(); }
   if (stepAt === seq.length - 1) { // nothing left to try after this one
     const u = cur();
-    toast(`Still missing: ${stepMode === "pick" ? `box ${u.box}` : `${itemName(u)} for order ${u.label}`}`);
+    toast(`Still missing: ${stepMode === "pick" ? `box ${u.boxes}` : `${itemName(u)} for order ${u.label}`}`);
     closeSteps(); return;
   }
   skipped.add(seq[stepAt]);
@@ -2272,7 +2270,7 @@ function drawDetail() {
       h("div", { class: "dlist" }, lines.map(u => {
         const ls = lineStatus(u);
         return h("div", { class: "drow static " + ls.cls }, h("span", { class: "dqty" }, `${u.qty}×`),
-          itemText(u, full ? h("div", { class: "small" }, `Box ${u.box}`) : null), badge(ls));
+          itemText(u, full ? h("div", { class: "small" }, `Box ${boxLabel(u)}`) : null), badge(ls));
       }))];
     el.replaceChildren(h("div", { class: "detailbox" }, head(`Order ${o.label}`, { kind: "orders" }), ...body));
   } else if (v.kind === "items") {
@@ -2283,7 +2281,7 @@ function drawDetail() {
         const st = on >= p.qty ? { cls: "st-green", text: "All on their orders" } : on > 0 ? { cls: "st-yellow", text: `${on} of ${p.qty} on their orders` }
           : pickedDone.has(p.step) ? { cls: "st-blue", text: "Picked" } : { cls: "st-red", text: "Not picked yet" };
         return h("div", { class: "drow static " + st.cls }, h("span", { class: "dqty" }, `${p.qty}×`),
-          itemText(p, h("div", { class: "small" }, `Box ${p.box}`, full ? ` · for order${p.orders.length > 1 ? "s" : ""} ${p.orders.map(o => o.qty > 1 ? `${o.label} (${o.qty})` : o.label).join(", ")}` : "")), badge(st));
+          itemText(p, h("div", { class: "small" }, `Box ${boxLabel(p)}`, full ? ` · for order${p.orders.length > 1 ? "s" : ""} ${p.orders.map(o => o.qty > 1 ? `${o.label} (${o.qty})` : o.label).join(", ")}` : "")), badge(st));
       }))];
     el.replaceChildren(h("div", { class: "detailbox" }, head("Items"), ...body));
   } else {
@@ -2291,7 +2289,7 @@ function drawDetail() {
       h("div", { class: "dlist" }, boxGroups().map(g => {
         const done = g.items.every(p => pickedDone.has(p.step)), some = g.items.some(p => pickedDone.has(p.step));
         const st = done ? { cls: "st-blue", text: "Picked" } : some ? { cls: "st-orange", text: "Partly picked" } : { cls: "st-red", text: "Not picked yet" };
-        return h("div", { class: "drow static " + st.cls }, h("span", { class: "dbox" }, g.box),
+        return h("div", { class: "drow static " + st.cls }, h("span", { class: "dbox" }, g.boxes),
           h("div", { style: "flex:1;min-width:0;text-align:left" }, g.items.map(p => h("div", null, `${p.qty}× ${itemName(p)}`, full && p.details ? h("span", { class: "idet" }, ` · ${p.details}`) : null)),
             full && g.loc ? h("div", { class: "small" }, [g.loc.unitName, shelfText(g.loc)].filter(Boolean).join(" · ")) : null), badge(st));
       }))];
@@ -2654,7 +2652,7 @@ function drawRich(doc, lines, x, y, size, bold, lineH, grey) {
 function itemBlock(doc, t, width) {
   const nameLines = layoutRich(doc, itemName(t), t.marks, width, 12, true);
   const detLines = t.details ? layoutRich(doc, t.details, t.marks, width, 9, false) : [];
-  const codeLines = [t.barcode, t.sku ? `SKU ${t.sku}` : "", alsoText(t)].filter(Boolean).flatMap(x => layoutRich(doc, x, null, width, 9, false)); // barcode, SKU below
+  const codeLines = [t.barcode, t.sku ? `SKU ${t.sku}` : ""].filter(Boolean).flatMap(x => layoutRich(doc, x, null, width, 9, false)); // barcode, SKU below
   return { nameLines, detLines, codeLines, height: nameLines.length * 14 + (detLines.length + codeLines.length) * 11 };
 }
 function drawItemBlock(doc, b, x, y) {
@@ -2689,8 +2687,8 @@ function pickPdf() {
     // one box number, centred across all of its lines
     const cx = X.boxL + X.boxW / 2;
     if (g.items.length > 1) { doc.setFillColor(238, 244, 249); doc.rect(X.boxL, y + 2, X.boxW, gh - 4, "F"); }
-    doc.setFont("helvetica", "bold"); doc.setFontSize(20);
-    doc.text(g.box, cx, y + gh / 2 + 1, { align: "center" });
+    doc.setFont("helvetica", "bold"); doc.setFontSize(g.boxes.length > 5 ? 12 : 20);
+    doc.text(g.boxes, cx, y + gh / 2 + 1, { align: "center" });
     doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(100);
     doc.text(g.loc ? shelfText(g.loc) : g.box === "?" ? "not in inventory" : "not on map", cx, y + gh / 2 + 11, { align: "center" });
     doc.setTextColor(0);
