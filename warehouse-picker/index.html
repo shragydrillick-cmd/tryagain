@@ -565,13 +565,26 @@ function parseSlips(pages) {
       // barcode), and there's extra space before the next item.
       const isBarcode = t => /^\d{8,14}$/.test(t.replace(/\s/g, ""));
       const isCode = t => /^[A-Za-z0-9._\/-]{3,30}$/.test(t) && t.replace(/[^A-Za-z]/g, "").length >= 2 && t.replace(/\D/g, "").length >= 2;
+      const isLetterBarcode = t => /^[A-Za-z0-9._\/-]{3,24}( [A-Za-z0-9._\/-]{1,8}){0,2}$/.test(t) && /[A-Za-z]/.test(t.split(" ")[0]) && /\d/.test(t.split(" ")[0]);
       const blocks = [];
       left.forEach((l, i) => {
         const prev = left[i - 1];
-        const newItem = !prev || isBarcode(prev.text) || (isCode(prev.text) && !isBarcode(l.text)) || prev.y - l.y > lineH * 1.6;
+        const cur = blocks[blocks.length - 1];
+        // right under the SKU, a code like "PJ131PNK 6M" is the barcode written in letters
+        const letterBc = prev && cur && !cur.letterCode && cur.lines.length > 1 && isCode(prev.text) && isLetterBarcode(l.text) && prev.y - l.y <= lineH * 1.6;
+        const newItem = !prev || isBarcode(prev.text) || (cur && cur.letterCode) || (isCode(prev.text) && !isBarcode(l.text) && !letterBc) || prev.y - l.y > lineH * 1.6;
         if (newItem) blocks.push({ lines: [], top: l.y, bottom: l.y });
         const bl = blocks[blocks.length - 1]; bl.lines.push(l.text); bl.bottom = l.y;
+        if (letterBc && !newItem) bl.letterCode = true;
       });
+      // A barcode written as letters (like "PJ131PNK 6M") under the SKU starts a new block above; with no bin
+      // or quantity beside it, it belongs to the item above.
+      for (let n = blocks.length - 1; n > 0; n--) {
+        const bl = blocks[n], above = blocks[n - 1];
+        if (bl.lines.length !== 1 || !isLetterBarcode(bl.lines[0]) || !isCode(above.lines[above.lines.length - 1])) continue;
+        if (marks.some(m => m.y <= bl.top + lineH * 0.8 && m.y >= bl.bottom - lineH * 0.8 && !(m.y <= above.top + lineH * 0.8 && m.y >= above.bottom - lineH * 0.8))) continue;
+        above.lines.push(...bl.lines); above.bottom = bl.bottom; above.letterCode = true; blocks.splice(n, 1);
+      }
       // One item kept in two boxes: the slip lists a second bin under the first, with no quantity of its own.
       // Fold it into the bin next to it (only when there are more bins than items).
       for (let k = marks.length - 1; k >= 0 && blocks.length < marks.length; k--) {
@@ -588,7 +601,7 @@ function parseSlips(pages) {
       }
       // Match items to bin/quantity rows: in order when the counts agree; otherwise by position.
       let groups;
-      if (blocks.length === marks.length) groups = blocks.map((bl, i) => ({ m: marks[i], lines: bl.lines }));
+      if (blocks.length === marks.length) groups = blocks.map((bl, i) => ({ m: marks[i], lines: bl.lines, letterCode: bl.letterCode }));
       else {
         groups = [];
         const used = new Set();
@@ -613,6 +626,7 @@ function parseSlips(pages) {
         barcode = labelled(/^\s*(barcode|upc|ean|gtin)\s*[:#]?\s*/i).replace(/\s/g, "");
         const skuLabelled = labelled(/^\s*sku\s*[:#]?\s*/i);
         // otherwise the barcode is the line of 8–14 digits under the name (usually the last; the lowest one wins)
+        if (!barcode && g.letterCode && rest.length > 2) barcode = rest.pop(); // a barcode in letters, under the SKU
         if (!barcode) { let i = -1; rest.forEach((t, k) => { if (k > 0 && /^\d{8,14}$/.test(t.replace(/\s/g, ""))) i = k; }); if (i > 0) barcode = rest.splice(i, 1)[0].replace(/\s/g, ""); }
         if (skuLabelled) sku = skuLabelled;
         const last = rest[rest.length - 1] || "";

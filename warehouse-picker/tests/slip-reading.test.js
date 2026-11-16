@@ -37,6 +37,7 @@ const fs = require('fs');
         const barcode = rnd(9) === 0 ? '' : '47416311' + String(10000 + rnd(89999));
         const it = { title, variant, sku, barcode, bin: bins[rnd(bins.length)], qty: rnd(5) === 0 ? 2 + rnd(11) : 1 };
         if (rnd(10) === 0) it.bin2 = bins[rnd(bins.length)]; // one item kept in two boxes
+        if (sku && rnd(12) === 0) it.barcode = 'PJ' + (100 + rnd(900)) + 'PNK ' + (1 + rnd(12)) + 'M'; // a barcode written in letters
         items.push(it);
       }
       if (k === 0) { // exactly the photo
