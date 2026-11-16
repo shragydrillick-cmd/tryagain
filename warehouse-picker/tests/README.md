@@ -8,7 +8,7 @@ on one line, bin and quantity beside the second line of the name, names as
 app, and compares every order number, name, colour/size, SKU, barcode, bin and
 quantity with what was printed. It prints `mistakes: 0` when everything matches. One deliberately hard layout
 (no space between items) checks that anything the app can't read for certain is
-sent to "Check these": the number of mistakes NOT flagged must be 0.
+sent to "Please look": the number of mistakes NOT flagged must be 0.
 
     cd warehouse-picker && python3 -m http.server 8765 &
     node tests/slip-reading.test.js   # needs Playwright (npm i playwright)
@@ -23,7 +23,7 @@ reads wrong, add its item table there.
 
 `check-these.test.js` makes slips with problems (wrong total, missing bin,
 missing quantity, no "Total items", an order printed twice, a page with no
-order number), checks each is flagged under "Check these", fixes them the way
+order number), checks each is flagged under "Please look", fixes them the way
 a person would, and checks the lists afterwards.
 
 `aisle-map.test.js` makes 400 random aisles (2–8 shelves, numbers down the

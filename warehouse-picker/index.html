@@ -68,6 +68,17 @@ textarea { width: 100%; min-height: 140px; font-family: ui-monospace, Menlo, Con
 .notice.bad { background: var(--warn-soft); color: var(--danger); border: 1px solid var(--danger); font-weight: 700; }
 .reviewcard { border: 2px solid var(--warn); border-radius: 12px; padding: 12px; margin: 10px 0; background: var(--card); }
 .reviewcard ul.probs { margin: 6px 0; padding-left: 20px; color: var(--danger); font-size: 15px; }
+.fixitem { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 8px 0; }
+.fixitem.bad { border: 2px solid var(--danger); }
+.fixtop { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 6px; flex-wrap: wrap; }
+.fixmiss { color: var(--danger); font-size: 14px; font-weight: 700; }
+.fixgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fixf { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fixf.wide { grid-column: 1 / -1; }
+.fixlab { font-size: 13px; font-weight: 700; color: var(--muted); }
+.fixf input { min-width: 0; width: 100%; padding: 8px; font-size: 16px; }
+.fixf input.missing { border: 2px solid var(--danger); background: var(--warn-soft); }
+.fixdel { margin-top: 8px; }
 .fixrow { display: grid; grid-template-columns: 1fr 1fr 64px 56px auto; gap: 6px; margin: 4px 0; align-items: center; }
 .fixrow input { min-width: 0; width: 100%; padding: 6px; }
 .fixrow input.missing { border: 2px solid var(--danger); background: var(--warn-soft); }
@@ -707,11 +718,19 @@ function slipProblems(o, lines) {
   if (o.total == null) out.push(`No "Total items" found on the slip, so the count couldn't be checked.`);
   else if (got !== o.total) out.push(`Read ${got} item${got === 1 ? "" : "s"}, but the slip says Total items: ${o.total}.`);
   lines.forEach(l => {
-    const what = l.name || l.code || "an item";
-    if (!l.name) out.push(`An item has no name${l.code ? ` (code ${l.code})` : ""}.`);
-    if (!l.box || l.box === "?") out.push(`No bin for ${what}.`);
-    if (l.qtyMissing) out.push(`No quantity found for ${what}; it's set to 1.`);
+    const miss = lineMissing(l);
+    if (miss.length) out.push(`${l.name || l.sku || l.barcode || "An item"}: missing ${miss.join(", ")}.`);
   });
+  return out;
+}
+/** What an item is missing: every item needs its name, bin, quantity, SKU and barcode. */
+function lineMissing(l) {
+  const out = [];
+  if (!l.name) out.push("item name");
+  if (!l.box || l.box === "?") out.push("bin");
+  if (l.qtyMissing || !(Number(l.qty) > 0)) out.push("quantity");
+  if (!l.sku) out.push("SKU");
+  if (!l.barcode) out.push("barcode");
   return out;
 }
 let pdfjsReady = null;
@@ -1411,7 +1430,8 @@ function renderReview() {
   const list = (current && current.review) || [];
   if (!list.length) return;
   const open = list.filter(r => !r.done);
-  box.append(h("h3", null, open.length ? "Check these" : "Checked"));
+  box.append(h("h3", null, open.length ? "Please look" : "Checked"));
+  if (open.length) box.append(h("p", { class: "small muted", style: "margin-top:0" }, "These orders have an item with something missing or wrong. Fill in the boxes marked in red, fix anything that's wrong, then tap Confirmed."));
   list.forEach(r => box.append(r.done ? h("div", { class: "small muted", style: "margin:4px 0" }, `✓ Order ${r.slip.order ? "#" + r.slip.order : "(page " + r.slip.page + ")"} checked`) : reviewCard(r)));
 }
 function reviewCard(r) {
@@ -1425,17 +1445,29 @@ function reviewCard(r) {
     count.textContent = o.total != null ? `Items now: ${got} of ${o.total}${got === o.total ? " ✓" : ""}` : `Items now: ${got}`;
   };
   const rows = h("div");
-  const drawRows = () => rows.replaceChildren(...lines().map(l => h("div", { class: "fixrow" },
-    h("input", { type: "text", value: l.name, placeholder: "Item name", "aria-label": "Item name", class: "fixname",
-      onchange: e => { l.name = e.target.value.trim(); refresh(); } }),
-    h("input", { type: "text", value: l.details || "", placeholder: "Colour / size", "aria-label": "Colour or size", class: "fixdet",
-      onchange: e => { l.details = e.target.value.trim(); } }),
-    h("input", { type: "text", value: l.box === "?" ? "" : l.box, placeholder: "Bin", "aria-label": "Bin", class: "fixbin" + (!l.box || l.box === "?" ? " missing" : ""),
-      onchange: e => { l.box = normBox(e.target.value) || "?"; e.target.classList.toggle("missing", l.box === "?"); refresh(); } }),
-    h("input", { type: "number", min: 0, value: l.qty, "aria-label": "Quantity", class: "fixqty" + (l.qtyMissing ? " missing" : ""),
-      onchange: e => { l.qty = Math.max(0, parseInt(e.target.value, 10) || 0); l.qtyMissing = false; e.target.classList.remove("missing"); refresh(); } }),
-    h("button", { class: "btn secondary small", type: "button", "aria-label": "Remove this item", onclick: () => {
-      current.lines = current.lines.filter(x => x !== l); if (current.parked) current.parked = current.parked.filter(x => x !== l); drawRows(); refresh(); } }, "✕"))));
+  // one card per item: each piece of information in its own box, with what goes there written above it
+  const field = (l, key, label, opts = {}) => {
+    const miss = opts.missing ? opts.missing(l) : !l[key];
+    const input = h("input", { type: opts.type || "text", value: opts.value ? opts.value(l) : (l[key] ?? ""), placeholder: miss ? "Missing: fill in" : "", "aria-label": label,
+      min: opts.type === "number" ? 0 : null, inputmode: opts.inputmode || null, class: miss ? "missing" : "",
+      onchange: e => { opts.set ? opts.set(l, e.target.value) : (l[key] = e.target.value.trim()); l.code = l.sku || l.barcode || ""; drawRows(); refresh(); } });
+    return h("label", { class: "fixf" + (opts.wide ? " wide" : "") }, h("span", { class: "fixlab" }, label, miss ? h("b", { class: "fixmiss" }, " missing") : null), input);
+  };
+  const drawRows = () => rows.replaceChildren(...lines().map((l, n) => {
+    const miss = lineMissing(l);
+    return h("div", { class: "fixitem" + (miss.length ? " bad" : "") },
+      h("div", { class: "fixtop" }, h("b", null, `Item ${n + 1}`),
+        miss.length ? h("span", { class: "fixmiss" }, `Missing: ${miss.join(", ")}`) : h("span", { class: "small muted" }, "Complete")),
+      h("div", { class: "fixgrid" },
+        field(l, "name", "Item", { wide: true }),
+        field(l, "details", "Colour / size", { wide: true, missing: () => false }),
+        field(l, "box", "Bin", { value: x => (x.box === "?" ? "" : x.box), missing: x => !x.box || x.box === "?", set: (x, v) => { x.box = normBox(v) || "?"; } }),
+        field(l, "qty", "Quantity", { type: "number", inputmode: "numeric", missing: x => x.qtyMissing || !(Number(x.qty) > 0), set: (x, v) => { x.qty = Math.max(0, parseInt(v, 10) || 0); x.qtyMissing = false; } }),
+        field(l, "sku", "SKU", { wide: true }),
+        field(l, "barcode", "Barcode", { wide: true, set: (x, v) => { x.barcode = v.trim(); } })),
+      h("button", { class: "btn secondary small fixdel", type: "button", onclick: e => tapTwice(e.currentTarget, "Delete this item?", () => {
+        current.lines = current.lines.filter(x => x !== l); if (current.parked) current.parked = current.parked.filter(x => x !== l); drawRows(); refresh(); }) }, "Delete item"));
+  }));
   drawRows(); refresh();
   return h("div", { class: "reviewcard" },
     h("div", { class: "row", style: "justify-content:space-between" },
@@ -1450,11 +1482,10 @@ function reviewCard(r) {
         else { const back = current.lines.filter(l => l.slip === o); current.lines = current.lines.filter(l => l.slip !== o); current.parked.push(...back); }
         e.currentTarget.textContent = r.keepBoth ? "Use it only once" : "It's really two orders: keep both";
         drawRows(); refresh(); } }, "It's really two orders: keep both")) : null,
-    h("div", { class: "small muted" }, "Item · colour/size · bin · quantity"),
     rows, count,
     h("div", { class: "row" },
       h("button", { class: "btn secondary small", type: "button", onclick: () => {
-        current.lines.push({ order: o.order, box: "?", code: "", name: "", details: "", qty: 1, slip: o });
+        current.lines.push({ order: o.order, box: "?", code: "", sku: "", barcode: "", name: "", details: "", qty: 1, slip: o });
         drawRows(); refresh(); } }, "+ Add a missing item"),
       h("button", { class: "btn small", type: "button", onclick: () => {
         const left = slipProblems(o, lines()).filter(t => !/twice/.test(t) && !/couldn't be checked/.test(t));
@@ -1482,7 +1513,7 @@ function rebuild() {
     const sl = current.slips, open = (current.review || []).filter(r => !r.done).length;
     w.append(h("div", { class: "notice good" }, `Read ${sl.all} packing slip${sl.all === 1 ? "" : "s"} from ${sl.pages} page${sl.pages === 1 ? "" : "s"}.`));
     w.append(open
-      ? h("div", { class: "notice bad" }, `⚠ ${open} slip${open === 1 ? " needs" : "s need"} checking before you pick. See "Check these" below.`)
+      ? h("div", { class: "notice bad" }, `Please look: ${open} order${open === 1 ? " has" : "s have"} an item with something missing or wrong. See "Please look" below.`)
       : h("div", { class: "notice good" }, (current.review || []).length ? "✓ Everything checked." : `✓ Every slip's items add up to its "Total items". Nothing missing.`));
   }
   if (current.usedInventory) w.append(h("div", { class: "notice good" }, `Bins looked up in your inventory (${settings.inventory.name}).`));

@@ -65,9 +65,10 @@ const fs = require('fs');
         const want = { name: it.title, details: it.variant || '', sku: it.sku, barcode: it.barcode, bin: normBox(it.bin), also: it.bin2 ? normBox(it.bin2) : '', qty: it.qty };
         for (const k of Object.keys(want)) if (String(g[k]) !== String(want[k])) problems.push(`order ${o.number} item ${ii + 1} ${k}: expected "${want[k]}", read "${g[k]}"`);
       });
-      const flagged = slipProblems(got, got.items.map(it => ({ name: it.name, code: it.sku, box: it.bin || '?', qty: it.qty, qtyMissing: it.qtyMissing }))).length > 0;
-      if (problems.length > before && !flagged) unflagged.push(o.number);
-      if (problems.length === before && flagged) flaggedClean.push(o.number);
+      const flagged = slipProblems(got, got.items.map(it => ({ name: it.name, code: it.sku, sku: it.sku, barcode: it.barcode, box: it.bin || '?', qty: it.qty, qtyMissing: it.qtyMissing }))).length > 0;
+      const printedComplete = o.items.every(it => it.sku && it.barcode); // a slip missing a SKU or barcode must be flagged
+      if ((problems.length > before || !printedComplete) && !flagged) unflagged.push(o.number);
+      if (problems.length === before && printedComplete && flagged) flaggedClean.push(o.number);
     });
     return { problems, unflagged, flaggedClean, itemsChecked, pages, warnings: parsed.warnings, checked: parsed.checked, all: parsed.all, longest: Math.max(...orders.map(o => o.items.length)) };
   }, opt);

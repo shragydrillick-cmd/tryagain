@@ -28,16 +28,16 @@ const fs = require('fs');
   const card = n => p.locator('.reviewcard').filter({ hasText: n });
   // 80002: the missing item is a Bib in B3... the slip says 3, so add the missing item
   await card('#80002').locator('text=+ Add a missing item').click();
-  const last = card('#80002').locator('.fixrow').last();
-  await last.locator('.fixname').fill('Knit Pom Pom Hat'); await last.locator('.fixname').dispatchEvent('change');
-  await last.locator('.fixbin').fill('a-7'); await last.locator('.fixbin').dispatchEvent('change');
+  const last = card('#80002').locator('.fixitem').last();
+  await last.locator('input[aria-label="Item"]').fill('Knit Pom Pom Hat'); await last.locator('input[aria-label="Item"]').dispatchEvent('change');
+  await last.locator('input[aria-label="Bin"]').fill('a-7'); await last.locator('input[aria-label="Bin"]').dispatchEvent('change');
   console.log('80002 count now:', await card('#80002').locator('text=/Items now/').innerText());
   await card('#80002').locator('text=Confirmed ✓').click();
   // 80003: type the bin
-  await card('#80003').locator('.fixbin').fill('A15'); await card('#80003').locator('.fixbin').dispatchEvent('change');
+  await card('#80003').locator('input[aria-label="Bin"]').fill('A15'); await card('#80003').locator('input[aria-label="Bin"]').dispatchEvent('change');
   await card('#80003').locator('text=Confirmed ✓').click();
   // 80004: quantity is really 2
-  await card('#80004').locator('.fixqty').fill('2'); await card('#80004').locator('.fixqty').dispatchEvent('change');
+  await card('#80004').locator('input[aria-label="Quantity"]').fill('2'); await card('#80004').locator('input[aria-label="Quantity"]').dispatchEvent('change');
   await card('#80004').locator('text=Confirmed ✓').click();
   // duplicate 80001: leave it used once
   await card('#80001').locator('text=Confirmed ✓').click();
