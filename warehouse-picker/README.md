@@ -37,12 +37,15 @@ add up is named so it can be checked by hand. Slips that run onto a second page
 are joined up. Addresses and phone numbers are ignored, and nothing leaves the
 phone. If a slip has no bin for an item, the inventory (by SKU) fills it in.
 
-**Check these.** Anything missing or uncertain stops for a person to look at:
-a slip whose items don't add up to its "Total items", no "Total items" at all,
-an item with no bin, no quantity or no name, the same order in the files twice
-(used once unless you keep both), or a page with no order number. Each shows
-what was read; fix the bin/quantity/name, add a missing item or remove one,
-then tap **Confirmed ✓**. A red banner stays until everything is checked.
+**Please look.** Every item must have its name, bin, quantity, SKU and barcode.
+Anything missing or uncertain stops for a person to look at: an item missing any
+of those, a slip whose items don't add up to its "Total items", no "Total items"
+at all, the same order in the files twice (used once unless you keep both), or a
+page with no order number. Each order with a problem shows its items one by one,
+every piece of information in its own box with its name above it (Item, Colour /
+size, Bin, Quantity, SKU, Barcode). Missing ones are marked in red to fill in;
+anything can be changed, an item deleted (tap twice) or a missing one added,
+then tap **Confirmed**. A red banner stays until everything is checked.
 
 `tests/slip-reading.test.js` checks this against 60 test slips in five layouts.
 
