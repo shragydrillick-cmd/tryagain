@@ -199,6 +199,7 @@ img.qr.big { width: 320px; }
 .scanmsg { margin: 10px 0 6px; font-size: 17px; text-align: center; }
 .scanbar { height: 8px; background: rgba(255,255,255,.2); border-radius: 4px; overflow: hidden; }
 .scanbar > div { height: 100%; width: 0; background: #5fd08f; transition: width .2s; }
+.alsobox { font-size: 13.5px; font-weight: 700; color: var(--accent); margin-top: 2px; }
 .icode { font-size: 13.5px; color: var(--text); opacity: .85; font-variant-numeric: tabular-nums; letter-spacing: .02em; margin-top: 1px; }
 .scanner.barcode .scanview { flex: 0 0 34vh; }
 .scanframe.wide { width: 90%; aspect-ratio: auto; height: 40%; }
@@ -571,6 +572,20 @@ function parseSlips(pages) {
         if (newItem) blocks.push({ lines: [], top: l.y, bottom: l.y });
         const bl = blocks[blocks.length - 1]; bl.lines.push(l.text); bl.bottom = l.y;
       });
+      // One item kept in two boxes: the slip lists a second bin under the first, with no quantity of its own.
+      // Fold it into the bin next to it (only when there are more bins than items).
+      for (let k = marks.length - 1; k >= 0 && blocks.length < marks.length; k--) {
+        const m = marks[k];
+        if (m.qty != null || !m.bin) continue;
+        // its partner: the nearest bin that has a quantity
+        let best = null;
+        marks.forEach(o => { if (o !== m && o.qty != null && o.bin && Math.abs(o.y - m.y) < lineH * 2.2 && (!best || Math.abs(o.y - m.y) < Math.abs(best.y - m.y))) best = o; });
+        if (!best) continue;
+        const upper = best.y >= m.y ? best : m, lower = upper === best ? m : best; // the first box is the upper one
+        best.also = [...(best.also || []), lower.bin]; best.bin = upper.bin;
+        best.y = Math.max(best.y, m.y);
+        marks.splice(k, 1);
+      }
       // Match items to bin/quantity rows: in order when the counts agree; otherwise by position.
       let groups;
       if (blocks.length === marks.length) groups = blocks.map((bl, i) => ({ m: marks[i], lines: bl.lines }));
@@ -610,7 +625,7 @@ function parseSlips(pages) {
           name: cut > 0 ? nameText.slice(0, cut).trim() : nameText,
           details: cut > 0 ? nameText.slice(cut + 3).trim() : "",
           sku, barcode,
-          bin: g.m.bin ? normBox(g.m.bin) : "", qty: g.m.qty == null ? 1 : g.m.qty, qtyMissing: g.m.qty == null, unsure: !!g.unsure,
+          bin: g.m.bin ? normBox(g.m.bin) : "", also: (g.m.also || []).map(normBox).filter(Boolean), qty: g.m.qty == null ? 1 : g.m.qty, qtyMissing: g.m.qty == null, unsure: !!g.unsure,
         });
       });
       left.length = 0; bins.length = 0; qtys.length = 0;
@@ -663,7 +678,7 @@ function parseSlips(pages) {
 function slipsToLines(parsed) {
   const lines = [];
   parsed.orders.forEach(o => o.items.forEach(it => {
-    lines.push({ order: o.order, box: it.bin || "?", code: it.sku || it.barcode, sku: it.sku || "", barcode: it.barcode || "", name: it.name, details: it.details, qty: it.qty,
+    lines.push({ order: o.order, box: it.bin || "?", code: it.sku || it.barcode, sku: it.sku || "", barcode: it.barcode || "", also: (it.also || []).join(", "), name: it.name, details: it.details, qty: it.qty,
       qtyMissing: !!it.qtyMissing, slip: o });
   }));
   return lines;
@@ -815,6 +830,9 @@ function lineCodes(l) {
 const codesText = t => [t.barcode || "", t.sku ? `SKU ${t.sku}` : ""].filter(Boolean).join(" · "); // the barcode number on its own, then the SKU
 /** Under an item: the barcode number, and the SKU on the line below it. */
 const codesEls = t => [t.barcode ? h("div", { class: "icode" }, t.barcode) : null, t.sku ? h("div", { class: "icode" }, `SKU ${t.sku}`) : null];
+/** An item kept in two boxes: "Also in box D97". */
+const alsoText = t => (t.also ? `Also in box ${t.also}` : "");
+const alsoEl = t => (t.also ? h("div", { class: "alsobox" }, alsoText(t)) : null);
 /** The whole plan: pick list (shelf order) + unpack list (last picked first). */
 function makePlan(lines, settings) {
   const { locate } = buildLocator(settings);
@@ -824,7 +842,7 @@ function makePlan(lines, settings) {
     const o = orders.get(l.order);
     o.units += l.qty;
     const k = `${l.box}\u0000${l.name}\u0000${l.details}`;
-    if (!o.things.has(k)) o.things.set(k, { box: l.box, name: l.name, details: l.details, qty: 0, ...lineCodes(l) });
+    if (!o.things.has(k)) o.things.set(k, { box: l.box, also: l.also || "", name: l.name, details: l.details, qty: 0, ...lineCodes(l) });
     o.things.get(k).qty += l.qty;
   });
   const orderList = [...orders.values()];
@@ -834,7 +852,7 @@ function makePlan(lines, settings) {
   // One pick line per box + item (a box can hold more than one kind of item)
   const picks = new Map();
   orderList.forEach(o => o.things.forEach((t, k) => {
-    if (!picks.has(k)) picks.set(k, { box: t.box, name: t.name, details: t.details, barcode: t.barcode, sku: t.sku, qty: 0, orders: [], loc: locate(t.box) });
+    if (!picks.has(k)) picks.set(k, { box: t.box, also: t.also, name: t.name, details: t.details, barcode: t.barcode, sku: t.sku, qty: 0, orders: [], loc: locate(t.box) });
     const p = picks.get(k);
     p.qty += t.qty;
     p.orders.push({ label: o.label, raw: o.raw, qty: t.qty });
@@ -856,7 +874,7 @@ function makePlan(lines, settings) {
   [...list].reverse().forEach(p => {
     p.orders.forEach(o => {
       left.set(o.label, left.get(o.label) - o.qty);
-      unpack.push({ box: p.box, name: p.name, details: p.details, barcode: p.barcode, sku: p.sku, marks: p.marks, qty: o.qty, label: o.label, raw: o.raw, last: left.get(o.label) === 0 });
+      unpack.push({ box: p.box, also: p.also, name: p.name, details: p.details, barcode: p.barcode, sku: p.sku, marks: p.marks, qty: o.qty, label: o.label, raw: o.raw, last: left.get(o.label) === 0 });
     });
   });
   unpack.forEach((u, i) => { u.step = i + 1; });
@@ -1486,6 +1504,7 @@ function itemCell(t, extra) {
     h("div", { class: "iname" }, hl(itemName(t), t.marks)),
     t.details ? h("div", { class: "idet" }, hl(t.details, t.marks)) : null,
     ...codesEls(t),
+    alsoEl(t),
     extra ? h("div", { class: "idet" }, extra) : null);
 }
 /** Consecutive pick lines from the same box on the same unit. */
@@ -1581,7 +1600,8 @@ function stepContent(i, isCurrent) {
           h("div", { class: "iname" }, hl(itemName(p), p.marks)),
           ...(p.details ? [h("div", { class: "idet" }, hl(p.details, p.marks))] : []),
           ...(p.barcode ? [h("div", { class: "bigbarcode" }, p.barcode)] : []), // big and clear, to match against the label in the bin
-          ...(p.sku ? [h("div", { class: "icode" }, `SKU ${p.sku}`)] : [])))))];
+          ...(p.sku ? [h("div", { class: "icode" }, `SKU ${p.sku}`)] : []),
+          ...(p.also ? [alsoEl(p)] : [])))))];
   }
   // "last item" depends on what is still to come, so a skipped item keeps its order open
   const rest = (isCurrent ? seq.slice(stepAt + 1) : seq.slice(stepAt)).filter(j => j !== i && stepItems[j].label === u.label);
@@ -2587,7 +2607,7 @@ function drawRich(doc, lines, x, y, size, bold, lineH, grey) {
 function itemBlock(doc, t, width) {
   const nameLines = layoutRich(doc, itemName(t), t.marks, width, 12, true);
   const detLines = t.details ? layoutRich(doc, t.details, t.marks, width, 9, false) : [];
-  const codeLines = [t.barcode, t.sku ? `SKU ${t.sku}` : ""].filter(Boolean).flatMap(x => layoutRich(doc, x, null, width, 9, false)); // barcode, SKU below
+  const codeLines = [t.barcode, t.sku ? `SKU ${t.sku}` : "", alsoText(t)].filter(Boolean).flatMap(x => layoutRich(doc, x, null, width, 9, false)); // barcode, SKU below
   return { nameLines, detLines, codeLines, height: nameLines.length * 14 + (detLines.length + codeLines.length) * 11 };
 }
 function drawItemBlock(doc, b, x, y) {

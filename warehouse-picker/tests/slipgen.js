@@ -40,7 +40,10 @@ window.makeSlips = function (orders, opts = {}) {
       }
       doc.setFillColor(150); doc.rect(X.thumb, y + 2, 22, 22, 'F'); doc.setDrawColor(255); doc.line(X.thumb, y + 24, X.thumb + 22, y + 2); doc.setDrawColor(0); // picture
       lines.forEach((t, i) => doc.text(t, X.name, y + i * LH));
-      if (it.bin) doc.text(it.bin, X.bin, y + LH * (opts.binDy ?? 0.55));
+      // an item kept in two boxes: the two bins stacked one above the other, either side of the quantity (as on real slips)
+      const by = LH * (it.bin2 ? (opts.qtyDy ?? 0.15) : (opts.binDy ?? 0.55)), bh = it.bin2 ? LH * 0.6 : 0;
+      if (it.bin) doc.text(it.bin, X.bin, y + by - bh);
+      if (it.bin2) doc.text(it.bin2, X.bin, y + by + bh);
       if (it.qty != null) doc.text(String(it.qty), X.qty, y + LH * (opts.qtyDy ?? 0.15));
       y += h + (opts.itemGap ?? 12);
     });

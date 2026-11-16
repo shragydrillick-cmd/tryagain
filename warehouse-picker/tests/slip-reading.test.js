@@ -35,7 +35,9 @@ const fs = require('fs');
         const variant = vars[rnd(vars.length)];
         const sku = rnd(7) === 0 ? '' : 'BO' + (9000 + rnd(900));
         const barcode = rnd(9) === 0 ? '' : '47416311' + String(10000 + rnd(89999));
-        items.push({ title, variant, sku, barcode, bin: bins[rnd(bins.length)], qty: rnd(5) === 0 ? 2 + rnd(11) : 1 });
+        const it = { title, variant, sku, barcode, bin: bins[rnd(bins.length)], qty: rnd(5) === 0 ? 2 + rnd(11) : 1 };
+        if (rnd(10) === 0) it.bin2 = bins[rnd(bins.length)]; // one item kept in two boxes
+        items.push(it);
       }
       if (k === 0) { // exactly the photo
         items.splice(0, 2,
@@ -59,7 +61,7 @@ const fs = require('fs');
       o.items.forEach((it, ii) => {
         const g = got.items[ii]; itemsChecked++;
         if (!g) return;
-        const want = { name: it.title, details: it.variant || '', sku: it.sku, barcode: it.barcode, bin: normBox(it.bin), qty: it.qty };
+        const want = { name: it.title, details: it.variant || '', sku: it.sku, barcode: it.barcode, bin: normBox(it.bin), also: it.bin2 ? normBox(it.bin2) : '', qty: it.qty };
         for (const k of Object.keys(want)) if (String(g[k]) !== String(want[k])) problems.push(`order ${o.number} item ${ii + 1} ${k}: expected "${want[k]}", read "${g[k]}"`);
       });
       const flagged = slipProblems(got, got.items.map(it => ({ name: it.name, code: it.sku, box: it.bin || '?', qty: it.qty, qtyMissing: it.qtyMissing }))).length > 0;
