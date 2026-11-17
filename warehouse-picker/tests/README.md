@@ -71,3 +71,10 @@ for the auth (9099) and firestore (8080) emulators:
 `firebase emulators:start --project pick-and-sort --only auth,firestore`.
 
 The other tests run with accounts switched off (`noauth.js`).
+
+`bins.test.js` checks Bins (practice): loading the practice items, the List (by bin, empty bins, items not in a
+bin, sort, company filter, search), an item's colours and sizes and one size's details, a bin's Edit page (move,
+the "bin taken" warning with See details, Undo, Edit all with See empty bins), Add / Edit (choose sizes, add to a
+bin), scanning a bin's sticker and then items into it, the inventory-changes switch, History, and that picking
+and settings are untouched.
+

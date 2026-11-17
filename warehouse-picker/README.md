@@ -221,6 +221,27 @@ free plan needs no card and can't charge). Once switched on:
   `ACCOUNTS_ON` to `true` in index.html. Until then the app works as before,
   on each device alone.
 
+## Bins (practice)
+
+Settings → **Bins**: which bin each item is kept in. For now it's practice only: it's kept on the device by
+itself, isn't shared, and picking, sorting and packing never look at it (Settings → More → Bins → "Use bins
+for orders" stays Off).
+
+- **Practice** loads example items (several brands, sizes and colours), most already in bins.
+- **List**: every bin in shelf order with the items in it by their general name; empty bins too. Sort by
+  bin, A–Z, company or recently added; filter by company and by full / empty bins / items not in a bin;
+  search by name, barcode, SKU or bin; **Scan** an item (shows where it is) or a bin's sticker (opens it).
+  Tap an item for its colours and sizes; tap a size for its barcode, SKU and bin.
+- **A bin's Edit page**: every exact item in it, grouped by item, each with Edit; for one size, one item or
+  **Edit all**: remove from the bin, move to another bin, or add a second bin (it's then in either one,
+  shown as D91 / D97). **Scan items into** the bin: scan each item; scanning another bin's sticker switches
+  bins. Typing a bin that's taken warns, with **See details** to take things out of it.
+- **Add / Edit**: **Scan** or **Manual** (search), then only this size, chosen sizes or all of them,
+  **+ Add to bin** (type it, **See empty bins**, or **Scan bin**).
+- **Undo** for a few seconds after each change, and **History** of every change.
+- Settings → More → Bins → **Allow inventory changes** (off): lets item names, companies, sizes, colours,
+  barcodes and SKUs be changed here too.
+
 ## Settings: Map and Order
 
 Settings opens with two buttons:
