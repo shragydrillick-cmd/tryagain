@@ -86,6 +86,8 @@ const ok = (label, cond, extra = '') => { if (!cond) bad++; console.log(`${cond 
   ok('live: worker gets the owner\'s list', await until(worker, () => typeof plan !== 'undefined' && plan && plan.orders.length === 5, null, 10000));
   await worker.evaluate(() => { ['5012345000077', '5012345000015'].forEach(c => placeItem(c)); saveList(); });
   ok('live: owner sees the worker\'s scans', await until(owner, () => typeof unpackDone !== 'undefined' && unpackDone.size >= 2, null, 10000));
+  const sizes = await owner.evaluate(async () => { const d = (await listDoc().get()).data(); return { packed: d.z.length, plain: (await unpackText(d.z)).length }; });
+  ok('shared list is packed small', sizes.packed * 2 < sizes.plain, `${sizes.plain} → ${sizes.packed} characters`);
   ok('Sunrise (live off) doesn\'t get Moonlight\'s list', !(await boss.evaluate(() => !!(typeof plan !== 'undefined' && plan))));
 
   // 6. the company turns live sharing off: the worker stops getting changes

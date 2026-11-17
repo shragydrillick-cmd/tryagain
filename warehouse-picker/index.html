@@ -1975,7 +1975,8 @@ async function syncPush() {
   if (!syncOn()) return;
   const rev = sync.rev + 1, data = sync.lastStr || JSON.stringify(sharedState());
   try {
-    await listDoc().set({ data, rev, at: Date.now(), by: acct.uid });
+    // packed small (like a zip, nothing lost): 5–10 times less to send to every phone
+    await listDoc().set({ z: await packText(data), rev, at: Date.now(), by: acct.uid });
     sync.rev = rev; sync.dirty = false; keepSync(); setSync("ok");
   } catch (e) { setSync("offline", e.code === "permission-denied" ? "no access" : e.message); }
 }
@@ -2615,7 +2616,14 @@ function startSync() {
     if (snap.metadata.hasPendingWrites) return;
     if (!snap.exists) { if (current) { sync.lastStr = null; syncChanged(); } setSync("ok"); return; }
     const d = snap.data(), rev = d.rev || 0;
-    if (rev > sync.rev) { sync.rev = rev; sync.dirty = false; keepSync(); applyRemote(JSON.parse(d.data)); }
+    if (rev > sync.rev) {
+      sync.rev = rev; sync.dirty = false; keepSync();
+      // unpacked in turn, so updates are applied in the order they came
+      sync.chain = (sync.chain || Promise.resolve()).then(async () => {
+        const text = d.z ? await unpackText(d.z) : d.data; // a list sent unpacked (by an older version) reads too
+        if (sync.rev === rev) applyRemote(JSON.parse(text));
+      }).catch(e => setSync("offline", "couldn't read the shared list"));
+    }
     else if (sync.dirty) syncPush();
     setSync("ok");
   }, e => setSync("offline", e.code === "permission-denied" ? "no access" : e.message));
