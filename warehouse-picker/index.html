@@ -1562,8 +1562,7 @@ function rebuild() {
     `${current.missing.length} item number(s) aren't in your inventory, so they're listed at the end with bin "?": ${current.missing.slice(0, 12).join(", ")}${current.missing.length > 12 ? "…" : ""}.`));
   const unknownBins = plan.unknown.filter(b => b !== "?");
   if (unknownBins.length) w.append(h("div", { class: "notice warn" },
-    h("span", null, `${unknownBins.length} box number(s) aren't on your shelf map yet, so they're listed by aisle and number: ${unknownBins.slice(0, 12).join(", ")}${unknownBins.length > 12 ? "…" : ""}. `),
-    h("button", { class: "btn small", type: "button", style: "margin-top:6px", onclick: e => tapTwice(e.currentTarget, "Replace your shelf map?", () => { if (buildMapFromBins()) rebuild(); }) }, "Make a map from my bins")));
+    h("span", null, `${unknownBins.length} box number(s) aren't on your shelf map yet, so they're listed by aisle and number: ${unknownBins.slice(0, 12).join(", ")}${unknownBins.length > 12 ? "…" : ""}.`)));
   if (current.warnings.length) w.append(h("div", { class: "notice warn" }, current.slips
     ? current.warnings.map(t => h("div", null, "• " + t))
     : [current.warnings.slice(0, 5).join(" "), current.warnings.length > 5 ? ` (+${current.warnings.length - 5} more)` : ""]));
@@ -3621,9 +3620,6 @@ function renderAdvanced() {
     allUnitsCard(),
     h("section", { class: "card" },
       h("h2", null, "Your aisles"),
-      h("div", { class: "row", style: "margin-bottom:8px" },
-        h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace your shelf map?", () => { if (buildMapFromBins()) renderSettings(); }) }, "Make a map from my bins"),
-        h("span", { class: "small muted" }, "Fills in each aisle's first and last box from your inventory and orders. Then set its shelves.")),
       h("p", { class: "small muted" }, "Fill in each aisle's shelves, then how you want to pick it. Open \"Show the picking order\" to check."),
       h("div", { id: "checks" }),
       settings.units.map((u, ui) => unitCard(u, ui)),
@@ -3912,8 +3908,6 @@ function renderMapPage(v) {
     h("div", { class: "row", style: "margin-top:12px" },
       h("button", { class: "btn", type: "button", onclick: () => startWizard("add") }, "+ Add an aisle"),
       h("button", { class: "btn secondary", type: "button", onclick: () => startWizard("all") }, "Change all")),
-    h("div", { class: "row", style: "margin-top:10px" },
-      h("button", { class: "btn secondary small", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace your map?", () => { if (buildMapFromBins()) renderSettings(); }) }, "Make a map from my bins")),
     h("h3", null, "Find a box"),
     h("div", { class: "row" }, h("input", { type: "text", id: "probe", placeholder: "e.g. C14", style: "width:120px", oninput: renderChecks }), h("span", { id: "probeOut" }))));
   renderChecks();
