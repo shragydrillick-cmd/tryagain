@@ -186,6 +186,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
     /// several QR codes, each drawn and decoded like the camera would, then put back together.
     private func selfTestQr() {
         let js = """
+        clearList(true); // a fresh start (with a list already there, loading asks Replace or Merge)
         document.getElementById('exampleBtn').click();
         const want = plan.orders.length, packed = await packText(JSON.stringify(listToSend()));
         const n = Math.ceil(packed.length / 120), parts = [];
@@ -218,6 +219,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
     /// reader the app uses on iPhone, and the same item goes to its two orders one after the other.
     private func selfTestBarcode() {
         let js = """
+        clearList(true); // a fresh start (with a list already there, loading asks Replace or Merge)
         useRows(parseDelimited('Order,Box,Item,Details,Barcode,SKU,Qty\\n53796,C87,Lil Legs Sweatshirt Set,Deep Red - 2T,735380754426,LL2207-2T,1\\n53797,C87,Lil Legs Sweatshirt Set,Deep Red - 2T,735380754426,LL2207-2T,1'), 'selftest.csv');
         const L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
         const R = L.map(x => [...x].map(b => (b === '0' ? '1' : '0')).join('')), G = R.map(x => [...x].reverse().join(''));
