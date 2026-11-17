@@ -1312,14 +1312,15 @@ async function download(blob, name) {
 /* ---------- loading ---------- */
 function showLoadMsg(text, kind) { $("loadMsg").innerHTML = ""; if (text) $("loadMsg").append(h("div", { class: `notice ${kind || "warn"}` }, text)); }
 
-function useRows(rows, name) {
+function useRows(rows, name, again) {
   const r = rowsToLines(rows, $("formatSel").value);
   if (!r.lines.length) { showLoadMsg("Couldn't find any orders in that file. " + (r.warnings[0] || "Try the template.")); return; }
   const inv = settings.inventory;
   const useInv = !!(inv && inv.rows && inv.rows.length && !r.hasBin);
   const missing = useInv ? applyInventory(r.lines, inv) : [];
-  current = { lines: r.lines, warnings: r.warnings, name, src: rows, usedInventory: useInv, missing };
-  showResults();
+  const next = { lines: r.lines, warnings: r.warnings, name, src: rows, usedInventory: useInv, missing };
+  if (again) { current = next; showResults(); return; } // the same orders matched again (inventory or layout changed)
+  takeIncoming({ current: next }, `from ${name}`);
 }
 /** Packing slips: read, check, and use. */
 function useSlips(parsed, name) {
@@ -1336,9 +1337,8 @@ function useSlips(parsed, name) {
     return slipProblems(o, ls).length ? { slip: o, done: false, keepBoth: false } : null;
   }).filter(Boolean);
   const dupLines = new Set(lines.filter(l => l.slip.dupOf)); // copies are left out until "keep both"
-  current = { lines: lines.filter(l => !dupLines.has(l)), parked: [...dupLines], warnings: parsed.warnings, name, src: null,
-    slips: { all: parsed.all, checked: parsed.checked, pages: parsed.pages }, review, usedInventory: false, missing };
-  showResults();
+  takeIncoming({ current: { lines: lines.filter(l => !dupLines.has(l)), parked: [...dupLines], warnings: parsed.warnings, name, src: null,
+    slips: { all: parsed.all, checked: parsed.checked, pages: parsed.pages }, review, usedInventory: false, missing } }, `from ${name}`);
 }
 function showResults() {
   showLoadMsg("");
@@ -1383,7 +1383,7 @@ function useInventory(rows, name) {
   settings.inventory = { name, loaded: new Date().toISOString(), rows: r.rows };
   saveSettings();
   showInvStatus(null, null, r.warnings);
-  if (current && current.src) useRows(current.src, current.name); // re-match the orders already loaded
+  if (current && current.src) useRows(current.src, current.name, true); // re-match the orders already loaded
 }
 function showInvStatus(msg, kind, warnings) {
   const box = $("invStatus"); box.replaceChildren();
@@ -1394,7 +1394,7 @@ function showInvStatus(msg, kind, warnings) {
   box.append(h("div", { class: "notice good" }, `✓ ${inv.rows.length.toLocaleString()} items from ${inv.name} (${when}). `,
     h("button", { class: "link", type: "button", onclick: e => tapTwice(e.currentTarget, "Forget the inventory?", () => {
       delete settings.inventory; saveSettings(); showInvStatus();
-      if (current && current.src) useRows(current.src, current.name);
+      if (current && current.src) useRows(current.src, current.name, true);
     }) }, "Remove")));
   if (warnings && warnings.length) box.append(h("div", { class: "notice warn" }, warnings.slice(0, 4).join(" "), warnings.length > 4 ? ` (+${warnings.length - 4} more)` : ""));
 }
@@ -1406,7 +1406,7 @@ $("invInput").addEventListener("change", async e => {
 $("invTemplateBtn").onclick = () => download(new Blob(["Item Number,Bin,Name,Details\n"], { type: "text/csv" }), "inventory-template.csv");
 $("pasteToggle").onclick = () => $("pasteBox").classList.toggle("hidden");
 $("pasteGo").onclick = () => useRows(parseDelimited($("pasteText").value), "Pasted list");
-$("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name); };
+$("formatSel").onchange = () => { if (current && current.src) useRows(current.src, current.name, true); };
 
 const EXAMPLE = `Order,Box,Item,Details,Qty,Barcode,SKU
 10452,A3,Fleece blanket,"Blue, 50x60 in",1,5012345000015,FB-BLU
@@ -1883,8 +1883,18 @@ async function showSendBox() {
       h("p", { class: "small" }, `This list is ${n} codes that change by themselves. On the other phone or computer: Pick & Sort → `, h("b", null, "Receive"),
         ", and hold it on the codes until it says it has them all (it catches them in any order)."), pause);
   }
+  // just in case: one code that a phone's own camera app opens (as a link to the website, which then asks Replace / Merge)
+  const camArea = h("div");
+  const camBtn = h("button", { class: "btn secondary small", type: "button", style: "margin-top:8px", onclick: async () => {
+    if (camArea.childNodes.length) { camArea.replaceChildren(); camBtn.textContent = "Phone camera instead"; return; }
+    camBtn.textContent = "Hide the phone camera code";
+    camArea.replaceChildren(link.length <= 1800
+      ? h("div", null, h("img", { src: await qrUrl(link, 8), alt: "QR code for a phone's camera", class: "qr big" }),
+          h("p", { class: "small" }, "For a phone's own camera app: it opens the list on the website. (Pick & Sort's Receive reads this one too, but the codes above are easier for it.)"))
+      : h("p", { class: "small muted" }, "This list is too big for one phone-camera code. Use Receive in Pick & Sort, or Other ways below."));
+  } }, "Phone camera instead");
   box.replaceChildren(
-    h("h3", { style: "margin-top:0" }, "Send this list"), codeArea,
+    h("h3", { style: "margin-top:0" }, "Send this list"), codeArea, camBtn, camArea,
     h("details", null, h("summary", { class: "small" }, "Other ways"),
       h("div", { class: "row", style: "margin-top:8px" },
         navigator.share ? h("button", { class: "btn secondary small", type: "button", onclick: () => navigator.share({ title: "Pick list", url: link }).catch(() => {}) }, "Share link…") : null,
@@ -1983,29 +1993,56 @@ function applyTickKeys(t) {
   renderPick(); renderUnpack(); saveList();
 }
 const lineId = l => `${l.order}|${l.box}|${l.name}|${l.details}`;
-/** A list from another device (Receive, a link, or a file). With no list here, it's used as it came, with its
-    ticks. With a list here, only what's new is added: orders, ticks and piles already on this phone stay exactly
-    as they are, and order numbers don't change. */
+/** A list from another device (Receive, a link, or a file), with what was already done on it. */
 function receiveList(data, how) {
   const lines = data ? linesOf(data) : [];
   if (!lines.length) { showLoadMsg("That list is empty or damaged."); return; }
   const tk = data.ticks || {};
-  const theirs = { picked: new Set(tk.picked || []), unpacked: new Set(tk.unpacked || []), placed: new Map(tk.placed || []), packed: new Map(tk.packed || []) };
+  takeIncoming({ current: { lines, warnings: data.warnings || [], name: data.name || "List from another device", src: null, openChecks: data.openChecks || 0 },
+    ticks: { picked: new Set(tk.picked || []), unpacked: new Set(tk.unpacked || []), placed: new Map(tk.placed || []), packed: new Map(tk.packed || []) } }, how);
+}
+/** New orders came in (a file, slips, Practice, Manual, or another device). Nothing loaded yet: they're used
+    straight away. Orders already there: it asks, Replace (the old ones are cleared) or Merge (only what's new is
+    added; everything already there keeps its ticks, piles, Packed and order numbers). */
+function takeIncoming(inc, how) {
+  const n = new Set(inc.current.lines.map(l => l.order)).size;
+  const replace = () => {
+    if (!$("stepper").classList.contains("hidden")) closeSteps();
+    current = inc.current; showResults();
+    if (inc.ticks) applyTickKeys(inc.ticks);
+    toast(`${plural(n, "order")} loaded.`);
+  };
+  if (!current || !plan) return replace();
+  const had = plan.orders.length;
+  $("loadMsg").replaceChildren(h("div", { class: "notice warn askmerge" },
+    h("b", null, "There are already orders uploaded."),
+    h("div", { class: "small", style: "margin-top:4px" }, `You have ${plural(had, "order")}; ${plural(n, "order")} came ${how}. Replace clears what's there and uses the new ones. Merge adds the new ones and keeps everything that's there, with what's done on it.`),
+    h("div", { class: "row", style: "margin-top:10px" },
+      h("button", { class: "btn", type: "button", onclick: replace }, "Replace"),
+      h("button", { class: "btn", type: "button", onclick: () => mergeIn(inc, how) }, "Merge"))));
+  $("loadMsg").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function mergeIn(inc, how) {
+  const add = inc.current, theirs = inc.ticks || { picked: new Set(), unpacked: new Set(), placed: new Map(), packed: new Map() };
   if (!$("stepper").classList.contains("hidden")) closeSteps();
-  if (!current || !plan) {
-    current = { lines, warnings: data.warnings || [], name: data.name || "List from another device", src: null, openChecks: data.openChecks || 0 };
-    $("loadMsg").replaceChildren(); rebuild(); applyTickKeys(theirs);
-    toast(`List received (${how}).`); return;
-  }
   const have = new Set(current.lines.map(lineId)), haveOrders = new Set(current.lines.map(l => l.order));
-  const fresh = lines.filter(l => !have.has(lineId(l)));
-  if (!fresh.length) { $("loadMsg").replaceChildren(); toast(`Nothing new (${how}): you already have every order in it.`); return; }
+  const fresh = add.lines.filter(l => !have.has(lineId(l)));
+  if (!fresh.length) { $("loadMsg").replaceChildren(h("div", { class: "notice good" }, `Nothing new ${how}: you already have every order in it.`)); return; }
   const mine = tickKeys();
   const batch = Math.max(0, ...current.lines.map(l => l.batch || 0)) + 1;
   fresh.forEach(l => { l.batch = batch; });
   current.lines = current.lines.concat(fresh);
+  // slips to check, warnings and counts from the new ones come along
+  const freshSlips = new Set(fresh.map(l => l.slip).filter(Boolean));
+  if (add.review) current.review = (current.review || []).concat(add.review.filter(r => freshSlips.has(r.slip)));
+  if (add.parked) current.parked = (current.parked || []).concat(add.parked);
+  current.warnings = (current.warnings || []).concat(add.warnings || []);
+  if (add.slips) current.slips = current.slips ? { all: current.slips.all + add.slips.all, checked: current.slips.checked + add.slips.checked, pages: current.slips.pages + add.slips.pages } : add.slips;
+  if (add.missing && add.missing.length) current.missing = [...new Set((current.missing || []).concat(add.missing))];
+  current.src = null; // two lists in one: no re-matching the first one's rows
+  current.name = `${current.name} + ${add.name}`;
   rebuild();
-  // ticks: everything on this phone stays; for the new lines, what the other device had done
+  // ticks: everything already here stays; for the new lines, what the other device had done
   const newOrders = new Set(fresh.map(l => l.order).filter(o => !haveOrders.has(o)));
   plan.picks.filter(p => p.batch === batch && theirs.picked.has(`${p.box}|${p.name}|${p.details}`)
     && p.orders.every(o => newOrders.has(o.raw))).forEach(p => mine.picked.add(pickKey(p)));
@@ -2016,8 +2053,9 @@ function receiveList(data, how) {
   });
   theirs.packed.forEach((at, raw) => { if (newOrders.has(raw)) mine.packed.set(raw, at); });
   applyTickKeys(mine);
+  const extra = fresh.filter(l => haveOrders.has(l.order)).length;
   $("loadMsg").replaceChildren(h("div", { class: "notice good" },
-    `Added ${plural(newOrders.size, "new order")} ${how}${fresh.some(l => haveOrders.has(l.order)) ? `, and ${plural(fresh.filter(l => haveOrders.has(l.order)).length, "new item")} to orders you already had` : ""}. Everything you already had, and what's done on it, is unchanged.`));
+    `Merged: added ${plural(newOrders.size, "new order")} ${how}${extra ? `, and ${plural(extra, "new item")} to orders you already had` : ""}. Everything you already had, and what's done on it, is unchanged.`));
   toast(`Added ${plural(newOrders.size, "new order")}.`);
 }
 

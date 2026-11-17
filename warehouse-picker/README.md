@@ -177,10 +177,14 @@ orders and items load on the phone, with nothing else to send.
   change by themselves (e.g. 80 orders, 277 lines = 13 codes). Hold the phone on them: it counts
   "Got 3 of 13 codes…" and catches them in any order. It took about 13 seconds in the test.
 - What's already picked, sorted and packed comes along with the orders.
-- If the phone already has a list, only what's new is added: new orders come after the ones already
-  there (their numbers don't change), and everything on the phone keeps its ticks, piles and Packed.
-  A new order's item from a box already picked gets its own line in the pick list. The same list
-  again changes nothing.
+- **Phone camera instead** (under the code): one code a phone's own camera app can open (it opens the
+  list on the website), just in case.
+- **Replace or Merge**: whenever orders come in (Add file, Practice, Manual, Receive, a link or a file) and
+  there are already orders, it says "There are already orders uploaded" with **Replace** (clears them and
+  uses the new ones) or **Merge** (adds only what's new: new orders come after the ones already there, so
+  their numbers don't change, and everything already there keeps its ticks, piles and Packed; a new
+  order's item from a box already picked gets its own line in the pick list). With nothing there yet,
+  the orders just load.
 - **Other ways** (under the code): Copy link, Share link, Save as file (open it
   with **Choose file**).
 - The phone asks once for permission to use the camera. Nothing goes online.
