@@ -2013,11 +2013,9 @@ function takeIncoming(inc, how) {
     toast(`${plural(n, "order")} loaded.`);
   };
   if (!current || !plan) return replace();
-  const had = plan.orders.length;
-  $("loadMsg").replaceChildren(h("div", { class: "notice warn askmerge" },
+  $("loadMsg").replaceChildren(h("div", { class: "notice warn askmerge", style: "text-align:center" },
     h("b", null, "There are already orders uploaded."),
-    h("div", { class: "small", style: "margin-top:4px" }, `You have ${plural(had, "order")}; ${plural(n, "order")} came ${how}. Replace clears what's there and uses the new ones. Merge adds the new ones and keeps everything that's there, with what's done on it.`),
-    h("div", { class: "row", style: "margin-top:10px" },
+    h("div", { class: "row", style: "margin-top:10px;justify-content:center" },
       h("button", { class: "btn", type: "button", onclick: replace }, "Replace"),
       h("button", { class: "btn", type: "button", onclick: () => mergeIn(inc, how) }, "Merge"))));
   $("loadMsg").scrollIntoView({ behavior: "smooth", block: "center" });
