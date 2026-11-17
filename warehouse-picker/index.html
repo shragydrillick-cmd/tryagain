@@ -3695,8 +3695,10 @@ function showAppLinks() {
   const box = $("appLinks");
   if (!box || !/^https?:$/.test(location.protocol)) return;
   [["PickAndSort.apk", "⬇ Android app (APK)"], ["PickAndSort-unsigned.ipa", "⬇ iPhone app file (for Sideloadly / AltStore)"]].forEach(([file, label]) => {
-    fetch(file, { method: "HEAD" }).then(r => {
-      if (r.ok && $("appLinks")) $("appLinks").append(h("a", { class: "btn secondary", href: file, download: file }, label));
+    // the Firebase site can't hold app files (free plan): they're downloaded from the GitHub site
+    const url = (onFirebaseSite ? SITE : "") + file;
+    fetch(url, { method: "HEAD" }).then(r => {
+      if (r.ok && $("appLinks")) $("appLinks").append(h("a", { class: "btn secondary", href: url, download: file }, label));
     }).catch(() => {});
   });
 }
