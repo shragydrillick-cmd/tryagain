@@ -81,7 +81,7 @@ const ok = (label, cond, extra = '') => { if (!cond) bad++; console.log(`${cond 
   await fetch(codes.oobCodes.find(c => c.email === 'worker@test.com' && c.requestType === 'VERIFY_EMAIL').oobLink);
   await worker.click('#gate button:has-text("Check again")');
   ok('worker in after confirming their email', await open(worker));
-  if (await owner.evaluate(() => view === 'settings')) await owner.click('#navBtn');
+  for (let k = 0; k < 6 && await owner.evaluate(() => view === 'settings'); k++) await owner.click('#navBtn'); // Back… then Done
   await owner.click('#exampleBtn');
   ok('live: worker gets the owner\'s list', await until(worker, () => typeof plan !== 'undefined' && plan && plan.orders.length === 5, null, 10000));
   await worker.evaluate(() => { ['5012345000077', '5012345000015'].forEach(c => placeItem(c)); saveList(); });
