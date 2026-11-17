@@ -3117,7 +3117,7 @@ function renderBinPage(v) {
   const groups = [...new Map(list.map(x => [x.p.id, x.p])).values()];
   const inv = binsSettings().inventoryEdits, picked = list.filter(x => B.sel.has(x.v.id));
   const tick = (ids, on) => { ids.forEach(id => on ? B.sel.add(id) : B.sel.delete(id)); renderSettings(); };
-  v.replaceChildren(h("section", { class: "card" }, backRow("List", "binsList"),
+  v.replaceChildren(h("section", { class: "card" }, B.binFrom === "binsAdd" ? backRow("Add / Edit", "binsAdd") : backRow("List", "binsList"),
     h("div", { class: "row", style: "justify-content:space-between;align-items:center" }, h("h2", { style: "margin:0" }, `Bin ${bin}`),
       list.length ? h("button", { class: "btn small", type: "button", onclick: () => openBinEdit(bin, list, true) }, "Edit all") : null),
     h("button", { class: "btn addbin", type: "button", style: "margin:10px 0", onclick: () => scanIntoBin(bin) }, `Scan items into ${bin}`),
@@ -3214,6 +3214,7 @@ function renderBinsAdd(v) {
   }
   const p = productOf(B.pick.pid), sv = p && p.variants.find(x => x.id === B.pick.vid);
   if (!sv) { B.pick = null; return renderBinsAdd(v); }
+  parts[0] = h("button", { class: "link backlink", type: "button", onclick: () => { B.pick = null; renderSettings(); } }, "‹ Add / Edit"); // back one step: to finding an item
   const chosen = () => B.choice === "one" ? [sv] : B.choice === "all" ? p.variants : p.variants.filter(x => B.chosen.has(x.id));
   const radio = (val, label) => h("label", { class: "checkrow" }, h("input", { type: "radio", name: "bchoice", checked: B.choice === val, onchange: () => { B.choice = val; if (val === "chosen" && !B.chosen.size) B.chosen.add(sv.id); renderSettings(); } }), h("span", null, " " + label));
   const sel = chosen(), already = sel.filter(x => x.bins.length);
@@ -3586,6 +3587,8 @@ function pickingOrderGrid(u) {
 }
 let view = "home";
 $("navBtn").onclick = () => {
+  // inside Settings the top button goes back one step; only the first Settings page closes it
+  if (view === "settings" && (setPage !== "home" || chooser || $("binSheet"))) { window.appBack(); return; }
   view = view === "home" ? "settings" : "home";
   $("homeView").classList.toggle("hidden", view !== "home");
   $("settingsView").classList.toggle("hidden", view !== "settings");
@@ -3844,6 +3847,11 @@ function unitSummary(u) {
 
 const invPanel = $("invPanel");
 function renderSettings() {
+  if (B.lastPage !== setPage) { if (setPage === "binsBin") B.binFrom = B.lastPage; B.lastPage = setPage; } // a bin's page goes back to where it was opened from
+  renderSettingsPage();
+  if (view === "settings") $("navBtn").textContent = setPage === "home" ? "Done" : "Back";
+}
+function renderSettingsPage() {
   const v = $("settingsView");
   $("stash").append(invPanel); // back to its keeping place; the Inventory page takes it out again
   if (setPage === "advanced") { renderAdvanced(); v.prepend(backRow("More", "more")); return; }
@@ -4504,6 +4512,8 @@ window.appBack = () => {
   if (detailView) { if (detailView.kind === "order") { detailView = { kind: "orders" }; drawDetail(); } else closeDetail(); return true; }
   if (!$("stepper").classList.contains("hidden")) { if (stepView !== "step") { $("stepPrev").click(); } else closeSteps(); return true; }
   if (view === "settings") {
+    if (setPage === "binsAdd" && B.pick) { B.pick = null; renderSettings(); return true; } // an item found -> back to finding one
+    if (setPage === "binsBin") { go(["binsList", "binsAdd"].includes(B.binFrom) ? B.binFrom : "binsList"); return true; }
     const up = { map: "home", order: "home", more: "home", inventory: "home", admin: "home", bins: "home", binsList: "bins", binsBin: "binsList", binsAdd: "bins", binsHistory: "bins", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
     if (setPage === "wizard" && wiz) { wizBack(); return true; }
     if (up) { go(up); return true; }

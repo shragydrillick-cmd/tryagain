@@ -102,6 +102,15 @@ let bad = 0; const ok = (label, cond, extra = '') => { if (!cond) bad++; console
   await p.click(`#binChooser button:has-text("Confirm: bin ${pickE}")`);
   ok('Edit all: everything moved', await p.evaluate(([fb, e]) => bins.products[0].variants.every(v => !v.bins.some(b => b.bin === fb) && v.bins.some(b => b.bin === e)), [firstBin, pickE]));
 
+  // the top button: Back, one step at a time; only the first Settings page says Done and closes
+  await p.evaluate(() => go('binsList'));
+  await p.click('.binrow:has-text("Velour") button:has-text("Edit")');
+  const steps = [];
+  for (let k = 0; k < 4; k++) { steps.push(await p.$eval('#navBtn', x => x.textContent) + ':' + await p.evaluate(() => view === 'settings' ? setPage : 'main')); await p.click('#navBtn'); }
+  steps.push(await p.$eval('#navBtn', x => x.textContent) + ':' + await p.evaluate(() => view === 'settings' ? setPage : 'main'));
+  ok('Back goes one step at a time: bin → List → Bins → Settings → (Done) main', steps.join(' ') === 'Back:binsBin Back:binsList Back:bins Done:home Settings:main', steps.join(' '));
+  await p.click('#navBtn');
+
   // Add / Edit: find by search, choose sizes, add to a bin
   await p.evaluate(() => go('binsAdd'));
   ok('Add / Edit: Scan and Manual', /Scan.*Manual/.test(await txt('#settingsView')));
@@ -164,7 +173,7 @@ let bad = 0; const ok = (label, cond, extra = '') => { if (!cond) bad++; console
   // History, and nothing else in the app touched
   await p.evaluate(() => go('binsHistory'));
   ok('History lists the changes', (await p.$$eval('#settingsView .drow', r => r.length)) >= 4);
-  await p.click('#navBtn');
+  for (let k = 0; k < 6 && await p.evaluate(() => view === 'settings'); k++) await p.click('#navBtn'); // Back, Back… then Done
   await p.click('#exampleBtn');
   const after = await p.evaluate(() => JSON.stringify({ s: localStorage.getItem('pick-and-sort-settings-v2') }));
   ok('picking is unchanged: the example orders use their own bins', await p.evaluate(() => plan.picks[0].box === plan.picks[0].box && !plan.picks.some(x => x.box === 'D40')));
