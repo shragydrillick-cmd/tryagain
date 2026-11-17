@@ -3602,6 +3602,23 @@ function numInput(value, onset) {
 }
 const quick = { letter: "A", count: 2, shelves: 5, per: "10", first: 1, rtl: false, fromBottom: false, vertical: false };
 
+/** The settings file: the store (aisles, shelves, walking order), order numbers, inventory, learned barcodes,
+    the look, and Bins. Loading it on another device makes it the same. */
+function saveSettingsFile() {
+  const data = Object.assign({}, settings, bins ? { _bins: bins } : {});
+  download(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "pick-and-sort-settings.json");
+}
+async function loadSettingsFile(f) {
+  let o;
+  try { o = JSON.parse(await f.text()); } catch (e) { toast("That isn't a settings file (it couldn't be read)."); return; }
+  if (!o || !Array.isArray(o.units)) { toast(o && o.pickAndSortList ? "That's a list of orders, not settings: open it with Add file on the main screen." : "That isn't a Pick & Sort settings file."); return; }
+  const b = o._bins; delete o._bins; delete o._list;
+  settings = fixSettings(o); saveSettings();
+  if (b && Array.isArray(b.products)) { bins = b; saveBins(); }
+  const loc = buildLocator(settings);
+  renderSettings();
+  toast(`Loaded: ${plural(settings.units.length, "aisle")} (${loc.size} boxes)${b && b.products ? `, Bins (${plural(b.products.length, "item")})` : ""}${settings.inventory && settings.inventory.rows ? `, inventory (${settings.inventory.rows.length} items)` : ""}.`);
+}
 function renderAdvanced() {
   const v = $("settingsView");
   const qIn = (key, attrs) => h("input", Object.assign({ value: quick[key], oninput: e => { quick[key] = e.target.type === "number" ? +e.target.value : e.target.value; } }, attrs));
@@ -3660,10 +3677,10 @@ function renderAdvanced() {
       h("h2", null, "Backup & other devices"),
       h("p", { class: "small muted" }, "Settings are saved on this device only. Save them to a file to copy them to another phone, tablet or computer."),
       h("div", { class: "row" },
-        h("button", { class: "btn secondary", type: "button", onclick: () => download(new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" }), "pick-and-sort-settings.json") }, "Save settings file"),
+        h("button", { class: "btn secondary", type: "button", onclick: () => saveSettingsFile() }, "Save settings file"),
         h("label", { class: "btn secondary" }, "Load settings file", h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: async e => {
           const f = e.target.files[0]; if (!f) return;
-          try { settings = fixSettings(JSON.parse(await f.text())); changed(true); toast("Settings loaded."); } catch (err) { toast("That isn't a settings file."); }
+          loadSettingsFile(f);
         } })),
         h("button", { class: "btn secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Start over?", () => { const inv = settings.inventory; settings = defaultSettings(); if (inv) settings.inventory = inv; changed(true); toast("Shelf map reset."); }) }, "Reset")),
       h("p", { class: "small muted" }, "Look: ",
@@ -4464,10 +4481,10 @@ function renderMorePage(v) {
       h("h3", null, "Backup & other devices"),
       h("p", { class: "small muted" }, "Settings are saved on this device. Save them to a file to copy them to another phone, tablet or computer."),
       h("div", { class: "row" },
-        h("button", { class: "btn secondary", type: "button", onclick: () => download(new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" }), "pick-and-sort-settings.json") }, "Save settings file"),
+        h("button", { class: "btn secondary", type: "button", onclick: () => saveSettingsFile() }, "Save settings file"),
         h("label", { class: "btn secondary" }, "Load settings file", h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: async e => {
           const f = e.target.files[0]; if (!f) return;
-          try { settings = fixSettings(JSON.parse(await f.text())); saveSettings(); renderSettings(); toast("Settings loaded."); } catch (err) { toast("That isn't a settings file."); }
+          loadSettingsFile(f);
         } }))),
       h("h3", null, "Account"),
       accountSection(),
