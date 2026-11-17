@@ -261,6 +261,7 @@ img.qr.big { width: 320px; }
 .drow.st-green { background: #e3f6e9; border-color: #a9dcb9; } .stbadge.st-green, .st-green .stdot { color: #1e7a46; } .stbadge.st-green { background: #c9ecd5; }
 .drow.st-blue { background: #e3eefc; border-color: #a9c6ee; } .stbadge.st-blue, .st-blue .stdot { color: #1d4f91; } .stbadge.st-blue { background: #cadcf7; }
 .drow.st-yellow { background: #fff7d6; border-color: #ead98a; } .stbadge.st-yellow, .st-yellow .stdot { color: #7a6000; } .stbadge.st-yellow { background: #fbeaa6; }
+.drow.picked { outline: 3px solid var(--accent); outline-offset: 1px; }
 .drow.st-orange { background: #ffeedd; border-color: #f0c79a; } .stbadge.st-orange, .st-orange .stdot { color: #8a4b00; } .stbadge.st-orange { background: #fbd8b4; }
 .drow.st-red { background: #fde6e4; border-color: #f0b3ad; } .stbadge.st-red, .st-red .stdot { color: #a3241c; } .stbadge.st-red { background: #f8cdc8; }
 .drow[class*="st-"] { color: #1b1f24; } /* light coloured rows keep dark writing, also in night mode */
@@ -1943,7 +1944,7 @@ function receiveList(data, how) {
 
 /* ---------- linked devices: one shared list, kept in step through the owner's own free Firebase database ---------- */
 const sync = { rev: 0, dirty: false, lastStr: null, pushTimer: null, state: "", err: "", unsub: null };
-const syncOn = () => !!(typeof acct !== "undefined" && acct && acct.status === "allowed" && acct.company && fb.db);
+const syncOn = () => !!(typeof acct !== "undefined" && acct && acct.status === "allowed" && acct.company && acct.live && fb.db); // the company has live sharing on
 const SYNC_KEY = "pick-and-sort-sync-v2";
 try { const o = JSON.parse(localStorage.getItem(SYNC_KEY) || "{}"); sync.rev = o.rev || 0; sync.dirty = !!o.dirty; sync.company = o.company || ""; } catch (e) {}
 const keepSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify({ rev: sync.rev, dirty: sync.dirty, company: acct && acct.company })); } catch (e) {} };
@@ -2389,7 +2390,7 @@ function gate(view) {
 function signInView(msg) {
   const email = h("input", { type: "email", placeholder: "Email", autocomplete: "email", "aria-label": "Email" });
   const pass = h("input", { type: "password", placeholder: "Password", autocomplete: "current-password", "aria-label": "Password" });
-  const out = h("p", { class: "small gateerr" }, msg || "");
+  const out = h("p", { class: "small gateerr" }, msg || gateMsg || "");
   const busy = async (fn) => { out.textContent = ""; try { await fn(); } catch (e) { out.textContent = friendlyAuthError(e); } };
   return h("div", null,
     h("p", { class: "muted" }, "Sign in to continue."),
@@ -2428,6 +2429,31 @@ function waitView(title, text, extra) {
       h("button", { class: "btn", type: "button", onclick: () => checkAccount(true) }, "Check again"),
       h("button", { class: "btn secondary", type: "button", onclick: signOut }, "Sign out")));
 }
+/* Staying signed in, with one limit: a phone that hasn't reached the account check for a week is signed out
+   (and one whose clock was turned back), and can only get back in by signing in online. */
+const OFFLINE_LIMIT = (() => { try { return Number(localStorage.getItem("pick-and-sort-offline-limit")) || 7 * 864e5; } catch (e) { return 7 * 864e5; } })(); // a week
+const LAST_CO_KEY = "pick-and-sort-last-company";
+let gateMsg = ""; // why this phone was signed out, shown on the sign-in screen
+function touchChecked() { if (!acct) return; const now = Date.now(); acct.checkedAt = now; acct.lastNow = Math.max(acct.lastNow || 0, now); keepAcct(); }
+function offlineTooLong() {
+  if (!acct || !accountsOn() || testNoAuth || inClaude) return "";
+  const now = Date.now();
+  if (!acct.checkedAt || now - acct.checkedAt > OFFLINE_LIMIT) return "week";
+  if (acct.lastNow && now < acct.lastNow - 10 * 60e3) return "clock";
+  if (now > (acct.lastNow || 0)) { acct.lastNow = now; keepAcct(); }
+  return "";
+}
+async function enforceOffline() {
+  const why = offlineTooLong(); if (!why) return false;
+  stopWatching(); stopSync();
+  acct = null; keepAcct();
+  gateMsg = why === "week" ? "You were signed out because this phone wasn't online for a week. Connect to the internet and sign in again."
+    : "You were signed out because the phone's date or time was changed. Connect to the internet and sign in again.";
+  try { if (fb.auth) await fb.auth.signOut(); else indexedDB.deleteDatabase("firebaseLocalStorageDb"); } catch (e) {} // Firebase's own saved sign-in goes too
+  gate(signInView());
+  return true;
+}
+
 /** Who is signed in, and are they allowed in? Opens the app, or says why not. */
 async function checkAccount(showProgress) {
   const u = fb.auth && fb.auth.currentUser;
@@ -2442,69 +2468,145 @@ async function checkAccount(showProgress) {
       return;
     }
     await u.getIdToken(true); // so the database sees the confirmed email
-    let snap = await userDoc(u.uid).get();
+    const server = { source: "server" }; // never a copy saved on the phone: this is the real check
+    let snap = await userDoc(u.uid).get(server);
     if (!snap.exists) {
-      // first time: the owner, or someone an admin has added (an invite for this email)
-      let made = null;
-      try { await userDoc(u.uid).set({ email, name: u.displayName || "", company: "", role: "owner", status: "allowed", at: Date.now() }); made = "owner"; } catch (e) {}
+      // first time: the owner, or someone a company admin has added (an invite for this email)
+      let made = false;
+      try { await userDoc(u.uid).set({ email, name: u.displayName || "", company: "", role: "owner", status: "allowed", at: Date.now() }); made = true; } catch (e) {}
       if (!made) {
-        const inv = await fb.db.collection("invites").doc(email).get().catch(() => null);
+        const inv = await fb.db.collection("invites").doc(email).get(server).catch(() => null);
         if (inv && inv.exists) {
-          await userDoc(u.uid).set({ email, name: u.displayName || "", company: inv.data().company, role: inv.data().role || "user", status: "allowed", at: Date.now() });
+          await userDoc(u.uid).set({ email, name: u.displayName || "", company: inv.data().company, role: inv.data().role || "user", status: "allowed", at: Date.now() }).catch(() => {});
           await fb.db.collection("invites").doc(email).delete().catch(() => {});
         }
       }
-      snap = await userDoc(u.uid).get();
+      snap = await userDoc(u.uid).get(server);
     }
-    if (!snap.exists) { gate(waitView("Not added yet", `${email} hasn't been added to a company yet. Ask your manager to add this email in Admin, then tap Check again.`)); acct = null; keepAcct(); return; }
+    if (!snap.exists) { stopWatching(); acct = null; keepAcct(); gate(startCompanyView(email)); return; }
     const d = snap.data();
     if (d.status !== "allowed") return blocked();
-    let companyName = "";
-    if (d.company) { const c = await fb.db.collection("companies").doc(d.company).get().catch(() => null); companyName = c && c.exists ? c.data().name : ""; }
+    let comp = null;
+    if (d.company) { const c = await fb.db.collection("companies").doc(d.company).get(server); comp = c.exists ? c.data() : null; }
+    if (d.role !== "owner") {
+      const nm = comp ? `“${comp.name}”` : "Your company";
+      if (!comp) return blocked("Your company has been removed. Ask the app's owner if that's a mistake.");
+      if (comp.status === "pending") {
+        stopWatching(); acct = null; keepAcct(); watchPending(d.company);
+        gate(waitView("Waiting for approval", `${nm} is waiting for the app's owner to accept it. The app opens by itself as soon as they do.`));
+        return;
+      }
+      if (comp.status === "declined") return blocked(`${nm} wasn't accepted. Ask the app's owner if that's a mistake.`);
+      if (comp.status !== "approved") return blocked(`${nm} has been turned off. Ask the app's owner if that's a mistake.`);
+    }
+    // a different company from the last one on this phone: the list on it isn't theirs
+    let last = null; try { last = localStorage.getItem(LAST_CO_KEY); localStorage.setItem(LAST_CO_KEY, d.company || ""); } catch (e) {}
+    if (last != null && last !== (d.company || "") && current) clearList(true);
     const was = acct && acct.company;
-    acct = { uid: u.uid, email, name: d.name || "", company: d.company || "", companyName, role: d.role || "user", status: "allowed" };
-    keepAcct();
+    acct = { uid: u.uid, email, name: d.name || "", company: d.company || "", companyName: comp ? comp.name : "", role: d.role || "user", status: "allowed",
+      live: !!(comp && comp.live), checkedAt: Date.now(), lastNow: Date.now() };
+    keepAcct(); gateMsg = "";
     gate(null);
     if (was !== acct.company) { sync.rev = 0; sync.dirty = !!current; sync.lastStr = null; keepSync(); }
     watchAccount(); startSync(); showSyncLine();
     if (view === "settings") renderSettings();
   } catch (e) {
-    if (acct && acct.status === "allowed") { setSync("offline", "can't check the account right now"); gate(null); return; } // offline: carry on as last time
+    if (acct && acct.status === "allowed") { setSync("offline", "can't check the account right now"); gate(null); return; } // offline: carry on as last time (for up to a week)
     gate(waitView("Can't check your account", friendlyAuthError(e)));
   }
 }
-/** Blocked or removed: the saved list is wiped from this phone and nothing more comes in. */
-function blocked() {
-  stopSync();
+/** Signed in, but in no company yet: ask a company admin to add you, or ask to start a new company. */
+function startCompanyView(email) {
+  const name = h("input", { type: "text", placeholder: "Company name", "aria-label": "Company name" });
+  const out = h("p", { class: "small gateerr" });
+  return h("div", null,
+    h("h2", null, "Not added yet"),
+    h("p", null, `${email} isn't in a company yet. If your company already uses Pick & Sort, ask its admin to add this email, then tap Check again.`),
+    h("h3", null, "Start a new company"),
+    h("p", { class: "small muted" }, "You'll be its admin and can add your own people. The app's owner has to accept a new company before it can be used."),
+    name,
+    h("button", { class: "btn gatebtn", type: "button", onclick: async () => {
+      const n = name.value.trim(); out.textContent = "";
+      if (!n) { out.textContent = "Type the company's name."; return; }
+      const u = fb.auth.currentUser, ref = fb.db.collection("companies").doc(), b = fb.db.batch();
+      b.set(ref, { name: n, status: "pending", live: false, createdBy: u.uid, createdByEmail: email, at: Date.now() });
+      b.set(userDoc(u.uid), { email, name: u.displayName || "", company: ref.id, role: "admin", status: "allowed", at: Date.now() });
+      try { await b.commit(); checkAccount(true); } catch (e) { out.textContent = friendlyAuthError(e); }
+    } }, "Ask to start this company"),
+    out,
+    h("div", { class: "row", style: "margin-top:12px" },
+      h("button", { class: "btn secondary", type: "button", onclick: () => checkAccount(true) }, "Check again"),
+      h("button", { class: "btn secondary", type: "button", onclick: signOut }, "Sign out")));
+}
+/** Blocked, removed, or the company turned off: the saved list is wiped from this phone and nothing more comes in. */
+function blocked(msg) {
+  stopWatching(); stopSync();
   try { if (current) clearList(true); } catch (e) {}
   acct = null; keepAcct();
-  gate(h("div", null, h("h2", null, "No access"), h("p", null, "This account has been turned off. Ask your manager if that's a mistake."),
-    h("button", { class: "btn secondary", type: "button", onclick: signOut }, "Sign out")));
+  gate(h("div", null, h("h2", null, "No access"), h("p", null, msg || "This account has been turned off. Ask your company's admin if that's a mistake."),
+    h("div", { class: "row" },
+      h("button", { class: "btn secondary", type: "button", onclick: () => checkAccount(true) }, "Check again"),
+      h("button", { class: "btn secondary", type: "button", onclick: signOut }, "Sign out"))));
 }
-let unwatchAccount = null;
+let unwatchAccount = null, unwatchCompany = null;
+function stopWatching() {
+  if (unwatchAccount) { unwatchAccount(); unwatchAccount = null; }
+  if (unwatchCompany) { unwatchCompany(); unwatchCompany = null; }
+}
+/** Live: blocked, moved, made admin, the company turned off, or live sharing switched: it shows at once. */
 function watchAccount() {
-  if (unwatchAccount) unwatchAccount();
-  unwatchAccount = userDoc(acct.uid).onSnapshot(s => {
+  stopWatching();
+  unwatchAccount = userDoc(acct.uid).onSnapshot({ includeMetadataChanges: true }, s => {
+    if (s.metadata.fromCache) return;
+    touchChecked();
     if (!s.exists || s.data().status !== "allowed") return blocked();
     const d = s.data();
-    if (d.company !== acct.company || d.role !== acct.role) checkAccount(false); // moved to another company, or made admin
-  }, e => { if (e && e.code === "permission-denied") blocked(); });
+    if (d.company !== acct.company || d.role !== acct.role) checkAccount(false);
+  }, e => { if (e && e.code === "permission-denied") checkAccount(false); });
+  if (!acct.company) return;
+  const id = acct.company;
+  unwatchCompany = fb.db.collection("companies").doc(id).onSnapshot({ includeMetadataChanges: true }, s => {
+    if (s.metadata.fromCache || !acct || acct.company !== id) return;
+    touchChecked();
+    const c = s.exists ? s.data() : null;
+    if (acct.role !== "owner" && (!c || c.status !== "approved")) return checkAccount(false);
+    if (c && (!!c.live !== acct.live || c.name !== acct.companyName)) {
+      const was = acct.live;
+      acct.live = !!c.live; acct.companyName = c.name; keepAcct();
+      if (acct.live !== was) { if (acct.live) { sync.rev = 0; sync.dirty = !!current; sync.lastStr = null; startSync(); } else stopSync(); }
+      showSyncLine(); if (view === "settings") renderSettings();
+    }
+  }, e => { if (e && e.code === "permission-denied") checkAccount(false); });
+}
+/** A new company waiting for the owner: opens by itself once it's accepted (or says it wasn't). */
+function watchPending(id) {
+  stopWatching();
+  unwatchCompany = fb.db.collection("companies").doc(id).onSnapshot(s => {
+    if (s.exists && s.data().status === "pending") return;
+    stopWatching(); checkAccount(true);
+  }, () => {});
 }
 async function signOut() {
-  stopSync(); if (unwatchAccount) { unwatchAccount(); unwatchAccount = null; }
+  stopWatching(); stopSync();
   acct = null; keepAcct();
   try { await loadFirebase(); await fb.auth.signOut(); } catch (e) {}
   gate(signInView());
 }
 async function accountsInit() {
   if (inClaude || testNoAuth || !accountsOn()) return; // the private preview page and the automatic tests run without accounts
-  if (!(acct && acct.status === "allowed")) gate(h("p", { class: "muted" }, "Loading…"));
+  await enforceOffline();
+  setInterval(enforceOffline, 60e3);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) enforceOffline(); });
+  // while online, check again every hour (the live watch also counts as a check)
+  setInterval(() => { if (navigator.onLine && fb.auth && fb.auth.currentUser && acct) checkAccount(false); }, 60 * 60e3);
+  window.addEventListener("online", () => { if (fb.auth && fb.auth.currentUser) checkAccount(false); });
+  if (!(acct && acct.status === "allowed")) gate(gateMsg ? signInView() : h("p", { class: "muted" }, "Loading…"));
   try { await loadFirebase(); }
-  catch (e) { if (!(acct && acct.status === "allowed")) gate(waitView("No internet", "Connect to the internet once to sign in.")); return; }
+  catch (e) { if (!(acct && acct.status === "allowed")) gate(gateMsg ? signInView() : waitView("No internet", "Connect to the internet once to sign in.")); return; }
   fb.auth.onAuthStateChanged(u => { if (u) checkAccount(!(acct && acct.status === "allowed")); else if (acct) signOut(); else gate(signInView()); });
 }
 
-/* ---------- the company's shared list, live ---------- */
+/* ---------- the company's shared list, live (when the company has live sharing on) ---------- */
 const listDoc = () => fb.db.collection("companies").doc(acct.company).collection("lists").doc("current");
 function startSync() {
   stopSync();
@@ -2520,64 +2622,106 @@ function startSync() {
 }
 function stopSync() { if (sync.unsub) { sync.unsub(); sync.unsub = null; } }
 
-/* ---------- Admin: companies, people, allowed / blocked ---------- */
-let adminCompany = null; // the company the owner is looking at
+/* ---------- Admin ----------
+   The app owner: every company (accept new ones, turn down, remove, bring back) and everyone in them.
+   A company admin: their own company only (people, and live sharing). */
+let adminCompany = null; // the company being looked at
+const roleName = r => (r === "owner" ? "App owner" : r === "admin" ? "Company admin" : "Worker");
+const statusName = s => ({ approved: "Active", pending: "Waiting for your OK", declined: "Turned down", removed: "Removed" }[s] || "Active");
 async function renderAdminPage(v) {
   const box = h("section", { class: "card" }, backRow("Settings", "home"), h("h2", null, "Admin"), h("p", { class: "muted" }, "Loading…"));
   v.replaceChildren(box);
   const isOwner = acct.role === "owner";
+  const comps = fb.db.collection("companies");
   let companies = [];
   try {
-    if (isOwner) companies = (await fb.db.collection("companies").get()).docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => natural(a.name, b.name));
-    else companies = [{ id: acct.company, name: acct.companyName }];
+    if (isOwner) companies = (await comps.get()).docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => natural(a.name, b.name));
+    else { const c = await comps.doc(acct.company).get(); companies = [{ id: acct.company, ...(c.exists ? c.data() : { name: acct.companyName }) }]; }
   } catch (e) { box.replaceChildren(backRow("Settings", "home"), h("h2", null, "Admin"), h("p", null, "Couldn't load: " + e.message)); return; }
-  if (!adminCompany || !companies.some(c => c.id === adminCompany)) adminCompany = isOwner ? (acct.company || (companies[0] && companies[0].id) || null) : acct.company;
-  const parts = [backRow("Settings", "home"), h("h2", null, "Admin")];
+  if (!isOwner) adminCompany = acct.company;
+  else if (!companies.some(c => c.id === adminCompany)) adminCompany = acct.company && companies.some(c => c.id === acct.company) ? acct.company : null;
+  const redo = () => renderSettings();
+  const fail = e => toast((e && e.message) || "That didn't work.");
+  const setCo = (id, data) => comps.doc(id).update(data).then(redo).catch(fail);
+  const parts = [backRow("Settings", "home"), h("h2", null, isOwner ? "Admin (only you)" : `Admin: ${acct.companyName}`)];
+
   if (isOwner) {
+    const waiting = companies.filter(c => c.status === "pending");
+    if (waiting.length) parts.push(h("h3", null, "Waiting for your OK"),
+      h("p", { class: "small muted" }, "Someone signed in and asked to start a company. Nothing in it works until you accept it."),
+      h("div", { class: "dlist" }, waiting.map(c => h("div", { class: "drow static st-orange" },
+        h("div", { style: "flex:1;min-width:0" }, h("b", null, c.name), h("div", { class: "small" }, `${c.createdByEmail || ""}${c.at ? " · " + new Date(c.at).toLocaleDateString() : ""}`)),
+        h("div", { class: "row", style: "gap:6px" },
+          h("button", { class: "btn small", type: "button", onclick: () => setCo(c.id, { status: "approved" }) }, "Accept"),
+          h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Turn down?", () => setCo(c.id, { status: "declined" })) }, "Turn down"))))));
     const name = h("input", { type: "text", placeholder: "New company name", "aria-label": "New company name" });
+    const others = companies.filter(c => c.status !== "pending");
     parts.push(h("h3", null, "Companies"),
-      companies.length ? h("div", { class: "row" }, companies.map(c => h("button", { class: "btn small" + (c.id === adminCompany ? "" : " secondary"), type: "button", onclick: () => { adminCompany = c.id; renderSettings(); } }, c.name))) : h("p", { class: "small muted" }, "No companies yet. Make the first one."),
+      others.length ? h("div", { class: "dlist" }, others.map(c => {
+        const ok = (c.status || "approved") === "approved";
+        return h("div", { class: "drow static " + (ok ? "st-green" : "st-grey") + (c.id === adminCompany ? " picked" : "") },
+          h("div", { style: "flex:1;min-width:0;cursor:pointer", onclick: () => { adminCompany = c.id; redo(); } },
+            h("b", null, c.name), h("div", { class: "small" }, statusName(c.status), c.live ? " · live sharing on" : "", c.id === acct.company ? " · your list" : "")),
+          h("div", { class: "row", style: "gap:6px" },
+            h("button", { class: "btn small secondary", type: "button", onclick: () => { adminCompany = c.id; redo(); } }, "Open"),
+            ok ? h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Remove it?", () => setCo(c.id, { status: "removed" })) }, "Remove")
+              : h("button", { class: "btn small", type: "button", onclick: () => setCo(c.id, { status: "approved" }) }, "Bring back")));
+      })) : h("p", { class: "small muted" }, "No companies yet."),
       h("div", { class: "row", style: "margin-top:8px" }, name, h("button", { class: "btn small", type: "button", onclick: async () => {
         const n = name.value.trim(); if (!n) return;
-        const ref = await fb.db.collection("companies").add({ name: n, at: Date.now() });
-        adminCompany = ref.id;
-        if (!acct.company) await userDoc(acct.uid).update({ company: ref.id }); // the owner works in their first company
-        renderSettings();
-      } }, "Add company")),
-      adminCompany && acct.company !== adminCompany ? h("button", { class: "link small", type: "button", onclick: async () => { await userDoc(acct.uid).update({ company: adminCompany }); } }, "Use this company's list on this device") : null);
+        try {
+          const ref = await comps.add({ name: n, status: "approved", live: false, createdBy: acct.uid, createdByEmail: acct.email, at: Date.now() });
+          adminCompany = ref.id;
+          if (!acct.company) await userDoc(acct.uid).update({ company: ref.id }); // the owner works in their first company
+          redo();
+        } catch (e) { fail(e); }
+      } }, "Add company")));
   }
-  if (adminCompany) {
-    const comp = companies.find(c => c.id === adminCompany) || { name: acct.companyName };
+
+  const comp = companies.find(c => c.id === adminCompany);
+  if (comp) {
     let people = [], invites = [];
     try {
-      people = (await fb.db.collection("users").where("company", "==", adminCompany).get()).docs.map(d => ({ id: d.id, ...d.data() }));
-      invites = (await fb.db.collection("invites").where("company", "==", adminCompany).get()).docs.map(d => ({ id: d.id, ...d.data() }));
+      people = (await fb.db.collection("users").where("company", "==", comp.id).get()).docs.map(d => ({ id: d.id, ...d.data() }));
+      invites = (await fb.db.collection("invites").where("company", "==", comp.id).get()).docs.map(d => ({ id: d.id, ...d.data() }));
     } catch (e) { parts.push(h("p", null, "Couldn't load the people: " + e.message)); }
-    const set = (id, data) => userDoc(id).update(data).then(() => renderSettings()).catch(e => toast(e.message));
+    const set = (id, data) => userDoc(id).update(data).then(redo).catch(fail);
     const newEmail = h("input", { type: "email", placeholder: "their@email.com", "aria-label": "Email to add" });
-    const newRole = h("select", { "aria-label": "Role" }, h("option", { value: "user" }, "Worker"), h("option", { value: "admin" }, "Manager (can add people)"));
-    parts.push(h("h3", null, `People in ${comp.name || "this company"}`),
-      h("div", { class: "dlist" }, people.sort((a, b) => natural(a.email, b.email)).map(p => {
+    const newRole = h("select", { "aria-label": "Role" }, h("option", { value: "user" }, "Worker"), h("option", { value: "admin" }, "Company admin (can add people)"));
+    parts.push(h("h3", null, isOwner ? comp.name : "Live sharing"),
+      isOwner ? h("p", { class: "small muted", style: "margin-top:0" }, statusName(comp.status)) : null,
+      h("div", { class: "row", style: "justify-content:space-between;align-items:center" },
+        h("span", null, h("b", null, "Live sharing: "), comp.live ? "On" : "Off"),
+        h("button", { class: "btn small" + (comp.live ? " secondary" : ""), type: "button", onclick: () => setCo(comp.id, { live: !comp.live }) }, comp.live ? "Turn off" : "Turn on")),
+      h("p", { class: "small muted" }, comp.live
+        ? `Everyone in ${comp.name} who is signed in sees the same list, live: orders added on one device, and every tick, show on the others.`
+        : `Off: each person's list stays on their own device (they can still Send / Receive by QR code). Turn it on to share one list, live.`),
+      h("h3", null, `People in ${comp.name}`),
+      people.length ? h("div", { class: "dlist" }, people.sort((a, b) => natural(a.email, b.email)).map(p => {
         const me = p.id === acct.uid, ok = p.status === "allowed";
         return h("div", { class: "drow static " + (ok ? "st-green" : "st-red") },
-          h("div", { style: "flex:1;min-width:0" }, h("b", null, p.email), h("div", { class: "small" }, p.role === "owner" ? "Owner" : p.role === "admin" ? "Manager" : "Worker", me ? " · you" : "")),
+          h("div", { style: "flex:1;min-width:0" }, h("b", null, p.email), h("div", { class: "small" }, roleName(p.role), ok ? "" : " · blocked", me ? " · you" : "")),
           me || p.role === "owner" ? null : h("div", { class: "row", style: "gap:6px" },
             h("button", { class: "btn small" + (ok ? " secondary" : ""), type: "button", onclick: () => set(p.id, { status: ok ? "blocked" : "allowed" }) }, ok ? "Block" : "Allow"),
-            h("button", { class: "btn small secondary", type: "button", onclick: () => set(p.id, { role: p.role === "admin" ? "user" : "admin" }) }, p.role === "admin" ? "Make worker" : "Make manager")));
-      })),
-      invites.length ? h("div", null, h("h3", null, "Added, not signed in yet"), invites.map(i => h("div", { class: "row small", style: "justify-content:space-between" }, i.id,
-        h("button", { class: "link small", type: "button", onclick: () => fb.db.collection("invites").doc(i.id).delete().then(() => renderSettings()) }, "Remove")))) : null,
+            h("button", { class: "btn small secondary", type: "button", onclick: () => set(p.id, { role: p.role === "admin" ? "user" : "admin" }) }, p.role === "admin" ? "Make worker" : "Make admin"),
+            h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Remove?", () => userDoc(p.id).delete().then(redo).catch(fail)) }, "Remove")));
+      })) : h("p", { class: "small muted" }, "Nobody yet."),
+      invites.length ? h("div", null, h("h3", null, "Added, not signed in yet"), invites.map(i => h("div", { class: "row small", style: "justify-content:space-between" }, `${i.id} · ${roleName(i.role)}`,
+        h("button", { class: "link small", type: "button", onclick: () => fb.db.collection("invites").doc(i.id).delete().then(redo).catch(fail) }, "Remove")))) : null,
       h("h3", null, "Add someone"),
-      h("p", { class: "small muted" }, "Type the email they'll sign in with (their Google email, or the one they make an account with)."),
+      h("p", { class: "small muted" }, "Type the email they'll sign in with (their Google email, or the one they make an account with). They can sign in straight away."),
       h("div", { class: "row" }, newEmail, newRole, h("button", { class: "btn small", type: "button", onclick: async () => {
         const e = emailKey(newEmail.value); if (!/^\S+@\S+\.\S+$/.test(e)) return toast("Type their email.");
-        // the owner can also move someone who already has an account; a manager adds new people
-        const existing = acct.role === "owner" ? (await fb.db.collection("users").where("email", "==", e).get().catch(() => ({ docs: [] }))).docs[0] : null;
-        if (existing) await userDoc(existing.id).update({ company: adminCompany, role: newRole.value, status: "allowed" });
-        else await fb.db.collection("invites").doc(e).set({ company: adminCompany, role: newRole.value, at: Date.now() });
-        toast(existing ? "Added." : "Added. They can sign in now."); renderSettings();
-      } }, "Add")));
-  }
+        try {
+          // the owner can also move someone who already has an account; a company admin adds new people
+          const existing = isOwner ? (await fb.db.collection("users").where("email", "==", e).get()).docs[0] : null;
+          if (existing) await userDoc(existing.id).update({ company: comp.id, role: newRole.value, status: "allowed" });
+          else await fb.db.collection("invites").doc(e).set({ company: comp.id, role: newRole.value, at: Date.now() });
+          toast(existing ? "Added." : "Added. They can sign in now."); redo();
+        } catch (err) { fail(err); }
+      } }, "Add")),
+      isOwner && comp.id !== acct.company ? h("button", { class: "link small", style: "margin-top:10px", type: "button", onclick: () => userDoc(acct.uid).update({ company: comp.id }).catch(fail) }, `Use ${comp.name}'s list on this device`) : null);
+  } else if (isOwner && companies.length) parts.push(h("p", { class: "small muted" }, "Tap a company to see its people and settings."));
   box.replaceChildren(...parts.filter(Boolean));
 }
 function accountSection() {
@@ -2585,7 +2729,7 @@ function accountSection() {
   if (!acct) return h("p", { class: "small muted" }, testNoAuth || inClaude ? "Accounts are off on this page." : "Not signed in.");
   return h("div", null,
     h("p", null, h("b", null, acct.email), h("br"), h("span", { class: "small muted" },
-      `${acct.role === "owner" ? "Owner" : acct.role === "admin" ? "Manager" : "Worker"}${acct.companyName ? " · " + acct.companyName : ""}`)),
+      `${roleName(acct.role)}${acct.companyName ? " · " + acct.companyName : ""}${acct.company ? (acct.live ? " · live sharing on" : " · live sharing off") : ""}`)),
     h("p", { class: "small", id: "syncStatus" }, ""),
     h("div", { class: "row" },
       acct.role === "owner" || acct.role === "admin" ? h("button", { class: "btn small", type: "button", onclick: () => go("admin") }, "Admin") : null,

@@ -194,16 +194,28 @@ free plan needs no card and can't charge). Once switched on:
   (on the website) or **email and password** (everywhere, including the phone
   apps; a new email account confirms its email first). Once signed in, a phone
   stays signed in.
-- **Who gets in:** the owner's email (set in the database rules) is the
-  **Owner**. Everyone else must be added by email in **Settings → More →
-  Account → Admin**. Anyone not added sees "Not added yet".
-- **Companies:** the owner makes companies and adds people to them as **Worker** or
-  **Manager**. A manager can add, allow and block people in their own company.
-  Everyone in a company shares one live list: orders, ticks, scans and Packed
-  show up on the others' phones within a moment. Other companies can't see it:
+- **The app owner** (the email set in the database rules) has full control, in
+  **Settings → More → Account → Admin**, a page only they see: every company and
+  everyone in it.
+- **Starting a company:** someone signs in and isn't in a company yet: they can
+  ask a company admin to add their email, or **Ask to start this company**. It
+  waits ("Waiting for approval") until the owner taps **Accept** under "Waiting
+  for your OK" (or **Turn down**). Then they're in, as its **Company admin**.
+- **Company admins** add their own people by email (Worker or Company admin),
+  block, allow and remove them, with no need for the owner, but only in their
+  own company. The owner can **Remove** a company at any time (everyone in it is
+  out at once, and their lists are wiped) and **Bring back** it.
+- **Live sharing** is a switch per company (in Admin, off to start). When it's
+  on, everyone in the company who is signed in shares one list, live: orders,
+  ticks, scans and Packed show up on the others within a moment. When it's off,
+  each person's list stays on their own device. Other companies never see it:
   the database itself refuses them.
-- **Block:** the person is shut out at once, and the list saved on their phone
-  is wiped.
+- **Staying signed in:** once signed in, a phone stays signed in. It's checked
+  every time it's online (live, and at least every hour). If a phone goes a whole
+  week without one check (or its date is turned back), it's signed out and can
+  only get back in by signing in online, which checks the company is still allowed.
+- **Block / Remove:** the person is shut out at once, and the list saved on their
+  phone is wiped.
 - **Setup:** paste `firebase/firestore.rules` into Firebase → Firestore Database →
   Rules, with `OWNER_EMAIL` replaced by the owner's email, then switch
   `ACCOUNTS_ON` to `true` in index.html. Until then the app works as before,

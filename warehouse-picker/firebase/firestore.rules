@@ -1,6 +1,11 @@
 rules_version = '2';
 // Pick & Sort: who may see and change what. Paste this into Firebase → Firestore Database → Rules.
-// OWNER_EMAIL is the owner's Google / login email (all lowercase).
+// OWNER_EMAIL is the app owner's Google / login email (all lowercase).
+//
+//  - The app owner sees and changes everything: accepts or turns down new companies, removes a company, any person.
+//  - Anyone signed in can ask to start a company; it does nothing until the owner accepts it.
+//  - A company's admin adds, blocks and removes their own people (no need for the owner), and turns live sharing on or off.
+//  - A company's list can only be read or changed by its own people, while the company is accepted and live sharing is on.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
@@ -9,29 +14,43 @@ service cloud.firestore {
     function isOwner() { return verified() && myEmail() == "OWNER_EMAIL"; }
     function meDoc() { return /databases/$(database)/documents/users/$(request.auth.uid); }
     function me() { return get(meDoc()).data; }
+    function compDoc(c) { return /databases/$(database)/documents/companies/$(c); }
+    function accepted(c) { return c is string && c != "" && exists(compDoc(c)) && get(compDoc(c)).data.status == "approved"; }
     function active() { return verified() && exists(meDoc()) && me().status == "allowed"; }
-    function inCompany(c) { return active() && me().company == c; }
-    function manages(c) { return inCompany(c) && (me().role == "admin" || me().role == "owner"); }
+    function member(c) { return active() && me().company == c; }                 // even while the company waits
+    function inCompany(c) { return member(c) && accepted(c); }
+    function manages(c) { return inCompany(c) && me().role in ["admin", "owner"]; }
     function invite() { return get(/databases/$(database)/documents/invites/$(myEmail())); }
 
-    // people: themselves, their manager, or the owner
     match /users/{uid} {
-      allow read: if isOwner() || (signedIn() && request.auth.uid == uid) || (resource.data.company != "" && manages(resource.data.company));
+      allow read: if isOwner() || (signedIn() && request.auth.uid == uid) || manages(resource.data.company);
       allow create: if isOwner()
+        // added by a company admin (an invite for this email), into an accepted company
         || (verified() && request.auth.uid == uid
             && exists(/databases/$(database)/documents/invites/$(myEmail()))
             && request.resource.data.email == myEmail()
             && request.resource.data.company == invite().data.company
+            && accepted(invite().data.company)
             && request.resource.data.role == invite().data.role
-            && request.resource.data.role != "owner"
-            && request.resource.data.status == "allowed");
-      // a manager can allow / block people in their own company and make them manager or worker, never owner
+            && request.resource.data.role in ["user", "admin"]
+            && request.resource.data.status == "allowed")
+        // starting a new company: made together with the company, which waits for the owner
+        || (verified() && request.auth.uid == uid
+            && request.resource.data.email == myEmail()
+            && request.resource.data.role == "admin"
+            && request.resource.data.status == "allowed"
+            && request.resource.data.company is string
+            && !exists(compDoc(request.resource.data.company))
+            && getAfter(compDoc(request.resource.data.company)).data.createdBy == request.auth.uid
+            && getAfter(compDoc(request.resource.data.company)).data.status == "pending");
+      // a company admin can allow / block their own people and make them admin or worker, never owner
       allow update: if isOwner()
         || (manages(resource.data.company) && request.auth.uid != uid && resource.data.role != "owner"
             && request.resource.data.company == resource.data.company
             && request.resource.data.role in ["user", "admin"]
             && request.resource.data.email == resource.data.email);
-      allow delete: if isOwner();
+      allow delete: if isOwner()
+        || (manages(resource.data.company) && request.auth.uid != uid && resource.data.role != "owner");
     }
     // someone added by email who hasn't signed in yet
     match /invites/{email} {
@@ -39,12 +58,21 @@ service cloud.firestore {
       allow create, update: if isOwner() || (manages(request.resource.data.company) && request.resource.data.role in ["user", "admin"]);
       allow delete: if isOwner() || (verified() && myEmail() == email) || manages(resource.data.company);
     }
-    // companies, and each company's shared list: only its own people
     match /companies/{c} {
-      allow read: if isOwner() || inCompany(c);
-      allow write: if isOwner();
+      allow read: if isOwner() || member(c);
+      // asking to start a company: it waits for the owner, with live sharing off
+      allow create: if isOwner()
+        || (verified() && !exists(meDoc())
+            && request.resource.data.createdBy == request.auth.uid
+            && request.resource.data.status == "pending"
+            && request.resource.data.live == false
+            && getAfter(meDoc()).data.company == c);
+      // the company's admin: only the name and live sharing; accepting / removing is the owner's
+      allow update: if isOwner()
+        || (manages(c) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["live", "name"]));
+      allow delete: if isOwner();
       match /lists/{doc} {
-        allow read, write: if isOwner() || inCompany(c);
+        allow read, write: if isOwner() || (inCompany(c) && get(compDoc(c)).data.live == true);
       }
     }
   }

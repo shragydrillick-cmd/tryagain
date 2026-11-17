@@ -59,7 +59,7 @@ must count twice (and a barcode still in view only once), and the barcode
 that isn't on the slips must ask which item it is and be remembered after.
 
 
-`accounts.test.js` checks sign-in, companies, Admin, live sharing and blocking
+`accounts.test.js` checks sign-in, asking to start a company and the owner accepting it, company admins, the live sharing switch, the one-week offline sign-out (and a clock turned back), removing a company, blocking and removing people, and that the database refuses everything it should
 against the Firebase emulator, with `firebase/firestore.rules` (OWNER_EMAIL set
 to owner@test.com): the owner signs in with Google and makes a company, a
 worker makes an email account, a stranger is refused, the list and scans go
