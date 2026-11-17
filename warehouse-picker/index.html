@@ -322,7 +322,11 @@ header.top #title { white-space: nowrap; }
 .fixval { padding: 8px 0; font-weight: 600; overflow-wrap: anywhere; }
 .fixgrid > .wide { grid-column: 1 / -1; }
 .binnow { font-size: 26px; font-weight: 800; margin: 4px 0 8px; }
-.binacts { gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+.binacts { display: grid; gap: 8px; margin: 10px 0; }
+.btn.choice { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 12px 14px; width: 100%; }
+.btn.choice .small { font-weight: 500; opacity: .85; }
+.btn.choice.danger { border-color: var(--danger); color: var(--danger); }
+.selbar { position: sticky; bottom: 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; background: var(--card); border: 2px solid var(--accent); border-radius: 12px; padding: 10px 12px; margin-top: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
 .bingroup { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 10px 0; }
 .emptygrid { display: flex; flex-wrap: wrap; gap: 6px; }
 .checkrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; }
@@ -2995,7 +2999,7 @@ function findCode(code) {
 
 /* an item's own box: its name, its sizes / colours, and each one's details */
 let sheet = null; // { pid, bin, vid }
-function openProduct(pid, bin, vid) { sheet = { pid, bin, vid: vid || null }; drawSheet(); }
+function openProduct(pid, bin, vid) { sheet = { pid, bin, vid: vid || null, direct: !!vid }; drawSheet(); }
 function closeSheet() { sheet = null; const el = $("binSheet"); if (el) el.remove(); document.body.style.overflow = ""; }
 function drawSheet() {
   let el = $("binSheet");
@@ -3004,9 +3008,10 @@ function drawSheet() {
   if (!el) { el = h("div", { id: "binSheet", class: "detailpanel", role: "dialog" }); document.body.append(el); }
   document.body.style.overflow = "hidden";
   const v = sheet.vid && p.variants.find(x => x.id === sheet.vid);
-  const head = (title, back) => h("div", { class: "detailhead" }, back ? h("button", { class: "link", type: "button", onclick: back }, "‹ Back") : null,
-    h("h2", { style: "flex:1;margin:0" }, title), h("button", { class: "btn small", type: "button", onclick: closeSheet }, "Close"));
-  if (v) { el.replaceChildren(h("div", { class: "detailbox" }, head(optText(v), () => { sheet.vid = null; drawSheet(); }), variantBox(p, v))); return; }
+  // one button at the top: back one step (a size -> its item -> where you were)
+  const head = (title, back) => h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, title),
+    h("button", { class: "btn small", type: "button", onclick: back || closeSheet }, "Back"));
+  if (v) { el.replaceChildren(h("div", { class: "detailbox" }, head(optText(v), sheet.direct ? closeSheet : () => { sheet.vid = null; drawSheet(); }), variantBox(p, v))); return; }
   // the options it comes in: each colour (or style), with its sizes
   const byColour = new Map(); p.variants.forEach(x => { const c = x.colour || "One style"; if (!byColour.has(c)) byColour.set(c, []); byColour.get(c).push(x); });
   el.replaceChildren(h("div", { class: "detailbox" }, head(p.title),
@@ -3029,64 +3034,71 @@ function variantBox(p, v) {
     inv ? null : h("p", { class: "small muted" }, "Item details come from the store. To change them here, turn on Settings → More → Bins → Allow inventory changes."),
     h("h3", null, "Bin"),
     v.bins.length ? h("div", { class: "binnow" }, v.bins.map(b => b.bin).join(" / "), v.bins.length > 1 ? h("span", { class: "small muted" }, " (either one)") : null) : h("p", { class: "muted" }, "Not in a bin yet."),
-    binActions([v], `${p.title} ${optText(v)}`));
+    binActions([v], `${p.title} ${optText(v)}`, sheet && sheet.bin && setOf(v, sheet.bin) ? sheet.bin : null));
 }
-/** The three bin changes, for one variant or many: take out, move, or add a second bin. */
+/** What can be done with one size, a few, or everything in a bin: move to another bin, also put in another bin
+    (it's then in either one), or remove from the bin. */
 function binActions(list, what, fromBin) {
   const inBins = [...new Set(list.flatMap(v => v.bins.map(b => b.bin)))];
   const from = fromBin || (inBins.length === 1 ? inBins[0] : null);
-  return h("div", { class: "row binacts" },
-    inBins.length ? h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Take out?", () =>
-      binsChange(`${what}: taken out of ${from || inBins.join(" / ")}`, () => list.forEach(v => from ? takeOut(v, from) : (v.bins = [])))) }, from ? `Remove from ${from}` : "Remove from its bins") : null,
-    h("button", { class: "btn small", type: "button", onclick: () => chooseBin({ title: inBins.length ? `Move ${what}` : `Put ${what} in a bin`, items: list, onDone: bin =>
-      binsChange(`${what}: ${inBins.length ? "moved" : "put"} to ${bin}`, () => list.forEach(v => { if (from) takeOut(v, from); else v.bins = []; putIn(v, bin); })) }) }, inBins.length ? "Move to another bin" : "Put in a bin"),
-    inBins.length ? h("button", { class: "btn small secondary", type: "button", onclick: () => chooseBin({ title: `Add a second bin for ${what}`, items: list, exclude: inBins, onDone: bin =>
-      binsChange(`${what}: also in ${bin}`, () => list.forEach(v => putIn(v, bin))) }) }, "Add a bin") : null);
+  const choice = (label, sub, cls, onclick) => h("button", { class: "btn choice " + cls, type: "button", onclick }, h("b", null, label), sub ? h("span", { class: "small" }, sub) : null);
+  return h("div", { class: "binacts" },
+    choice(inBins.length ? "Move to another bin" : "Put in a bin", inBins.length ? `Out of ${from || inBins.join(" / ")}, into the bin you choose` : "", "",
+      () => chooseBin({ title: inBins.length ? `Move ${what}` : `Put ${what} in a bin`, items: list, onDone: bin =>
+        binsChange(`${what}: ${inBins.length ? "moved" : "put"} to ${bin}`, () => list.forEach(v => { if (from) takeOut(v, from); else v.bins = []; putIn(v, bin); })) })),
+    inBins.length ? choice("Also put in another bin", "Kept in both: it can be in either one", "secondary",
+      () => chooseBin({ title: `Also put ${what} in`, items: list, exclude: inBins, onDone: bin => binsChange(`${what}: also in ${bin}`, () => list.forEach(v => putIn(v, bin))) })) : null,
+    inBins.length ? choice(from ? `Remove from ${from}` : "Remove from its bins", (() => { const still = from ? inBins.filter(b => b !== from) : [];
+      return still.length ? `Taken out of ${from}; still in ${still.join(" / ")}` : `Taken out; then not in any bin`; })(), "secondary danger",
+      e => tapTwice(e.currentTarget, "Remove?", () => binsChange(`${what}: taken out of ${from || inBins.join(" / ")}`, () => list.forEach(v => from ? takeOut(v, from) : (v.bins = []))))) : null);
+}
+/** Edit all / Edit selected: the choices for those items (and, for Edit all with inventory changes on, their details). */
+function openBinEdit(bin, list, all) {
+  const vs = list.map(x => x.v), prods = [...new Set(list.map(x => x.p))], inv = binsSettings().inventoryEdits;
+  sheet = { custom: true }; let el = $("binSheet");
+  if (!el) { el = h("div", { id: "binSheet", class: "detailpanel", role: "dialog" }); document.body.append(el); }
+  document.body.style.overflow = "hidden";
+  const what = all ? `Everything in ${bin}` : prods.length === 1 && vs.length === 1 ? `${prods[0].title} ${optText(vs[0])}` : `${plural(vs.length, "item")} from ${bin}`;
+  el.replaceChildren(h("div", { class: "detailbox" },
+    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, all ? `Edit all in ${bin}` : `Edit selected (${vs.length})`), h("button", { class: "btn small", type: "button", onclick: closeSheet }, "Back")),
+    h("p", { class: "small muted" }, prods.map(p => `${p.title}: ${list.filter(x => x.p === p).map(x => optText(x.v)).join(", ")}`).join(" · ")),
+    binActions(vs, what, bin),
+    all && inv ? h("div", null, h("h3", null, "Item details"), prods.map(p => h("div", { class: "fixgrid", style: "margin-bottom:10px" },
+      h("label", { class: "fixf wide" }, h("span", { class: "fixlab" }, "Item name"), h("input", { type: "text", value: p.title, "aria-label": "Item name", onchange: e => binsChange(`${p.title}: renamed`, () => { p.title = e.target.value.trim() || p.title; }) })),
+      h("label", { class: "fixf wide" }, h("span", { class: "fixlab" }, "Company"), h("input", { type: "text", value: p.vendor, "aria-label": "Company", onchange: e => binsChange(`${p.title}: company changed`, () => { p.vendor = e.target.value.trim() || p.vendor; }) })))))
+      : null));
+  sheet = null; // after a change this box closes and the bin page redraws
 }
 
-/* one bin: every exact item in it, grouped by item */
+/* one bin: every exact item in it, grouped by item. Each has Edit; tick some for Edit selected; or Edit all. */
 function renderBinPage(v) {
   const bin = B.bin, list = binContents().get(bin) || [];
+  if (B.selBin !== bin) { B.sel = new Set(); B.selBin = bin; }
+  B.sel = new Set([...B.sel].filter(id => list.some(x => x.v.id === id))); // only what's still in the bin
   const groups = [...new Map(list.map(x => [x.p.id, x.p])).values()];
-  const inv = binsSettings().inventoryEdits;
+  const inv = binsSettings().inventoryEdits, picked = list.filter(x => B.sel.has(x.v.id));
+  const tick = (ids, on) => { ids.forEach(id => on ? B.sel.add(id) : B.sel.delete(id)); renderSettings(); };
   v.replaceChildren(h("section", { class: "card" }, backRow("List", "binsList"),
     h("div", { class: "row", style: "justify-content:space-between;align-items:center" }, h("h2", { style: "margin:0" }, `Bin ${bin}`),
-      list.length ? h("button", { class: "btn small", type: "button", onclick: () => openEditAll(bin) }, "Edit all") : null),
+      list.length ? h("button", { class: "btn small", type: "button", onclick: () => openBinEdit(bin, list, true) }, "Edit all") : null),
     h("button", { class: "btn addbin", type: "button", style: "margin:10px 0", onclick: () => scanIntoBin(bin) }, `Scan items into ${bin}`),
     list.length ? null : h("p", { class: "muted" }, "This bin is empty."),
     groups.map(p => {
-      const vs = list.filter(x => x.p === p).map(x => x.v);
+      const vs = list.filter(x => x.p === p).map(x => x.v), allOn = vs.every(x => B.sel.has(x.id));
       return h("div", { class: "bingroup" },
-        h("div", { class: "row", style: "justify-content:space-between;align-items:baseline" },
-          h("div", null, h("b", null, p.title), h("div", { class: "small muted" }, `${p.vendor} · ${plural(vs.length, "variant")} in this bin${vs.length < p.variants.length ? ` (of ${p.variants.length})` : ""}`))),
-        binActions(vs, p.title, bin),
-        h("div", { class: "dlist" }, vs.map(x => h("div", { class: "drow static" },
+        h("label", { class: "checkrow", style: "align-items:flex-start" }, h("input", { type: "checkbox", checked: allOn, "aria-label": `Select all ${p.title}`, onchange: e => tick(vs.map(x => x.id), e.target.checked) }),
+          h("div", null, h("b", null, " " + p.title), h("div", { class: "small muted" }, `${p.vendor} · ${plural(vs.length, "variant")} in this bin${vs.length < p.variants.length ? ` (of ${p.variants.length})` : ""}`))),
+        h("div", { class: "dlist" }, vs.map(x => h("div", { class: "drow static" + (B.sel.has(x.id) ? " picked" : "") },
+          h("input", { type: "checkbox", checked: B.sel.has(x.id), "aria-label": `Select ${optText(x)}`, onchange: e => tick([x.id], e.target.checked) }),
           h("div", { style: "flex:1;min-width:0" }, h("b", null, optText(x)), h("div", { class: "icode" }, x.barcode), h("div", { class: "icode" }, `SKU ${x.sku}`),
             x.bins.length > 1 ? h("div", { class: "small muted" }, `Also in ${x.bins.filter(b => b.bin !== bin).map(b => b.bin).join(" / ")}`) : null),
           h("button", { class: "btn small secondary", type: "button", onclick: () => openProduct(p.id, bin, x.id) }, "Edit")))));
     }),
-    list.length ? h("button", { class: "btn secondary", type: "button", style: "margin-top:14px", onclick: e => tapTwice(e.currentTarget, `Empty bin ${bin}?`, () =>
-      binsChange(`Bin ${bin} emptied`, () => list.forEach(x => takeOut(x.v, bin)))) }, "Remove all from this bin") : null,
+    picked.length ? h("div", { class: "selbar" }, h("span", null, `${picked.length} selected`),
+      h("button", { class: "link small", type: "button", onclick: () => tick([...B.sel], false) }, "Clear"),
+      h("button", { class: "btn", type: "button", onclick: () => openBinEdit(bin, picked, false) }, `Edit selected (${picked.length})`)) : null,
     inv ? null : h("p", { class: "small muted" }, "Only bins can be changed. Item details come from the store.")));
 }
-/** Edit all: what's the same for everything in the bin. */
-function openEditAll(bin) {
-  const list = binContents().get(bin) || [], prods = [...new Set(list.map(x => x.p))], inv = binsSettings().inventoryEdits;
-  sheet = { custom: true }; let el = $("binSheet");
-  if (!el) { el = h("div", { id: "binSheet", class: "detailpanel", role: "dialog" }); document.body.append(el); }
-  document.body.style.overflow = "hidden";
-  const vs = list.map(x => x.v);
-  el.replaceChildren(h("div", { class: "detailbox" },
-    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, `Edit all in ${bin}`), h("button", { class: "btn small", type: "button", onclick: closeSheet }, "Close")),
-    h("p", { class: "small muted" }, `${plural(vs.length, "variant")} of ${plural(prods.length, "item")}.`),
-    h("h3", null, "The bin"), binActions(vs, `Everything in ${bin}`, bin),
-    inv ? h("div", null, h("h3", null, "Item details"), prods.map(p => h("div", { class: "fixgrid", style: "margin-bottom:10px" },
-      h("label", { class: "fixf wide" }, h("span", { class: "fixlab" }, "Item name"), h("input", { type: "text", value: p.title, "aria-label": "Item name", onchange: e => binsChange(`${p.title}: renamed`, () => { p.title = e.target.value.trim() || p.title; }) })),
-      h("label", { class: "fixf wide" }, h("span", { class: "fixlab" }, "Company"), h("input", { type: "text", value: p.vendor, "aria-label": "Company", onchange: e => binsChange(`${p.title}: company changed`, () => { p.vendor = e.target.value.trim() || p.vendor; }) })))))
-      : h("p", { class: "small muted" }, "Item names and companies come from the store. Turn on Settings → More → Bins → Allow inventory changes to edit them here.")));
-  sheet = null; // after any change this box closes and the bin page redraws
-}
-
 /* choosing a bin: type it, or pick from the empty ones; warns if it's taken */
 let chooser = null;
 function chooseBin(opts) { chooser = { ...opts, value: opts.preset || "", stage: "type", remove: new Set() }; drawChooser(); }

@@ -54,7 +54,10 @@ let bad = 0; const ok = (label, cond, extra = '') => { if (!cond) bad++; console
   const vt = await txt('#binSheet');
   ok('a size: barcode, SKU, both bins', /Barcode.*7353.*SKU.*LL2232-BLA-7Y.*\/.*either one/.test(vt), vt.slice(0, 220));
   await shot('4-variant');
-  await p.click('#binSheet button:has-text("Close")');
+  await p.click('#binSheet .detailhead button:has-text("Back")');
+  ok('Back from a size goes back to its item', /14 variants/.test(await txt('#binSheet')));
+  await p.click('#binSheet .detailhead button:has-text("Back")');
+  ok('Back from the item goes back to the list', !(await p.$('#binSheet')) && /List/.test(await txt('#settingsView')));
 
   // a bin's Edit page
   const firstBin = await p.$eval('.binrow:has-text("Velour") .binno', x => x.textContent);
@@ -72,10 +75,21 @@ let bad = 0; const ok = (label, cond, extra = '') => { if (!cond) bad++; console
   ok('See details: its items with tick boxes and Check all', (await p.$$eval('#binChooser .checkrow', r => r.length)) >= 2);
   await p.click('#binChooser button:has-text("Back")');
   await p.click('#binChooser button:has-text("anyway")');
-  ok('moved, with Undo', await p.evaluate(t => { const v = bins.products[0].variants.find(x => x.size === '8Y' && x.colour === 'Black'); return v.bins.map(b => b.bin).join() === t; }, taken) && !!(await p.$('#binsUndo')));
+  ok('moved out of this bin into the new one, with Undo', await p.evaluate(([t, fb]) => { const v = bins.products[0].variants.find(x => x.size === '8Y' && x.colour === 'Black'); return v.bins.some(b => b.bin === t) && !v.bins.some(b => b.bin === fb); }, [taken, firstBin]) && !!(await p.$('#binsUndo')));
   await p.click('#binsUndo button:has-text("Undo")');
   ok('Undo puts it back', await p.evaluate(fb => bins.products[0].variants.find(x => x.size === '8Y' && x.colour === 'Black').bins.some(b => b.bin === fb), firstBin));
-  await p.click('#binSheet button:has-text("Close")').catch(() => {});
+  await p.click('#binSheet .detailhead button:has-text("Back")').catch(() => {});
+  // Edit selected: tick two sizes, then the choices (move / also another bin / remove)
+  await p.click('#settingsView .drow:has-text("Black / 2T") input[type=checkbox]');
+  await p.click('#settingsView .drow:has-text("Black / 3T") input[type=checkbox]');
+  ok('ticked two: Edit selected (2)', /2 selected.*Edit selected \(2\)/.test(await txt('#settingsView')));
+  await p.click('button:has-text("Edit selected (2)")');
+  const ch = await txt('#binSheet');
+  ok('the choices: move, also another bin, remove', /Move to another bin.*Also put in another bin.*Remove from/.test(ch), ch.slice(0, 200));
+  await p.click('#binSheet button:has-text("Remove from")'); await p.click('#binSheet button:has-text("Tap again")');
+  ok('removed just those two', await p.evaluate(fb => { const vs = bins.products[0].variants; return !vs[0].bins.some(b => b.bin === fb) && !vs[1].bins.some(b => b.bin === fb) && vs[2].bins.some(b => b.bin === fb); }, firstBin));
+  await p.click('#binsUndo button:has-text("Undo")');
+  ok('no separate Remove buttons on the bin page', !/Remove all from this bin|Remove from/.test(await txt('#settingsView')));
   // Edit all: move everything to an empty bin picked from See empty bins
   await p.click('button:has-text("Edit all")');
   await p.click('#binSheet button:has-text("Move to another bin")');
@@ -140,12 +154,12 @@ let bad = 0; const ok = (label, cond, extra = '') => { if (!cond) bad++; console
   // inventory changes: off = read only; on = editable
   await p.evaluate(() => { openProduct('p4', 'D40', 'p4v1'); });
   ok('inventory changes off: details can\'t be edited', !(await p.$('#binSheet input[aria-label="Barcode"]')));
-  await p.click('#binSheet button:has-text("Close")');
+  await p.click('#binSheet .detailhead button:has-text("Back")');
   await p.evaluate(() => go('more'));
   await p.click('button:has-text("Turn on") >> nth=-1');
   await p.evaluate(() => { openProduct('p4', 'D40', 'p4v1'); });
   ok('inventory changes on: details can be edited', !!(await p.$('#binSheet input[aria-label="Barcode"]')));
-  await p.click('#binSheet button:has-text("Close")');
+  await p.click('#binSheet .detailhead button:has-text("Back")');
 
   // History, and nothing else in the app touched
   await p.evaluate(() => go('binsHistory'));
