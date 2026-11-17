@@ -246,7 +246,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
             case .success(let value):
                 let r = (value as? String) ?? ""
                 print("SELFTEST BARCODE RESULT \(r)")
-                let ok = r.contains("\"read\":\"735380754426\"") && r.contains("\"first\":1") && r.contains("\"second\":2") && r.contains("Barcode 735380754426")
+                let ok = r.contains("\"read\":\"735380754426\"") && r.contains("\"first\":1") && r.contains("\"second\":2") && r.contains("\"shown\":\"735380754426")
                 print(ok ? "SELFTEST BARCODE OK" : "SELFTEST BARCODE FAIL")
             }
         }
