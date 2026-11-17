@@ -222,6 +222,9 @@ free plan needs no card and can't charge). Once switched on:
   only get back in by signing in online, which checks the company is still allowed.
 - **Block / Remove:** the person is shut out at once, and the list saved on their
   phone is wiped.
+- **Which address:** the Firebase address (pick-and-sort.web.app) always uses sign-in. The old address
+  (github.io) and the phone apps carry on without sign-in, as before, until `ACCOUNTS_ON` is switched on,
+  so anyone still working there isn't interrupted.
 - **Setup:** paste `firebase/firestore.rules` into Firebase → Firestore Database →
   Rules, with `OWNER_EMAIL` replaced by the owner's email, then switch
   `ACCOUNTS_ON` to `true` in index.html. Until then the app works as before,

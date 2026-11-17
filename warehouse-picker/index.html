@@ -2477,7 +2477,10 @@ const keepAcct = () => { try { acct ? localStorage.setItem(ACCT_KEY, JSON.string
 // Sign-in is switched on once the database rules (firebase/firestore.rules) are in the Firebase project:
 // before that, the database refuses everyone and nobody could get in.
 const ACCOUNTS_ON = false;
-const accountsOn = () => { try { return ACCOUNTS_ON || localStorage.getItem("pick-and-sort-accounts-on") === "1"; } catch (e) { return ACCOUNTS_ON; } };
+// The Firebase address (pick-and-sort.web.app) always uses sign-in. The old address (github.io) and the phone apps
+// carry on without it until ACCOUNTS_ON is switched on, so nobody working there is interrupted.
+const onFirebaseSite = /(^|\.)pick-and-sort\.(web\.app|firebaseapp\.com)$/.test(location.hostname);
+const accountsOn = () => { try { return ACCOUNTS_ON || onFirebaseSite || localStorage.getItem("pick-and-sort-accounts-on") === "1"; } catch (e) { return ACCOUNTS_ON || onFirebaseSite; } };
 const testNoAuth = (() => { try { return localStorage.getItem("pick-and-sort-test-noauth") === "1"; } catch (e) { return false; } })(); // the automatic tests only
 const useEmulator = (() => { try { return localStorage.getItem("pick-and-sort-emulator") === "1"; } catch (e) { return false; } })();
 function loadFirebase() {
