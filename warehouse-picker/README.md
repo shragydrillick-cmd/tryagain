@@ -172,13 +172,15 @@ Pick & Sort (the iPhone app, the Android app or the website), tap
 **Receive** and point it at the code. All
 orders and items load on the phone, with nothing else to send.
 
-- A big list doesn't fit in one QR code, so the computer shows several codes
-  that change by themselves (e.g. 80 orders, 277 lines = 6 codes). Hold the phone on them: it
-  counts "Got 3 of 6 codes…" and catches them in any order. It took about 4
-  seconds in the test.
-- If the phone already has a list, it asks before replacing it.
-- A list that fits in one code also works with the phone's own camera app (it
-  opens the list on the website).
+- The codes are made for Pick & Sort's own scanner: each holds a short piece of the list, drawn big with
+  big squares, so they read easily off a screen. A small list is one code; a big one is several that
+  change by themselves (e.g. 80 orders, 277 lines = 13 codes). Hold the phone on them: it counts
+  "Got 3 of 13 codes…" and catches them in any order. It took about 13 seconds in the test.
+- What's already picked, sorted and packed comes along with the orders.
+- If the phone already has a list, only what's new is added: new orders come after the ones already
+  there (their numbers don't change), and everything on the phone keeps its ticks, piles and Packed.
+  A new order's item from a box already picked gets its own line in the pick list. The same list
+  again changes nothing.
 - **Other ways** (under the code): Copy link, Share link, Save as file (open it
   with **Choose file**).
 - The phone asks once for permission to use the camera. Nothing goes online.

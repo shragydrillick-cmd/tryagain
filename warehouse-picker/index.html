@@ -202,7 +202,7 @@ table.ordergrid td.first { background: var(--accent-soft); border-color: var(--a
 }
 .sendbox { margin: 10px 0; padding: 12px; border: 1px solid var(--line, #ccd); border-radius: 10px; }
 img.qr { display: block; width: 220px; max-width: 100%; image-rendering: pixelated; background: #fff; padding: 6px; border-radius: 8px; margin: 6px 0; }
-img.qr.big { width: 320px; }
+img.qr.big { width: min(420px, 100%); } /* big squares: easy to read off a screen */
 .scanner { position: fixed; inset: 0; z-index: 50; background: #000; color: #fff; display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px); }
 .scanhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .scanview { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 12px; }
@@ -905,21 +905,24 @@ function makePlan(lines, settings) {
   const { locate } = buildLocator(settings);
   const orders = new Map();
   lines.forEach(l => {
-    if (!orders.has(l.order)) orders.set(l.order, { raw: l.order, units: 0, things: new Map() });
+    if (!orders.has(l.order)) orders.set(l.order, { raw: l.order, units: 0, things: new Map(), batch: l.batch || 0 });
     const o = orders.get(l.order);
     o.units += l.qty;
-    const k = `${l.box}\u0000${l.name}\u0000${l.details}`;
-    if (!o.things.has(k)) o.things.set(k, { box: l.box, also: l.also || "", name: l.name, details: l.details, qty: 0, ...lineCodes(l) });
+    // lines added later (new orders from a received list) get pick lines of their own, so what's already picked stays picked
+    const k = `${l.box}\u0000${l.name}\u0000${l.details}${l.batch ? "\u0000" + l.batch : ""}`;
+    if (!o.things.has(k)) o.things.set(k, { box: l.box, also: l.also || "", name: l.name, details: l.details, batch: l.batch || 0, qty: 0, ...lineCodes(l) });
     o.things.get(k).qty += l.qty;
   });
   const orderList = [...orders.values()];
-  if (settings.orderNumbering !== "file") orderList.sort((a, b) => natural(a.raw, b.raw));
+  // orders added later come after the ones already there, so no order's number changes
+  if (settings.orderNumbering !== "file") orderList.sort((a, b) => a.batch - b.batch || natural(a.raw, b.raw));
+  else orderList.sort((a, b) => a.batch - b.batch);
   orderList.forEach((o, i) => { o.label = i + 1; });
 
   // One pick line per box + item (a box can hold more than one kind of item)
   const picks = new Map();
   orderList.forEach(o => o.things.forEach((t, k) => {
-    if (!picks.has(k)) picks.set(k, { box: t.box, also: t.also, name: t.name, details: t.details, barcode: t.barcode, sku: t.sku, qty: 0, orders: [], loc: locate(t.box) });
+    if (!picks.has(k)) picks.set(k, { box: t.box, also: t.also, name: t.name, details: t.details, batch: t.batch, barcode: t.barcode, sku: t.sku, qty: 0, orders: [], loc: locate(t.box) });
     const p = picks.get(k);
     p.qty += t.qty;
     p.orders.push({ label: o.label, raw: o.raw, qty: t.qty });
@@ -930,7 +933,7 @@ function makePlan(lines, settings) {
     else if (a.loc) return -1;
     else if (b.loc) return 1;
     else { const d = natural(a.box, b.box); if (d) return d; }
-    return natural(a.name, b.name) || natural(a.details, b.details);
+    return natural(a.name, b.name) || natural(a.details, b.details) || a.batch - b.batch;
   });
   list.forEach((p, i) => { p.step = i + 1; });
   markDifferences(list);
@@ -941,7 +944,7 @@ function makePlan(lines, settings) {
   [...list].reverse().forEach(p => {
     p.orders.forEach(o => {
       left.set(o.label, left.get(o.label) - o.qty);
-      unpack.push({ box: p.box, also: p.also, name: p.name, details: p.details, barcode: p.barcode, sku: p.sku, marks: p.marks, qty: o.qty, label: o.label, raw: o.raw, last: left.get(o.label) === 0 });
+      unpack.push({ box: p.box, also: p.also, name: p.name, details: p.details, batch: p.batch, barcode: p.barcode, sku: p.sku, marks: p.marks, qty: o.qty, label: o.label, raw: o.raw, last: left.get(o.label) === 0 });
     });
   });
   unpack.forEach((u, i) => { u.step = i + 1; });
@@ -1829,7 +1832,9 @@ function listToSend() {
   saveList();
   // compact: the field names once, then one row per line
   const keys = [...new Set(savedList.lines.flatMap(l => Object.keys(l)))];
+  const st = sharedState(); // what's already picked, sorted and packed goes along too
   return { pickAndSortList: 1, name: current.name, warnings: current.warnings || [], openChecks: savedList.openChecks || 0,
+    ticks: { picked: st.picked, unpacked: st.unpacked, placed: st.placed, packed: st.packed },
     k: keys, r: savedList.lines.map(l => keys.map(k => (l[k] === undefined ? null : l[k]))) };
 }
 /** Back from the compact form (or a plain list of lines). */
@@ -1846,7 +1851,7 @@ async function qrUrl(text, cell) {
   try { const q = qrcode(0, "L"); q.addData(text, "Byte"); q.make(); return q.createDataURL(cell || 4, 8); } catch (e) { return null; }
 }
 async function qrImage(text) { const u = await qrUrl(text); return u ? h("img", { src: u, alt: "QR code", class: "qr" }) : null; }
-const QR_PART = 550; // characters per code when a list needs several: small enough to scan easily off a screen
+const QR_PART = 300; // characters per code when a list needs several: small enough to scan easily off a screen
 let qrAnim = null;
 async function showSendBox() {
   const box = $("sendBox");
@@ -1857,20 +1862,21 @@ async function showSendBox() {
   const data = listToSend(), packed = await packText(JSON.stringify(data));
   const link = siteUrl() + "#list=" + packed, fileName = `pick-list-${fileStamp()}.json`;
   const file = new Blob([JSON.stringify(data)], { type: "application/json" });
+  // Always codes made for Pick & Sort's own scanner, never too dense: each holds a short piece, drawn big with
+  // big squares. A small list is one code; a big one is several, shown one after another (caught in any order).
+  const id = Math.random().toString(36).slice(2, 7), n = Math.max(1, Math.ceil(packed.length / QR_PART));
+  const urls = [];
+  for (let i = 0; i < n; i++) urls.push(await qrUrl(`PS:${id}:${i + 1}/${n}:${packed.slice(i * QR_PART, (i + 1) * QR_PART)}`, 8));
+  const img = h("img", { src: urls[0], alt: "QR code", class: "qr big" });
   let codeArea;
-  if (link.length <= 1000) { // one code: works with the in-app scanner, and with the phone's own camera (opens the website)
-    codeArea = h("div", null, await qrImage(link),
-      h("p", { class: "small" }, "On the other phone or computer: Pick & Sort → ", h("b", null, "Receive"), ", and point it here. (Or a phone's camera app: opens the list on the website.)"));
-  } else { // several codes, shown one after another: the scanner collects them in any order
-    const id = Math.random().toString(36).slice(2, 7), n = Math.ceil(packed.length / QR_PART);
-    const urls = [];
-    for (let i = 0; i < n; i++) urls.push(await qrUrl(`PS:${id}:${i + 1}/${n}:${packed.slice(i * QR_PART, (i + 1) * QR_PART)}`));
-    const img = h("img", { src: urls[0], alt: "QR code", class: "qr big" }), label = h("p", { class: "small muted", style: "margin:0" }, `Code 1 of ${n}`);
+  if (n === 1) codeArea = h("div", null, img, h("p", { class: "small" }, "On the other phone or computer: Pick & Sort → ", h("b", null, "Receive"), ", and point it here."));
+  else {
+    const label = h("p", { class: "small muted", style: "margin:0" }, `Code 1 of ${n}`);
     let i = 0, paused = false;
-    const pause = h("button", { class: "btn secondary small", type: "button", onclick: () => { paused = !paused; pause.textContent = paused ? "▶ Play" : "❚❚ Pause"; } }, "❚❚ Pause");
+    const pause = h("button", { class: "btn secondary small", type: "button", onclick: () => { paused = !paused; pause.textContent = paused ? "Play" : "Pause"; } }, "Pause");
     qrAnim = setInterval(() => { if (paused || box.classList.contains("hidden") || !document.body.contains(img)) return; i = (i + 1) % n; img.src = urls[i]; label.textContent = `Code ${i + 1} of ${n}`; }, 700);
     codeArea = h("div", null, img, label,
-      h("p", { class: "small" }, `This list is big, so it's ${n} codes that change by themselves. On the other phone or computer: Pick & Sort → `, h("b", null, "Receive"),
+      h("p", { class: "small" }, `This list is ${n} codes that change by themselves. On the other phone or computer: Pick & Sort → `, h("b", null, "Receive"),
         ", and hold it on the codes until it says it has them all (it catches them in any order)."), pause);
   }
   box.replaceChildren(
@@ -1960,19 +1966,55 @@ async function copyText(text, btn) {
   if (btn) { const old = btn.textContent; btn.textContent = "Copied ✓"; setTimeout(() => { btn.textContent = old; }, 2000); }
 }
 /** A list that came from another device: open it, but ask first if it would replace one in progress. */
+/** The ticks as keys (pick line, order line, order), so they survive the list being rebuilt. */
+function tickKeys() {
+  return { picked: new Set(plan.picks.filter(p => pickedDone.has(p.step)).map(pickKey)), unpacked: new Set(plan.unpack.filter(u => unpackDone.has(u.step)).map(unpackKey)),
+    placed: new Map(plan.unpack.filter(u => placed.get(u.step)).map(u => [unpackKey(u), placed.get(u.step)])), packed: new Map(packed) };
+}
+function applyTickKeys(t) {
+  pickedDone = new Set(plan.picks.filter(p => t.picked.has(pickKey(p))).map(p => p.step));
+  unpackDone = new Set(plan.unpack.filter(u => t.unpacked.has(unpackKey(u))).map(u => u.step));
+  placed = new Map(plan.unpack.filter(u => t.placed.has(unpackKey(u))).map(u => [u.step, t.placed.get(unpackKey(u))]));
+  packed = new Map(t.packed);
+  renderPick(); renderUnpack(); saveList();
+}
+const lineId = l => `${l.order}|${l.box}|${l.name}|${l.details}`;
+/** A list from another device (Receive, a link, or a file). With no list here, it's used as it came, with its
+    ticks. With a list here, only what's new is added: orders, ticks and piles already on this phone stay exactly
+    as they are, and order numbers don't change. */
 function receiveList(data, how) {
   const lines = data ? linesOf(data) : [];
   if (!lines.length) { showLoadMsg("That list is empty or damaged."); return; }
-  const use = () => {
+  const tk = data.ticks || {};
+  const theirs = { picked: new Set(tk.picked || []), unpacked: new Set(tk.unpacked || []), placed: new Map(tk.placed || []), packed: new Map(tk.packed || []) };
+  if (!$("stepper").classList.contains("hidden")) closeSteps();
+  if (!current || !plan) {
     current = { lines, warnings: data.warnings || [], name: data.name || "List from another device", src: null, openChecks: data.openChecks || 0 };
-    $("loadMsg").replaceChildren(); rebuild(); toast(`List received (${how}).`);
-  };
-  if (!current) return use();
-  $("loadMsg").replaceChildren(h("div", { class: "notice warn" }, `A list came ${how}: "${data.name || "list"}". Open it instead of the list you have now?`,
-    h("div", { class: "row", style: "margin-top:8px" },
-      h("button", { class: "btn small", type: "button", onclick: use }, "Open the new list"),
-      h("button", { class: "btn secondary small", type: "button", onclick: () => $("loadMsg").replaceChildren() }, "Keep mine"))));
-  window.scrollTo(0, 0);
+    $("loadMsg").replaceChildren(); rebuild(); applyTickKeys(theirs);
+    toast(`List received (${how}).`); return;
+  }
+  const have = new Set(current.lines.map(lineId)), haveOrders = new Set(current.lines.map(l => l.order));
+  const fresh = lines.filter(l => !have.has(lineId(l)));
+  if (!fresh.length) { $("loadMsg").replaceChildren(); toast(`Nothing new (${how}): you already have every order in it.`); return; }
+  const mine = tickKeys();
+  const batch = Math.max(0, ...current.lines.map(l => l.batch || 0)) + 1;
+  fresh.forEach(l => { l.batch = batch; });
+  current.lines = current.lines.concat(fresh);
+  rebuild();
+  // ticks: everything on this phone stays; for the new lines, what the other device had done
+  const newOrders = new Set(fresh.map(l => l.order).filter(o => !haveOrders.has(o)));
+  plan.picks.filter(p => p.batch === batch && theirs.picked.has(`${p.box}|${p.name}|${p.details}`)
+    && p.orders.every(o => newOrders.has(o.raw))).forEach(p => mine.picked.add(pickKey(p)));
+  plan.unpack.filter(u => u.batch === batch && newOrders.has(u.raw)).forEach(u => {
+    const k = unpackKey(u);
+    if (theirs.unpacked.has(k)) mine.unpacked.add(k);
+    if (theirs.placed.has(k)) mine.placed.set(k, theirs.placed.get(k));
+  });
+  theirs.packed.forEach((at, raw) => { if (newOrders.has(raw)) mine.packed.set(raw, at); });
+  applyTickKeys(mine);
+  $("loadMsg").replaceChildren(h("div", { class: "notice good" },
+    `Added ${plural(newOrders.size, "new order")} ${how}${fresh.some(l => haveOrders.has(l.order)) ? `, and ${plural(fresh.filter(l => haveOrders.has(l.order)).length, "new item")} to orders you already had` : ""}. Everything you already had, and what's done on it, is unchanged.`));
+  toast(`Added ${plural(newOrders.size, "new order")}.`);
 }
 
 /* ---------- linked devices: one shared list, kept in step through the owner's own free Firebase database ---------- */
@@ -1981,7 +2023,7 @@ const syncOn = () => !!(typeof acct !== "undefined" && acct && acct.status === "
 const SYNC_KEY = "pick-and-sort-sync-v2";
 try { const o = JSON.parse(localStorage.getItem(SYNC_KEY) || "{}"); sync.rev = o.rev || 0; sync.dirty = !!o.dirty; sync.company = o.company || ""; } catch (e) {}
 const keepSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify({ rev: sync.rev, dirty: sync.dirty, company: acct && acct.company })); } catch (e) {} };
-const pickKey = p => `${p.box}|${p.name}|${p.details}`;
+const pickKey = p => `${p.box}|${p.name}|${p.details}${p.batch ? "|" + p.batch : ""}`;
 const unpackKey = u => `${u.raw}|${u.box}|${u.name}|${u.details}`;
 /** What all linked devices share: the orders and the ticks (not where each one is in step by step). */
 function sharedState() {
@@ -2240,7 +2282,7 @@ async function openBarcodeScanner() {
 let detailFull = (() => { try { return localStorage.getItem("pick-and-sort-full-detail") === "1"; } catch (e) { return false; } })();
 let detailView = null; // { kind: "orders" | "order" | "items" | "boxes", label }
 /** Has this order line's item been picked (its pick line ticked)? */
-function pickOf(u) { return plan.picks.find(p => p.box === u.box && p.name === u.name && p.details === u.details); }
+function pickOf(u) { return plan.picks.find(p => p.box === u.box && p.name === u.name && p.details === u.details && p.batch === u.batch); }
 /** One item for one order: how far it's got. */
 function lineStatus(u) {
   const placedN = unpackDone.has(u.step) ? u.qty : (placed.get(u.step) || 0), p = pickOf(u), picked = p && pickedDone.has(p.step);
@@ -2311,7 +2353,7 @@ function drawDetail() {
   } else if (v.kind === "items") {
     body = [h("p", { class: "small muted" }, `Every item to pick, ${plan.totalUnits} in all.`),
       h("div", { class: "dlist" }, plan.picks.map(p => {
-        const lines = plan.unpack.filter(u => u.box === p.box && u.name === p.name && u.details === p.details);
+        const lines = plan.unpack.filter(u => u.box === p.box && u.name === p.name && u.details === p.details && u.batch === p.batch);
         const on = lines.reduce((a, u) => a + (unpackDone.has(u.step) ? u.qty : Math.min(u.qty, placed.get(u.step) || 0)), 0);
         const st = on >= p.qty ? { cls: "st-green", text: "All on their orders" } : on > 0 ? { cls: "st-yellow", text: `${on} of ${p.qty} on their orders` }
           : pickedDone.has(p.step) ? { cls: "st-blue", text: "Picked" } : { cls: "st-red", text: "Not picked yet" };

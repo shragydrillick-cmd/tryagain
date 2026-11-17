@@ -27,7 +27,7 @@ const SP = require('os').tmpdir() + '/pick-and-sort-qr';
     // the label and the picture read together, so they always belong to the same code
     const { lbl, src } = await pc.evaluate(() => { // the code at its own size, as a PNG
       const img = document.querySelector('#sendBox img.qr'), c = document.createElement('canvas'); c.width = 420; c.height = 420; // same size every time (ffmpeg drops a frame when the size changes)
-      const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 420, 420); x.drawImage(img, (420 - img.naturalWidth) >> 1, (420 - img.naturalHeight) >> 1); return { lbl: document.querySelector('#sendBox p.muted').textContent, src: c.toDataURL('image/png') }; });
+      const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 420, 420); x.imageSmoothingEnabled = false; x.drawImage(img, 10, 10, 400, 400); /* the whole code, at the size it is shown */ return { lbl: document.querySelector('#sendBox p.muted').textContent, src: c.toDataURL('image/png') }; });
     const i = +lbl.match(/Code (\d+)/)[1];
     if (!seen.has(i)) { const f = path.join(SP, `f${String(i).padStart(3, '0')}.png`); fs.writeFileSync(f, Buffer.from(src.split(',')[1], 'base64')); seen.set(i, f); }
     await pc.waitForTimeout(200);

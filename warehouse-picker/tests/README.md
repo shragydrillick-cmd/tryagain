@@ -78,3 +78,7 @@ the "bin taken" warning with See details, Undo, Edit all with See empty bins), A
 bin), scanning a bin's sticker and then items into it, the inventory-changes switch, History, and that picking
 and settings are untouched.
 
+`receive-merge.test.js` checks receiving a list when the phone already has one: only new orders are added,
+after the old ones; everything already picked, placed, sorted and packed stays; a new order's item from a box
+already picked gets its own pick line; what the sending device had done on new orders comes along; the same list
+again changes nothing; an empty phone gets the list with its ticks.
