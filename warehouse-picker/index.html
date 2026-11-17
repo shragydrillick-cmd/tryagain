@@ -327,6 +327,8 @@ header.top #title { white-space: nowrap; }
 .emptygrid { display: flex; flex-wrap: wrap; gap: 6px; }
 .checkrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; }
 .chooselist { margin-left: 22px; }
+.scanwarn { margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: #6b4a10; color: #fff; font-size: 14px; font-weight: 600; }
+.scanresult .btn.secondary { color: #fff; border-color: #9aa4b0; }
 .addbin { width: 100%; margin-top: 14px; padding: 14px; font-size: 17px; }
 .binsearch { width: 100%; margin-top: 8px; }
 .undobar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 80; display: flex; justify-content: space-between; width: min(440px, calc(100% - 32px)); gap: 12px; align-items: center; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: calc(100% - 32px); }
@@ -2867,7 +2869,7 @@ function refreshBins() { if ($("binSheet")) drawSheet(); if (view === "settings"
 const setOf = (v, bin) => v.bins.some(b => b.bin === bin);
 function putIn(v, bin) { if (!setOf(v, bin)) v.bins.push({ bin, at: Date.now() }); }
 function takeOut(v, bin) { v.bins = v.bins.filter(b => b.bin !== bin); }
-const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const plural = (n, w, many) => (many ? `${n} ${n === 1 ? w : many}` : `${n} ${w}${n === 1 ? "" : "s"}`);
 
 /* the Bins pages */
 function binsNotice() {
@@ -3076,17 +3078,23 @@ function drawChooser() {
     oninput: e => { c.value = e.target.value; clearTimeout(input.t); input.t = setTimeout(() => { drawChooser(); const i = document.querySelector('#binChooser input[aria-label="Bin number"]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); } });
   const left = here.filter(x => !c.remove.has(x.v));
   const loc = bin ? buildLocator(settings).locate(bin) : null;
+  const elsewhere = c.askMove && bin ? c.items.filter(v => v.bins.some(b => b.bin !== bin)) : [];
+  if (c.move == null) c.move = true;
   el.replaceChildren(h("div", { class: "detailbox" }, head(c.title),
     h("div", { class: "row" }, input, h("button", { class: "btn secondary", type: "button", onclick: () => { c.stage = "empty"; drawChooser(); } }, "See empty bins"),
       h("button", { class: "btn secondary", type: "button", onclick: () => binScan(code => { const r = readBinCode(code); if (r.bin) { c.value = r.bin; drawChooser(); } else toast("That isn't a bin sticker."); }, { title: "Scan the bin's sticker" }) }, "Scan bin")),
     bin ? h("p", { class: "small muted" }, loc ? `${loc.unitName}, ${shelfText(loc)}` : binsAll().length ? "Not on your shelf map." : "") : null,
     bin && here.length ? h("div", { class: "notice warn" }, left.length ? `This bin is already taken (${plural(left.length, "item")}). ` : "Everything else will be taken out of this bin. ",
       h("button", { class: "link small", type: "button", onclick: () => { c.stage = "details"; drawChooser(); } }, "See details")) : null,
+    elsewhere.length ? h("div", { class: "notice warn" },
+      elsewhere.length === 1 ? `It's in ${elsewhere[0].bins.map(b => b.bin).join(" / ")} now.` : `${plural(elsewhere.length, "of these is", "of these are")} in another bin now.`,
+      h("label", { class: "checkrow" }, h("input", { type: "radio", name: "cmove", checked: c.move, onchange: () => { c.move = true; drawChooser(); } }), h("span", null, ` Move ${elsewhere.length === 1 ? "it" : "them"} to ${bin}`)),
+      h("label", { class: "checkrow" }, h("input", { type: "radio", name: "cmove", checked: !c.move, onchange: () => { c.move = false; drawChooser(); } }), h("span", null, " Keep the old bin too"))) : null,
     h("button", { class: "btn", type: "button", disabled: !bin, style: "margin-top:12px;width:100%", onclick: () => {
-      const take = [...c.remove]; const done = c.onDone; closeChooser();
+      const take = [...c.remove], done = c.onDone, move = c.move; closeChooser();
       if (take.length) binsChange(`${plural(take.length, "item")} taken out of ${bin}`, () => take.forEach(v => takeOut(v, bin)));
-      done(bin);
-    } }, bin ? (left.length ? `OK, add to ${bin} anyway` : `Confirm: bin ${bin}`) : "Type a bin")));
+      done(bin, move);
+    } }, bin ? (left.length || elsewhere.length ? `OK, ${elsewhere.length && c.move ? "move" : "add"} to ${bin} anyway` : `Confirm: bin ${bin}`) : "Type a bin")));
 }
 
 /* Add / Edit: find an item (scan or search), choose which of its sizes, put them in a bin */
@@ -3098,11 +3106,12 @@ function renderBinsAdd(v) {
     const search = h("input", { type: "search", class: "binsearch", value: q, placeholder: "Barcode, SKU or name", "aria-label": "Find an item",
       oninput: e => { B.q2 = e.target.value; clearTimeout(search.t); search.t = setTimeout(() => { renderSettings(); const s = document.querySelector('input[aria-label="Find an item"]'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }, 250); } });
     if (B.presetBin) parts.push(h("div", { class: "notice good" }, `Filling bin ${B.presetBin}: find the item to put in it.`));
-    parts.push(h("p", { class: "small muted" }, "Scan an item to place it, or scan a bin's sticker and then each item that goes in it."));
+    parts.push(h("p", { class: "small muted" }, "Scan: an item opens it, to choose its sizes; a bin's sticker opens that bin, to scan items into it. Place by scanning: scan an item and its bin's sticker, in either order, and confirm."));
     parts.push(h("div", { class: "binbig" },
         h("button", { class: "btn", type: "button", onclick: () => binScan(code => { const r = readBinCode(code);
           if (r.item) pickVariant(r.item); else if (r.bin) { B.bin = r.bin; go("binsBin"); setTimeout(() => scanIntoBin(r.bin), 50); } else toast(`${code}: not in the inventory.`); }) }, "Scan"),
         h("button", { class: "btn secondary", type: "button", onclick: () => { B.manual = true; renderSettings(); setTimeout(() => { const s = document.querySelector('input[aria-label="Find an item"]'); if (s) s.focus(); }, 50); } }, "Manual")),
+      h("button", { class: "btn secondary", type: "button", style: "width:100%;margin-top:10px", onclick: () => scanIntoBin(null) }, "Place by scanning: an item and its bin"),
       B.manual || q ? h("div", null, h("h3", null, "Manual"), search,
         ql && !hits.length ? h("p", { class: "muted" }, "Nothing matches.") : null,
         h("div", { class: "dlist" }, hits.map(x => h("button", { class: "drow", type: "button", onclick: () => pickVariant(x) },
@@ -3129,10 +3138,7 @@ function renderBinsAdd(v) {
         h("label", { class: "checkrow" }, h("input", { type: "checkbox", checked: p.variants.every(x => B.chosen.has(x.id)), onchange: e => { p.variants.forEach(x => e.target.checked ? B.chosen.add(x.id) : B.chosen.delete(x.id)); renderSettings(); } }), h("b", null, " Check all")),
         p.variants.map(x => h("label", { class: "checkrow" }, h("input", { type: "checkbox", checked: B.chosen.has(x.id), onchange: e => { e.target.checked ? B.chosen.add(x.id) : B.chosen.delete(x.id); renderSettings(); } }),
           h("span", null, ` ${optText(x)}`, h("span", { class: "small muted" }, x.bins.length ? ` · ${x.bins.map(b => b.bin).join(" / ")}` : " · no bin"))))) : null) : null,
-    already.length ? h("label", { class: "checkrow", style: "margin-top:8px" }, h("input", { type: "checkbox", checked: B.moveOld !== false, onchange: e => { B.moveOld = e.target.checked; } }),
-      h("span", null, ` Take ${already.length === 1 ? "it" : "them"} out of the old bin${already.length === 1 && already[0].bins.length === 1 ? ` (${already[0].bins[0].bin})` : "s"}`)) : null,
-    h("button", { class: "btn addbin", type: "button", disabled: !sel.length, onclick: () => chooseBin({ title: `Add ${plural(sel.length, "item")} to a bin`, items: sel, preset: B.presetBin || "", onDone: bin => {
-      const move = B.moveOld !== false;
+    h("button", { class: "btn addbin", type: "button", disabled: !sel.length, onclick: () => chooseBin({ title: `Add ${plural(sel.length, "item")} to a bin`, items: sel, preset: B.presetBin || "", askMove: true, onDone: (bin, move) => {
       binsChange(`${p.title} (${sel.length === p.variants.length ? "all sizes" : sel.map(optText).join(", ")}): put in ${bin}`, () => sel.forEach(x => { if (move) x.bins = []; putIn(x, bin); }));
       B.presetBin = null; toast(`Added to ${bin}.`);
     } }) }, `+ Add to bin${sel.length > 1 ? ` (${sel.length})` : ""}`),
@@ -3154,15 +3160,20 @@ async function binScan(onCode, opts = {}) {
   const video = h("video", { playsinline: true, muted: true, autoplay: true }), msg = h("p", { class: "scanmsg small" }, "Starting the camera…");
   const title = h("b", null, opts.title || "Scan an item or a bin");
   const result = h("div", { class: "scanresult" }, h("div", { class: "scanhint" }, opts.hint || "Scan an item's barcode, or the sticker on a bin."));
-  const handle = code => {
-    const r = onCode(code);
-    if (!opts.keep) { closeScanner(); return; }
-    if (r) {
+  const showR = r => {
+    if (r && r.el) { result.className = "scanresult " + (r.good ? "good" : r.bad ? "bad" : r.warn ? "warn" : "ok"); result.replaceChildren(r.el); }
+    else if (r) {
       result.className = "scanresult " + (r.good ? "good" : r.bad ? "bad" : "ok");
       result.replaceChildren(h("div", { class: "scanmain" }, r.big ? h("div", { class: "scanbig" }, r.big) : null,
         h("div", { style: "flex:1;min-width:0" }, h("div", { class: "scanverdict" }, r.text), r.sub ? h("div", { class: "small" }, r.sub) : null)));
     }
     if (r && r.title) title.textContent = r.title;
+  };
+  scan.show = showR;
+  const handle = code => {
+    const r = onCode(code);
+    if (!opts.keep) { closeScanner(); return; }
+    showR(r);
   };
   const typed = h("input", { type: "text", placeholder: "Or type the barcode / SKU / bin", "aria-label": "Barcode or SKU", onkeydown: e => { if (e.key === "Enter") ok.click(); } });
   const ok = h("button", { class: "btn small", type: "button", onclick: () => { const t = typed.value.trim(); if (t) { typed.value = ""; handle(t); } } }, "OK");
@@ -3200,23 +3211,52 @@ async function binScan(onCode, opts = {}) {
   };
   tick();
 }
-/** Scan a bin's sticker, then each item that goes in it. Scanning another bin's sticker switches to that bin. */
+/** Placing items by scanning: the bin's sticker and the item, in either order. Nothing is placed until it's confirmed;
+    it warns when the item is already in another bin, or the bin already has something else in it. The bin stays
+    chosen, so the next item can be scanned straight away; another bin's sticker switches bins. */
 function scanIntoBin(bin) {
-  let target = bin, count = 0;
-  const keep = h("select", { "aria-label": "Items already in another bin" }, h("option", { value: "move" }, "Items already in another bin: move them here"), h("option", { value: "both" }, "Items already in another bin: keep both bins"));
+  let target = bin || null, pending = null, count = 0;
+  const confirmBox = () => {
+    const { p, v } = pending, others = v.bins.map(b => b.bin).filter(b => b !== target);
+    if (setOf(v, target) && !others.length) { pending = null; return { big: target, text: `Already in ${target}`, sub: `${p.title} · ${optText(v)}` }; }
+    const inBin = (binContents().get(target) || []).filter(x => x.p !== p);
+    const names = [...new Set(inBin.map(x => x.p.title))];
+    const place = move => {
+      binsChange(`${p.title} ${optText(v)}: put in ${target}`, () => { if (move) v.bins = []; putIn(v, target); });
+      count++; pending = null; beep(true);
+      scan.show({ good: true, big: target, text: `Added: ${optText(v)}`, sub: `${p.title}${others.length ? (move ? ` · taken out of ${others.join(" / ")}` : ` · also still in ${others.join(" / ")}`) : ""} · ${count} added. Scan the next item.` });
+    };
+    const cancel = () => { pending = null; scan.show({ big: target, text: "Not added", sub: "Scan the next item." }); };
+    const warn = others.length || names.length;
+    return { warn: !!warn, el: h("div", { class: "scanmain", style: "align-items:flex-start" }, h("div", { class: "scanbig" }, target),
+      h("div", { style: "flex:1;min-width:0" },
+        h("div", { class: "scanverdict" }, `Add to ${target}?`),
+        h("div", null, h("b", null, optText(v)), " · ", p.title),
+        others.length ? h("div", { class: "scanwarn" }, `It's in ${others.join(" / ")} now.`) : null,
+        names.length ? h("div", { class: "scanwarn" }, `${target} already has: ${names.join(", ")}.`) : null,
+        h("div", { class: "row", style: "margin-top:8px;gap:6px" },
+          others.length
+            ? [h("button", { class: "btn small", type: "button", onclick: () => place(true) }, names.length ? `Move to ${target} anyway` : `Move to ${target}`),
+               h("button", { class: "btn small secondary", type: "button", onclick: () => place(false) }, "Keep in both")]
+            : h("button", { class: "btn small", type: "button", onclick: () => place(true) }, names.length ? "Add anyway" : `Add to ${target}`),
+          h("button", { class: "btn small secondary", type: "button", onclick: cancel }, "Cancel")))) };
+  };
   binScan(code => {
     const r = readBinCode(code);
     if (r.item) {
-      const { p, v } = r.item, others = v.bins.map(b => b.bin).filter(b => b !== target);
-      if (setOf(v, target) && (!others.length || keep.value === "both")) return { big: target, text: `Already in ${target}`, sub: `${p.title} · ${optText(v)}` };
-      binsChange(`${p.title} ${optText(v)}: put in ${target}`, () => { if (keep.value === "move") v.bins = []; putIn(v, target); });
-      count++;
-      return { good: true, big: target, text: `Added: ${optText(v)}`, sub: `${p.title}${others.length ? (keep.value === "move" ? ` · taken out of ${others.join(" / ")}` : ` · also still in ${others.join(" / ")}`) : ""} · ${count} added`, title: `Filling bin ${target}` };
+      pending = r.item;
+      if (!target) return { big: "?", text: `${optText(r.item.v)}: now scan the bin`, sub: `${r.item.p.title}. Scan the sticker on the bin it goes in.`, title: "Scan the bin" };
+      return confirmBox();
     }
-    if (r.bin) { target = r.bin; count = 0; B.bin = target; return { big: target, text: `Now filling bin ${target}`, sub: `${plural((binContents().get(target) || []).length, "item")} in it already. Scan the items.`, title: `Filling bin ${target}` }; }
+    if (r.bin) {
+      target = r.bin; B.bin = target; count = 0;
+      if (pending) { const x = confirmBox(); x.title = `Bin ${target}`; return x; }
+      return { big: target, text: `Bin ${target}`, sub: `${plural((binContents().get(target) || []).length, "item")} in it now. Scan an item to add it.`, title: `Bin ${target}` };
+    }
     return { bad: true, big: "?", text: "Not in the inventory", sub: code };
-  }, { keep: true, title: `Filling bin ${bin}`, hint: `Scan each item that goes in bin ${bin}. Scan another bin's sticker to switch bins.`, extra: keep,
-    onClose: () => { if (view === "settings") { B.bin = target; setPage = "binsBin"; renderSettings(); } } });
+  }, { keep: true, title: target ? `Bin ${target}` : "Scan an item and its bin",
+    hint: target ? `Scan an item to add it to ${target}. Scan another bin's sticker to switch bins.` : "Scan an item and the sticker on its bin, in either order.",
+    onClose: () => { if (view === "settings" && target) { B.bin = target; setPage = "binsBin"; renderSettings(); } } });
 }
 function renderBinsHistory(v) {
   v.replaceChildren(h("section", { class: "card" }, backRow("Bins", "bins"), h("h2", null, "History"),

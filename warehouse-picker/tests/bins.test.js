@@ -101,21 +101,41 @@ let bad = 0; const ok = (label, cond, extra = '') => { if (!cond) bad++; console
   await shot('8-add');
   await p.click('button:has-text("+ Add to bin (3)")');
   await p.fill('input[aria-label="Bin number"]', 'd40'); await p.waitForTimeout(500);
-  await p.click('#binChooser button:has-text("Confirm: bin D40")');
+  await p.click('#binChooser button:has-text("bin D40")');
   ok('3 sizes put in D40', await p.evaluate(() => bins.products[3].variants.filter(v => v.bins.some(b => b.bin === 'D40')).length === 3));
 
-  // scanning a bin's sticker, then items into it (typed here; the camera does the same)
+  // placing by scanning: nothing is placed until it's confirmed; warnings when it's in another bin or the bin has other things
+  const type = async c => { await p.fill('.scanner input[aria-label="Barcode or SKU"]', c); await p.click('.scanner button:text-is("OK")'); };
   await p.evaluate(() => { B.bin = 'D41'; go('binsBin'); });
   await p.click('button:has-text("Scan items into D41")');
-  const code = await p.evaluate(() => bins.products[6].variants[0].barcode);
-  await p.fill('.scanner input[aria-label="Barcode or SKU"]', code); await p.click('.scanner button:text-is("OK")');
-  ok('scan items into a bin: added', /D41.*Added/.test(await txt('.scanner .scanresult')) && await p.evaluate(() => bins.products[6].variants[0].bins.some(b => b.bin === 'D41')));
-  await p.fill('.scanner input[aria-label="Barcode or SKU"]', 'C12'); await p.click('.scanner button:text-is("OK")');
-  ok('scanning another bin sticker switches bins', /Now filling bin C12/.test(await txt('.scanner .scanresult')));
-  await p.fill('.scanner input[aria-label="Barcode or SKU"]', 'NOPE123X'); await p.click('.scanner button:text-is("OK")');
+  const code = await p.evaluate(() => bins.products[3].variants[3].barcode);
+  await type(code);
+  ok('scan an item into a bin: asks first', /D41.*Add to D41\?.*Add to D41.*Cancel/.test(await txt('.scanner .scanresult')) && await p.evaluate(() => !bins.products[3].variants[3].bins.some(b => b.bin === 'D41')));
+  await p.click('.scanner .scanresult button:has-text("Add to D41")');
+  ok('confirmed: added', /Added/.test(await txt('.scanner .scanresult')) && await p.evaluate(() => bins.products[3].variants[3].bins.some(b => b.bin === 'D41')));
+  const placed = await p.evaluate(() => { const v = bins.products[1].variants[0]; return { code: v.barcode, bin: v.bins[0].bin }; });
+  await type(placed.code);
+  const w1 = await txt('.scanner .scanresult');
+  ok('already in another bin and the bin has something else: both warnings', new RegExp(`in ${placed.bin} now.*D41 already has.*Move to D41 anyway.*Keep in both.*Cancel`).test(w1), w1.slice(0, 200));
+  await p.click('.scanner .scanresult button:has-text("Keep in both")');
+  ok('Keep in both: in both bins', await p.evaluate(b => { const v = bins.products[1].variants[0]; return v.bins.some(x => x.bin === b) && v.bins.some(x => x.bin === 'D41'); }, placed.bin));
+  await type('C12');
+  ok('another bin\'s sticker switches bins', /Bin C12/.test(await txt('.scanner .scanresult')));
+  await type('NOPE123X');
   ok('an unknown code says so', /Not in the inventory/.test(await txt('.scanner .scanresult')));
   await p.click('.scanner button:has-text("Done")');
   ok('Done: back on the last bin\'s page', /Bin C12/.test(await txt('#settingsView')));
+  // the other way round: the item first, then the bin
+  await p.evaluate(() => { B.pick = null; go('binsAdd'); });
+  await p.click('button:has-text("Place by scanning")');
+  const code2 = await p.evaluate(() => bins.products[3].variants[4].barcode);
+  await type(code2);
+  ok('item first: asks for the bin', /now scan the bin/.test(await txt('.scanner .scanresult')));
+  await type('C13');
+  ok('then the bin: asks to confirm', /Add to C13\?/.test(await txt('.scanner .scanresult')));
+  await p.click('.scanner .scanresult button:has-text("Add to C13")');
+  ok('confirmed: in C13', await p.evaluate(() => bins.products[3].variants[4].bins.some(b => b.bin === 'C13')));
+  await p.click('.scanner button:has-text("Done")');
 
   // inventory changes: off = read only; on = editable
   await p.evaluate(() => { openProduct('p4', 'D40', 'p4v1'); });

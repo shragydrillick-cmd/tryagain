@@ -234,10 +234,13 @@ for orders" stays Off).
   Tap an item for its colours and sizes; tap a size for its barcode, SKU and bin.
 - **A bin's Edit page**: every exact item in it, grouped by item, each with Edit; for one size, one item or
   **Edit all**: remove from the bin, move to another bin, or add a second bin (it's then in either one,
-  shown as D91 / D97). **Scan items into** the bin: scan each item; scanning another bin's sticker switches
-  bins. Typing a bin that's taken warns, with **See details** to take things out of it.
+  shown as D91 / D97). **Scan items into** the bin: scan each item and confirm it; scanning another bin's
+  sticker switches bins. Typing a bin that's taken warns, with **See details** to take things out of it.
 - **Add / Edit**: **Scan** or **Manual** (search), then only this size, chosen sizes or all of them,
   **+ Add to bin** (type it, **See empty bins**, or **Scan bin**).
+- **Place by scanning**: scan an item and its bin's sticker, in either order. Nothing is placed until
+  it's confirmed (**Add to A151**), and it warns when the item is already in another bin (**Move** or
+  **Keep in both**) or the bin already has something else in it (**Add anyway**), with **Cancel**.
 - **Undo** for a few seconds after each change, and **History** of every change.
 - Settings → More → Bins → **Allow inventory changes** (off): lets item names, companies, sizes, colours,
   barcodes and SKUs be changed here too.
