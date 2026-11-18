@@ -214,6 +214,10 @@ free plan needs no card and can't charge). Once switched on:
   ticks, scans and Packed show up on the others within a moment. When it's off,
   each person's list stays on their own device. Other companies never see it:
   the database itself refuses them.
+- **The company's store setup:** Settings → Map shows "<company>'s store setup". A company admin (or the
+  owner) taps **Save for company**, and from then on every device signed in to that company uses that map
+  (aisles, shelves, boxes and walking order): on signing in, on a new device, and whenever the admin saves a
+  change (ticks on the current list are kept). A device whose map differs can tap **Use the company's setup**.
 - **Staying signed in:** once signed in, a phone stays signed in. It's checked
   every time it's online (live, and at least every hour). If a phone goes a whole
   week without one check (or its date is turned back), it's signed out and can

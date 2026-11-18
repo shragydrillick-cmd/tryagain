@@ -1198,6 +1198,7 @@ function loadSettings() {
   return defaultSettings();
 }
 function saveSettings() {
+  if (typeof company !== "undefined" && company.store && myStore() !== JSON.stringify({ units: company.store.units, walk: company.store.walk })) settings.storeEditedAt = Date.now();
   const json = JSON.stringify(settings);
   try { localStorage.setItem(STORE_KEY, json); } catch (e) {}
   writeNative();
@@ -2731,6 +2732,63 @@ let unwatchAccount = null, unwatchCompany = null;
 function stopWatching() {
   if (unwatchAccount) { unwatchAccount(); unwatchAccount = null; }
   if (unwatchCompany) { unwatchCompany(); unwatchCompany = null; }
+  if (unwatchStore) { unwatchStore(); unwatchStore = null; }
+}
+/* ---------- the company's store setup (aisles, shelves, boxes, walking order): saved by an admin, used by everyone in it ---------- */
+let unwatchStore = null;
+var company = { store: null }; // { units, walk, at, byEmail } as saved for the company
+const storeDoc = () => fb.db.collection("companies").doc(acct.company).collection("settings").doc("store");
+const myStore = () => JSON.stringify({ units: settings.units, walk: settings.walk });
+function watchStore() {
+  if (unwatchStore) { unwatchStore(); unwatchStore = null; }
+  company.store = null;
+  if (!acct || !acct.company) return;
+  const id = acct.company;
+  unwatchStore = storeDoc().onSnapshot(s => {
+    if (!acct || acct.company !== id) return;
+    if (!s.exists) { company.store = null; if (view === "settings" && setPage === "map") renderSettings(); return; }
+    const d = s.data(); let st; try { st = JSON.parse(d.data); } catch (e) { return; }
+    company.store = { ...st, at: d.at || 0, byEmail: d.byEmail || "" };
+    // the company's setup is the store's setup on every device: a newer one (or one this device hasn't got) is used straight away
+    if (settings.companyStoreAt !== company.store.at || myStore() !== JSON.stringify({ units: st.units, walk: st.walk })) {
+      if (settings.companyStoreAt === company.store.at && settings.storeEditedAt > company.store.at) { if (view === "settings") renderSettings(); return; } // an admin's changes here, not saved yet
+      useCompanyStore(settings.companyStoreAt != null);
+    }
+  }, () => {});
+}
+/** Use the company's store setup on this device (ticks on the current list are kept). */
+function useCompanyStore(announce) {
+  const st = company.store; if (!st) return;
+  const keep = plan ? tickKeys() : null;
+  settings.units = st.units; settings.walk = st.walk; settings.companyStoreAt = st.at; delete settings.storeEditedAt;
+  settings = fixSettings(settings); saveSettings();
+  if (current) { rebuild(); if (keep) applyTickKeys(keep); }
+  if (view === "settings") renderSettings();
+  if (announce) toast(`Store setup updated from ${acct.companyName || "the company"}.`);
+}
+async function saveStoreForCompany() {
+  const at = Date.now();
+  try {
+    await storeDoc().set({ data: myStore(), at, by: acct.uid, byEmail: acct.email });
+    settings.companyStoreAt = at; delete settings.storeEditedAt; saveSettings();
+    toast(`Saved for everyone in ${acct.companyName}.`); renderSettings();
+  } catch (e) { toast(e.code === "permission-denied" ? "Only the company's admin can save the store setup for everyone." : "Couldn't save: " + e.message); }
+}
+/** At the top of Map: whether this device has the company's setup, and (for an admin) Save for company. */
+function companyStoreBox() {
+  if (!acct || !acct.company || !fb.db) return null;
+  const admin = acct.role === "owner" || acct.role === "admin", st = company.store;
+  const same = st && myStore() === JSON.stringify({ units: st.units, walk: st.walk });
+  const when = st ? new Date(st.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  return h("div", { class: "notice " + (same ? "good" : "warn"), style: "margin:8px 0 12px" },
+    h("b", null, `${acct.companyName}'s store setup`),
+    h("div", { class: "small", style: "margin-top:4px" }, !st ? "Not saved for the company yet. Until it is, each device keeps its own map."
+      : same ? `Everyone in ${acct.companyName} uses this setup (saved ${when}${st.byEmail ? " by " + st.byEmail : ""}).`
+      : admin ? "You've changed the map on this device. Save it for the company so everyone gets it."
+      : "This device's map is different from the company's."),
+    h("div", { class: "row", style: "margin-top:8px" },
+      admin && !same ? h("button", { class: "btn small", type: "button", onclick: e => tapTwice(e.currentTarget, `Use this map for everyone in ${acct.companyName}?`, saveStoreForCompany) }, "Save for company") : null,
+      st && !same ? h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Replace this device's map?", () => useCompanyStore(false)) }, "Use the company's setup") : null));
 }
 /** Live: blocked, moved, made admin, the company turned off, or live sharing switched: it shows at once. */
 function watchAccount() {
@@ -2744,6 +2802,7 @@ function watchAccount() {
   }, e => { if (e && e.code === "permission-denied") checkAccount(false); });
   if (!acct.company) return;
   const id = acct.company;
+  watchStore();
   unwatchCompany = fb.db.collection("companies").doc(id).onSnapshot({ includeMetadataChanges: true }, s => {
     if (s.metadata.fromCache || !acct || acct.company !== id) return;
     touchChecked();
@@ -4037,6 +4096,7 @@ function renderMapPage(v) {
   v.replaceChildren(h("section", { class: "card" },
     backRow("Settings", "home"),
     h("h2", null, "Map"),
+    companyStoreBox(),
     h("p", { class: "small muted" }, "Your aisles. Tap Edit to go through an aisle's questions again."),
     h("div", { id: "checks" }),
     h("div", { class: "aislelist" }, settings.units.length ? settings.units.map((u, ui) => {

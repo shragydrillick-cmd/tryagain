@@ -89,3 +89,7 @@ untick the pick list at the same moment; both must end up with every change and 
 `live-join.test.js` (with the Firebase emulator): live sharing turned on while two devices are already working on the
 same orders combines both lists (every tick, pile and Packed kept, on both); a device with different orders gets the
 company's list; a device that ticked offline in the background catches up and sends its tick when it's back.
+
+`company-store.test.js` (with the Firebase emulator): the admin saves the store setup (aisles, shelves, boxes,
+walking order) for the company; a worker signing in on a new device gets it; a later change reaches the worker by
+itself and keeps the ticks on the list; a worker can't save it; it stays after reopening.

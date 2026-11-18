@@ -74,6 +74,11 @@ service cloud.firestore {
       match /lists/{doc} {
         allow read, write: if isOwner() || (inCompany(c) && get(compDoc(c)).data.live == true);
       }
+      // the company's store setup (aisles, shelves, boxes, walking order): everyone in it reads it, its admins save it
+      match /settings/{doc} {
+        allow read: if isOwner() || inCompany(c);
+        allow write: if isOwner() || manages(c);
+      }
     }
   }
 }
