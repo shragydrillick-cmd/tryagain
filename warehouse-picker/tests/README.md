@@ -82,3 +82,6 @@ and settings are untouched.
 after the old ones; everything already picked, placed, sorted and packed stays; a new order's item from a box
 already picked gets its own pick line; what the sending device had done on new orders comes along; the same list
 again changes nothing; an empty phone gets the list with its ticks.
+
+`live-sync.test.js` (with the Firebase emulator, like `accounts.test.js`): two devices in one company tick and
+untick the pick list at the same moment; both must end up with every change and the same list.

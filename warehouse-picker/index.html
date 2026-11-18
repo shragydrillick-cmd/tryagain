@@ -2077,7 +2077,7 @@ function sharedState() {
     packed: [...packed].sort() };
 }
 function syncChanged() {
-  if (!syncOn()) return;
+  if (!syncOn() || sync.applying) return;
   const str = JSON.stringify(sharedState());
   if (str === sync.lastStr) return;
   sync.lastStr = str; sync.dirty = true; keepSync();
@@ -2089,19 +2089,63 @@ function showSyncLine() {
   el.textContent = !syncOn() ? "" : sync.state === "ok" ? `Shared with ${acct.companyName || "your company"}: up to date` : sync.state === "offline" ? `Shared with ${acct.companyName || "your company"}: not reaching the internet${sync.err ? " (" + sync.err + ")" : ""}. Changes are kept and sent later.` : `Shared with ${acct.companyName || "your company"}`;
   const m = $("syncStatus"); if (m) m.textContent = el.textContent || "";
 }
+/** The list as it was when this device last agreed with the others (saved or received): what a merge starts from. */
+const BASE_KEY = "pick-and-sort-sync-base";
+try { sync.baseStr = localStorage.getItem(BASE_KEY); } catch (e) {}
+function setBase(str) { sync.baseStr = str; try { str ? localStorage.setItem(BASE_KEY, str) : localStorage.removeItem(BASE_KEY); } catch (e) {} }
+/** Two devices changed the list at the same time: keep both. For each tick, pile and Packed, what this device changed
+    since the last agreed list wins; everything else comes from the other device. A new list (or Clear) on this
+    device wins over the other's list. */
+function merge3(base, mine, theirs) {
+  if (mine.cleared) return base.cleared ? theirs : mine;
+  if (theirs.cleared) return JSON.stringify(mine.lines) !== JSON.stringify(base.lines || null) ? mine : theirs;
+  const listChanged = JSON.stringify(mine.lines) !== JSON.stringify(base.lines || null);
+  const out = listChanged ? { ...mine } : { ...theirs };
+  const sets = (k) => { const b = new Set(base[k] || []), m = new Set(mine[k] || []), r = new Set(theirs[k] || []);
+    new Set([...b, ...m]).forEach(x => { if (m.has(x) !== b.has(x)) m.has(x) ? r.add(x) : r.delete(x); }); return [...r].sort(); };
+  const maps = (k) => { const b = new Map(base[k] || []), m = new Map(mine[k] || []), r = new Map(theirs[k] || []);
+    new Set([...b.keys(), ...m.keys()]).forEach(x => { if (JSON.stringify(m.get(x)) !== JSON.stringify(b.get(x))) m.has(x) ? r.set(x, m.get(x)) : r.delete(x); }); return [...r].sort(); };
+  out.picked = sets("picked"); out.unpacked = sets("unpacked"); out.placed = maps("placed"); out.packed = maps("packed");
+  return out;
+}
 async function syncPush() {
   if (!syncOn()) return;
-  const rev = sync.rev + 1, data = sync.lastStr || JSON.stringify(sharedState());
+  if (sync.pushing) { sync.again = true; return; }
+  sync.pushing = true;
   try {
-    // packed small (like a zip, nothing lost): 5–10 times less to send to every phone
-    await listDoc().set({ z: await packText(data), rev, at: Date.now(), by: acct.uid });
-    sync.rev = rev; sync.dirty = false; keepSync(); setSync("ok");
+    const mine = sharedState();
+    let done = null;
+    // a transaction: if someone else saved since this device last agreed with them, both sets of changes are combined
+    await fb.db.runTransaction(async tx => {
+      const snap = await tx.get(listDoc());
+      const d = snap.exists ? snap.data() : null, rev = d ? d.rev || 0 : 0;
+      let out = mine, merged = false;
+      if (d && rev !== sync.rev) {
+        const theirs = JSON.parse(d.z ? await unpackText(d.z) : d.data);
+        out = merge3(sync.baseStr ? JSON.parse(sync.baseStr) : theirs, mine, theirs); merged = true;
+      }
+      const str = JSON.stringify(out);
+      // packed small (like a zip, nothing lost): 5–10 times less to send to every phone
+      tx.set(listDoc(), { z: await packText(str), rev: rev + 1, at: Date.now(), by: acct.uid });
+      done = { out, str, rev: rev + 1, merged };
+    });
+    sync.rev = done.rev; sync.dirty = false; setBase(done.str); keepSync(); setSync("ok");
+    if (done.merged) applyRemote(done.out); // show the other device's changes here too
+    else sync.lastStr = JSON.stringify(sharedState());
   } catch (e) { setSync("offline", e.code === "permission-denied" ? "no access" : e.message); }
+  finally {
+    sync.pushing = false;
+    if (sync.again) { sync.again = false; sync.lastStr = null; syncChanged(); }
+  }
 }
 function syncPull() {} // the company's list comes in by itself (startSync)
 /** Another device changed the list or ticked something: show it here. */
 function applyRemote(state) {
-  sync.lastStr = JSON.stringify(state);
+  sync.applying = true;
+  try { applyRemoteNow(state); } finally { sync.applying = false; }
+  sync.lastStr = JSON.stringify(sharedState()); // what this device now has: nothing new to send
+}
+function applyRemoteNow(state) {
   if (state.cleared) { if (current) { clearList(true); toast("The list was cleared on another device."); } return; }
   const sameList = current && savedList && JSON.stringify(savedList.lines) === JSON.stringify(state.lines);
   if (!sameList) {
@@ -2118,7 +2162,7 @@ function applyRemote(state) {
   packed = new Map(state.packed || []);
   renderPick(); renderUnpack();
   if (!$("stepper").classList.contains("hidden")) showStep();
-  saveList(); sync.lastStr = JSON.stringify(state);
+  saveList();
 }
 /** Opened from a link: #list=… (a list sent from another device) or #link=… (join linked devices). */
 async function openFromLink() {
@@ -2630,7 +2674,7 @@ async function checkAccount(showProgress) {
       live: !!(comp && comp.live), checkedAt: Date.now(), lastNow: Date.now() };
     keepAcct(); gateMsg = "";
     gate(null);
-    if (was !== acct.company) { sync.rev = 0; sync.dirty = !!current; sync.lastStr = null; keepSync(); }
+    if (was !== acct.company) { sync.rev = 0; sync.dirty = !!current; sync.lastStr = null; setBase(null); keepSync(); }
     watchAccount(); startSync(); showSyncLine();
     if (view === "settings") renderSettings();
   } catch (e) {
@@ -2696,7 +2740,7 @@ function watchAccount() {
     if (c && (!!c.live !== acct.live || c.name !== acct.companyName)) {
       const was = acct.live;
       acct.live = !!c.live; acct.companyName = c.name; keepAcct();
-      if (acct.live !== was) { if (acct.live) { sync.rev = 0; sync.dirty = !!current; sync.lastStr = null; startSync(); } else stopSync(); }
+      if (acct.live !== was) { if (acct.live) { sync.rev = 0; sync.dirty = !!current; sync.lastStr = null; setBase(null); startSync(); } else stopSync(); }
       showSyncLine(); if (view === "settings") renderSettings();
     }
   }, e => { if (e && e.code === "permission-denied") checkAccount(false); });
@@ -2738,12 +2782,13 @@ function startSync() {
     if (snap.metadata.hasPendingWrites) return;
     if (!snap.exists) { if (current) { sync.lastStr = null; syncChanged(); } setSync("ok"); return; }
     const d = snap.data(), rev = d.rev || 0;
-    if (rev > sync.rev) {
+    if (rev > sync.rev && sync.dirty && sync.baseStr && !sync.pushing) { syncPush(); } // changes of our own not sent yet: combine, don't overwrite
+    else if (rev > sync.rev && !sync.pushing) {
       sync.rev = rev; sync.dirty = false; keepSync();
       // unpacked in turn, so updates are applied in the order they came
       sync.chain = (sync.chain || Promise.resolve()).then(async () => {
         const text = d.z ? await unpackText(d.z) : d.data; // a list sent unpacked (by an older version) reads too
-        if (sync.rev === rev) applyRemote(JSON.parse(text));
+        if (sync.rev === rev) { setBase(text); applyRemote(JSON.parse(text)); }
       }).catch(e => setSync("offline", "couldn't read the shared list"));
     }
     else if (sync.dirty) syncPush();
