@@ -2122,7 +2122,8 @@ async function syncPush() {
       let out = mine, merged = false;
       if (d && rev !== sync.rev) {
         const theirs = JSON.parse(d.z ? await unpackText(d.z) : d.data);
-        out = merge3(sync.baseStr ? JSON.parse(sync.baseStr) : theirs, mine, theirs); merged = true;
+        // with a shared history: change by change; without (just joined, both started at once): the two lists combined
+        out = sync.baseStr ? merge3(JSON.parse(sync.baseStr), mine, theirs) : joinStates(mine, theirs); merged = true;
       }
       const str = JSON.stringify(out);
       // packed small (like a zip, nothing lost): 5–10 times less to send to every phone
@@ -2780,21 +2781,65 @@ function startSync() {
   if (!syncOn()) return;
   sync.unsub = listDoc().onSnapshot({ includeMetadataChanges: false }, snap => {
     if (snap.metadata.hasPendingWrites) return;
-    if (!snap.exists) { if (current) { sync.lastStr = null; syncChanged(); } setSync("ok"); return; }
-    const d = snap.data(), rev = d.rev || 0;
-    if (rev > sync.rev && sync.dirty && sync.baseStr && !sync.pushing) { syncPush(); } // changes of our own not sent yet: combine, don't overwrite
-    else if (rev > sync.rev && !sync.pushing) {
-      sync.rev = rev; sync.dirty = false; keepSync();
-      // unpacked in turn, so updates are applied in the order they came
-      sync.chain = (sync.chain || Promise.resolve()).then(async () => {
-        const text = d.z ? await unpackText(d.z) : d.data; // a list sent unpacked (by an older version) reads too
-        if (sync.rev === rev) { setBase(text); applyRemote(JSON.parse(text)); }
-      }).catch(e => setSync("offline", "couldn't read the shared list"));
-    }
-    else if (sync.dirty) syncPush();
-    setSync("ok");
+    takeRemote(snap.exists ? snap.data() : null);
   }, e => setSync("offline", e.code === "permission-denied" ? "no access" : e.message));
 }
+/** The company's list as it is on the server (live, or fetched when the app comes back to the front). */
+function takeRemote(d) {
+  if (!d) { if (current) { sync.lastStr = null; syncChanged(); } setSync("ok"); return; } // nothing shared yet: this device's list goes up
+  const rev = d.rev || 0;
+  if (rev > sync.rev && !sync.pushing) {
+    if (sync.dirty && sync.baseStr) { syncPush(); setSync("ok"); return; } // changes of our own not sent yet: combine, don't overwrite
+    const joining = !sync.baseStr; // just switched on, signed in, or live sharing turned on
+    sync.rev = rev; sync.dirty = false; keepSync();
+    // unpacked in turn, so updates are applied in the order they came
+    sync.chain = (sync.chain || Promise.resolve()).then(async () => {
+      const text = d.z ? await unpackText(d.z) : d.data; // a list sent unpacked (by an older version) reads too
+      if (sync.rev !== rev) return;
+      if (joining && current && plan) joinList(JSON.parse(text), text);
+      else { setBase(text); applyRemote(JSON.parse(text)); }
+    }).catch(e => setSync("offline", "couldn't read the shared list"));
+  } else if (sync.dirty && !sync.pushing) syncPush();
+  setSync("ok");
+}
+/** A device joins (switched on, signed in, or live sharing turned on) with a list of its own while the others are
+    already working: if it's the same orders, the two are combined (every order, and everything done on either);
+    if it's different orders, the company's list is used. */
+function joinList(theirs, text) {
+  const merged = joinStates(sharedState(), theirs);
+  setBase(text);
+  applyRemote(merged);
+  if (JSON.stringify(merged) !== JSON.stringify(theirs)) { sync.dirty = true; keepSync(); syncPush(); toast("Combined with the list the others are working on."); }
+}
+/** Two lists with no shared history: the same orders -> one list with every order and everything done on either;
+    different orders -> the company's (theirs). */
+function joinStates(mine, theirs) {
+  const theirOrders = new Set((theirs.lines || []).map(l => l.order));
+  if (theirs.cleared || mine.cleared || !(mine.lines || []).some(l => theirOrders.has(l.order))) return theirs;
+  const have = new Set(theirs.lines.map(lineId));
+  const extra = mine.lines.filter(l => !have.has(lineId(l)));
+  const both = (a, b) => [...new Set([...(a || []), ...(b || [])])].sort();
+  const placedM = new Map(theirs.placed || []); (mine.placed || []).forEach(([k, n]) => placedM.set(k, Math.max(n, placedM.get(k) || 0)));
+  const packedM = new Map(theirs.packed || []); (mine.packed || []).forEach(([k, t]) => packedM.set(k, Math.min(t, packedM.get(k) || t)));
+  return { ...theirs, lines: theirs.lines.concat(extra), picked: both(theirs.picked, mine.picked), unpacked: both(theirs.unpacked, mine.unpacked),
+    placed: [...placedM].sort(), packed: [...packedM].sort() };
+}
+/** Back to the front, back online, or every half minute while something hasn't gone up yet: catch up and send. */
+async function syncRefresh() {
+  if (!syncOn() || sync.pushing) return;
+  if (sync.dirty) { syncPush(); return; }
+  try { const snap = await listDoc().get({ source: "server" }); takeRemote(snap.exists ? snap.data() : null); } catch (e) {}
+}
+let hiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (!syncOn()) return;
+  if (hiddenAt && Date.now() - hiddenAt > 20000) startSync(); // a phone may have dropped the live connection in the background
+  syncRefresh();
+});
+window.addEventListener("online", () => syncRefresh());
+window.addEventListener("focus", () => syncRefresh());
+setInterval(() => { if (sync.dirty && navigator.onLine) syncRefresh(); }, 30000);
 function stopSync() { if (sync.unsub) { sync.unsub(); sync.unsub = null; } }
 
 /* ---------- Admin ----------
