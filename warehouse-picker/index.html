@@ -1773,6 +1773,7 @@ function closeSteps() { $("stepper").classList.add("hidden"); document.body.styl
 function markDone(item, on) {
   if (stepMode === "pick") item.items.forEach(p => on ? pickedDone.add(p.step) : pickedDone.delete(p.step));
   else on ? unpackDone.add(item.step) : unpackDone.delete(item.step);
+  saveListSoon(); // saved, and shared with the company's other devices, straight away
 }
 /** Finish a skipped step from the list: it counts as done just before where you are now. */
 function finishSkipped(i) {
