@@ -280,6 +280,12 @@ img.qr.big { width: min(420px, 100%); } /* big squares: easy to read off a scree
 .actrow .btn { padding-left: 6px; padding-right: 6px; font-size: 14px; line-height: 1.2; }
 .dbarcode { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 700; font-size: 16px; letter-spacing: .04em; color: #1b1f24; margin-top: 2px; }
 .headbtns { display: flex; gap: 8px; align-items: center; }
+/* live sharing: a little circle in the top bar; green = up to date, orange = not reaching the others; tap to update */
+.headbtns .syncdot { width: 34px; height: 34px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.syncdot span { width: 14px; height: 14px; border-radius: 50%; background: #3fbf6f; box-shadow: 0 0 0 3px rgba(63,191,111,.25); }
+.syncdot.off span { background: #f0a43a; box-shadow: 0 0 0 3px rgba(240,164,58,.25); }
+.syncdot.busy span { animation: syncpulse .8s ease-in-out infinite; }
+@keyframes syncpulse { 50% { transform: scale(.55); opacity: .6; } }
 #packBtn { background: transparent; color: var(--accent-text); border: 1.5px solid rgba(255,255,255,.7); border-radius: 10px; padding: 7px 12px; font: inherit; font-size: 15px; cursor: pointer; }
 .packsum { font-size: 14px; font-weight: 600; margin: 4px 0 10px; }
 .pile.big { font-size: 28px; min-width: 54px; padding: 8px 10px; }
@@ -344,7 +350,8 @@ header.top #title { white-space: nowrap; }
 <body>
 <header class="top">
   <h1 id="title">Pick &amp; Sort</h1>
-  <div class="headbtns"><button id="packBtn" type="button">Packing</button>
+  <div class="headbtns"><button id="syncDot" class="syncdot hidden" type="button" aria-label="Live sharing: tap to update now" title="Live sharing: tap to update now"><span></span></button>
+  <button id="packBtn" type="button">Packing</button>
   <button id="navBtn" type="button" aria-label="Settings">Settings</button></div>
 </header>
 
@@ -2088,6 +2095,7 @@ function showSyncLine() {
   const el = $("syncLine"); if (!el) return;
   el.textContent = !syncOn() ? "" : sync.state === "ok" ? `Shared with ${acct.companyName || "your company"}: up to date` : sync.state === "offline" ? `Shared with ${acct.companyName || "your company"}: not reaching the internet${sync.err ? " (" + sync.err + ")" : ""}. Changes are kept and sent later.` : `Shared with ${acct.companyName || "your company"}`;
   const m = $("syncStatus"); if (m) m.textContent = el.textContent || "";
+  const dot = $("syncDot"); dot.classList.toggle("hidden", !syncOn()); dot.classList.toggle("off", sync.state === "offline");
 }
 /** The list as it was when this device last agreed with the others (saved or received): what a merge starts from. */
 const BASE_KEY = "pick-and-sort-sync-base";
@@ -2551,6 +2559,7 @@ const emailKey = e => String(e || "").trim().toLowerCase();
 function gate(view) {
   let g = $("gate");
   if (!view) { if (g) g.remove(); document.body.style.overflow = ""; return; }
+  const dot = $("syncDot"); if (dot) dot.classList.add("hidden"); // signed out / no access: no live sharing
   if (!g) { g = h("div", { id: "gate", class: "gate" }); document.body.append(g); }
   document.body.style.overflow = "hidden";
   g.replaceChildren(h("div", { class: "gatebox" }, h("h1", null, "Pick & Sort"), view));
@@ -2838,8 +2847,21 @@ document.addEventListener("visibilitychange", () => {
   syncRefresh();
 });
 window.addEventListener("online", () => syncRefresh());
+$("syncDot").addEventListener("click", async () => {
+  if (!syncOn()) return;
+  const d = $("syncDot"); d.classList.add("busy");
+  startSync(); await syncRefresh();
+  setTimeout(() => d.classList.remove("busy"), 600);
+  toast(sync.state === "offline" ? "Can't reach the others right now. Your changes are kept and sent when it connects." : "Up to date with the others.");
+});
 window.addEventListener("focus", () => syncRefresh());
-setInterval(() => { if (sync.dirty && navigator.onLine) syncRefresh(); }, 30000);
+// every half minute while the app is open: send anything not sent yet, and catch up even if a phone's live
+// connection went quiet (screen asleep, weak signal) without saying so
+setInterval(() => {
+  if (!navigator.onLine || !syncOn()) return;
+  if (sync.dirty) syncRefresh();                          // something not sent yet: send it
+  else if (!document.hidden && !sync.pushing) startSync(); // open: listen afresh (brings the latest, and live again)
+}, 30000);
 function stopSync() { if (sync.unsub) { sync.unsub(); sync.unsub = null; } }
 
 /* ---------- Admin ----------
