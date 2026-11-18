@@ -93,3 +93,7 @@ company's list; a device that ticked offline in the background catches up and se
 `company-store.test.js` (with the Firebase emulator): the admin saves the store setup (aisles, shelves, boxes,
 walking order) for the company; a worker signing in on a new device gets it; a later change reaches the worker by
 itself and keeps the ticks on the list; a worker can't save it; it stays after reopening.
+
+`settings-file.test.js`: a full store (aisles of different shapes, picking patterns, a custom walking order, order
+numbering, learned barcodes, inventory) and Bins are saved to a settings file and loaded on an empty device:
+everything must be identical, the same orders must give the same pick order, and it must stay after reopening.
