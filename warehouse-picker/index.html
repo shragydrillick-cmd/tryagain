@@ -57,7 +57,7 @@ button.btn.secondary, label.btn.secondary { background: transparent; color: var(
 button.btn.small { min-height: 34px; padding: 4px 10px; font-size: 14px; }
 button.btn:disabled { opacity: .45; cursor: default; }
 button.link { background: none; border: 0; color: var(--accent); padding: 0; font: inherit; text-decoration: underline; cursor: pointer; }
-input[type=number], input[type=text], input[type=search], select, textarea { font: inherit; color: var(--text); background: var(--bg);
+input[type=number], input[type=text], input[type=search], input[type=email], input[type=password], select, textarea { font: inherit; color: var(--text); background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 40px; }
 input[type=number] { width: 90px; }
 select { max-width: 100%; }
@@ -326,6 +326,9 @@ header.top #title { white-space: nowrap; }
 .btn.choice { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 12px 14px; width: 100%; }
 .btn.choice .small { font-weight: 500; opacity: .85; }
 .btn.choice.danger { border-color: var(--danger); color: var(--danger); }
+.personrow { flex-wrap: wrap; align-items: flex-start; }
+.personrow .pemail { overflow-wrap: anywhere; }
+.personrow .personacts { flex-basis: 100%; gap: 6px; margin-top: 8px; }
 .selbar { position: sticky; bottom: 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; background: var(--card); border: 2px solid var(--accent); border-radius: 12px; padding: 10px 12px; margin-top: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
 .bingroup { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 10px 0; }
 .emptygrid { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -2769,9 +2772,11 @@ async function renderAdminPage(v) {
   const redo = () => renderSettings();
   const fail = e => toast((e && e.message) || "That didn't work.");
   const setCo = (id, data) => comps.doc(id).update(data).then(redo).catch(fail);
-  const parts = [backRow("Settings", "home"), h("h2", null, isOwner ? "Admin (only you)" : `Admin: ${acct.companyName}`)];
+  // the owner: the list of companies on the Admin page; a company opens on a page of its own
+  const onCompanyPage = isOwner && setPage === "adminCompany";
+  const parts = onCompanyPage ? [backRow("Companies", "admin")] : [backRow("Settings", "home"), h("h2", null, isOwner ? "Admin (only you)" : `Admin: ${acct.companyName}`)];
 
-  if (isOwner) {
+  if (isOwner && !onCompanyPage) {
     const waiting = companies.filter(c => c.status === "pending");
     if (waiting.length) parts.push(h("h3", null, "Waiting for your OK"),
       h("p", { class: "small muted" }, "Someone signed in and asked to start a company. Nothing in it works until you accept it."),
@@ -2786,10 +2791,10 @@ async function renderAdminPage(v) {
       others.length ? h("div", { class: "dlist" }, others.map(c => {
         const ok = (c.status || "approved") === "approved";
         return h("div", { class: "drow static " + (ok ? "st-green" : "st-grey") + (c.id === adminCompany ? " picked" : "") },
-          h("div", { style: "flex:1;min-width:0;cursor:pointer", onclick: () => { adminCompany = c.id; redo(); } },
+          h("div", { style: "flex:1;min-width:0;cursor:pointer", onclick: () => { adminCompany = c.id; go("adminCompany"); } },
             h("b", null, c.name), h("div", { class: "small" }, statusName(c.status), c.live ? " · live sharing on" : "", c.id === acct.company ? " · your list" : "")),
           h("div", { class: "row", style: "gap:6px" },
-            h("button", { class: "btn small secondary", type: "button", onclick: () => { adminCompany = c.id; redo(); } }, "Open"),
+            h("button", { class: "btn small secondary", type: "button", onclick: () => { adminCompany = c.id; go("adminCompany"); } }, "Open"),
             ok ? h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Remove it?", () => setCo(c.id, { status: "removed" })) }, "Remove")
               : h("button", { class: "btn small", type: "button", onclick: () => setCo(c.id, { status: "approved" }) }, "Bring back")));
       })) : h("p", { class: "small muted" }, "No companies yet."),
@@ -2799,22 +2804,22 @@ async function renderAdminPage(v) {
           const ref = await comps.add({ name: n, status: "approved", live: false, createdBy: acct.uid, createdByEmail: acct.email, at: Date.now() });
           adminCompany = ref.id;
           if (!acct.company) await userDoc(acct.uid).update({ company: ref.id }); // the owner works in their first company
-          redo();
+          go("adminCompany");
         } catch (e) { fail(e); }
       } }, "Add company")));
   }
 
   const comp = companies.find(c => c.id === adminCompany);
-  if (comp) {
+  if (comp && (!isOwner || onCompanyPage)) {
     let people = [], invites = [];
     try {
       people = (await fb.db.collection("users").where("company", "==", comp.id).get()).docs.map(d => ({ id: d.id, ...d.data() }));
       invites = (await fb.db.collection("invites").where("company", "==", comp.id).get()).docs.map(d => ({ id: d.id, ...d.data() }));
     } catch (e) { parts.push(h("p", null, "Couldn't load the people: " + e.message)); }
     const set = (id, data) => userDoc(id).update(data).then(redo).catch(fail);
-    const newEmail = h("input", { type: "email", placeholder: "their@email.com", "aria-label": "Email to add" });
+    const newEmail = h("input", { type: "email", placeholder: "their@email.com", "aria-label": "Email to add", style: "flex:1;min-width:200px" });
     const newRole = h("select", { "aria-label": "Role" }, h("option", { value: "user" }, "Worker"), h("option", { value: "admin" }, "Company admin (can add people)"));
-    parts.push(h("h3", null, isOwner ? comp.name : "Live sharing"),
+    parts.push(isOwner ? h("h2", { style: "margin-bottom:0" }, comp.name) : h("h3", null, "Live sharing"),
       isOwner ? h("p", { class: "small muted", style: "margin-top:0" }, statusName(comp.status)) : null,
       h("div", { class: "row", style: "justify-content:space-between;align-items:center" },
         h("span", null, h("b", null, "Live sharing: "), comp.live ? "On" : "Off"),
@@ -2825,9 +2830,9 @@ async function renderAdminPage(v) {
       h("h3", null, `People in ${comp.name}`),
       people.length ? h("div", { class: "dlist" }, people.sort((a, b) => natural(a.email, b.email)).map(p => {
         const me = p.id === acct.uid, ok = p.status === "allowed";
-        return h("div", { class: "drow static " + (ok ? "st-green" : "st-red") },
-          h("div", { style: "flex:1;min-width:0" }, h("b", null, p.email), h("div", { class: "small" }, roleName(p.role), ok ? "" : " · blocked", me ? " · you" : "")),
-          me || p.role === "owner" ? null : h("div", { class: "row", style: "gap:6px" },
+        return h("div", { class: "drow static personrow " + (ok ? "st-green" : "st-red") },
+          h("div", { style: "flex:1;min-width:0" }, h("b", { class: "pemail" }, p.email), h("div", { class: "small" }, roleName(p.role), ok ? "" : " · blocked", me ? " · you" : "")),
+          me || p.role === "owner" ? null : h("div", { class: "row personacts" },
             h("button", { class: "btn small" + (ok ? " secondary" : ""), type: "button", onclick: () => set(p.id, { status: ok ? "blocked" : "allowed" }) }, ok ? "Block" : "Allow"),
             h("button", { class: "btn small secondary", type: "button", onclick: () => set(p.id, { role: p.role === "admin" ? "user" : "admin" }) }, p.role === "admin" ? "Make worker" : "Make admin"),
             h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Remove?", () => userDoc(p.id).delete().then(redo).catch(fail)) }, "Remove")));
@@ -2847,7 +2852,8 @@ async function renderAdminPage(v) {
         } catch (err) { fail(err); }
       } }, "Add")),
       isOwner && comp.id !== acct.company ? h("button", { class: "link small", style: "margin-top:10px", type: "button", onclick: () => userDoc(acct.uid).update({ company: comp.id }).catch(fail) }, `Use ${comp.name}'s list on this device`) : null);
-  } else if (isOwner && companies.length) parts.push(h("p", { class: "small muted" }, "Tap a company to see its people and settings."));
+  } else if (onCompanyPage) parts.push(h("p", null, "That company isn't there any more."));
+  else if (isOwner && companies.length) parts.push(h("p", { class: "small muted" }, "Tap a company to see its people and settings."));
   box.replaceChildren(...parts.filter(Boolean));
 }
 function accountSection() {
@@ -3883,7 +3889,7 @@ function renderSettingsPage() {
   if (setPage === "binsBin") return renderBinPage(v);
   if (setPage === "binsAdd") return renderBinsAdd(v);
   if (setPage === "binsHistory") return renderBinsHistory(v);
-  if (setPage === "admin" && acct && (acct.role === "owner" || acct.role === "admin")) return renderAdminPage(v);
+  if ((setPage === "admin" || setPage === "adminCompany") && acct && (acct.role === "owner" || acct.role === "admin")) return renderAdminPage(v);
   setPage = "home";
   const boxes = buildLocator(settings).size;
   v.replaceChildren(h("section", { class: "card" },
@@ -4528,7 +4534,7 @@ window.appBack = () => {
   if (view === "settings") {
     if (setPage === "binsAdd" && B.pick) { B.pick = null; renderSettings(); return true; } // an item found -> back to finding one
     if (setPage === "binsBin") { go(["binsList", "binsAdd"].includes(B.binFrom) ? B.binFrom : "binsList"); return true; }
-    const up = { map: "home", order: "home", more: "home", inventory: "home", admin: "home", bins: "home", binsList: "bins", binsBin: "binsList", binsAdd: "bins", binsHistory: "bins", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
+    const up = { map: "home", order: "home", more: "home", inventory: "home", admin: "home", adminCompany: "admin", bins: "home", binsList: "bins", binsBin: "binsList", binsAdd: "bins", binsHistory: "bins", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
     if (setPage === "wizard" && wiz) { wizBack(); return true; }
     if (up) { go(up); return true; }
     $("navBtn").click(); return true;
