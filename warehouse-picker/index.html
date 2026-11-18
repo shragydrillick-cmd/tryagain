@@ -344,6 +344,7 @@ header.top #title { white-space: nowrap; }
 .scanresult .btn.secondary { color: #fff; border-color: #9aa4b0; }
 .addbin { width: 100%; margin-top: 14px; padding: 14px; font-size: 17px; }
 .binsearch { width: 100%; margin-top: 8px; }
+.updatebar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 90; background: var(--accent); color: var(--accent-text); border: 0; border-radius: 12px; padding: 12px 18px; font: inherit; font-weight: 700; box-shadow: 0 6px 24px rgba(0,0,0,.3); }
 .undobar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 80; display: flex; justify-content: space-between; width: min(440px, calc(100% - 32px)); gap: 12px; align-items: center; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: calc(100% - 32px); }
 </style>
 </head>
@@ -1184,6 +1185,7 @@ function fixSettings(s) {
   s.version = 2;
   return s;
 }
+const APP_VERSION = "__APP_VERSION__"; // filled in when the website is published
 const STORE_KEY = "pick-and-sort-settings-v2";
 /* Inside the Android or iPhone app, window.NativeApp is the phone itself: settings are
    kept in a file on the phone, which stays until the app is uninstalled. */
@@ -2976,6 +2978,7 @@ function accountSection() {
     h("p", null, h("b", null, acct.email), h("br"), h("span", { class: "small muted" },
       `${roleName(acct.role)}${acct.companyName ? " · " + acct.companyName : ""}${acct.company ? (acct.live ? " · live sharing on" : " · live sharing off") : ""}`)),
     h("p", { class: "small", id: "syncStatus" }, ""),
+    (setTimeout(showSyncLine, 0), null),
     h("div", { class: "row" },
       acct.role === "owner" || acct.role === "admin" ? h("button", { class: "btn small", type: "button", onclick: () => go("admin") }, "Admin") : null,
       h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Sign out?", signOut) }, "Sign out")));
@@ -4619,7 +4622,15 @@ function renderMorePage(v) {
         h("p", { class: "small muted" }, "iPhone or iPad: open this page in Safari, tap Share, then Add to Home Screen. Android: in Chrome tap ⋮ then Install app, or download the Android app below."),
         h("div", { class: "row", id: "appLinks" })) : null,
       h("h3", null, "Advanced"),
-      h("button", { class: "btn secondary small", type: "button", onclick: () => go("advanced") }, "Everything on one page (shelf by shelf)")));
+      h("button", { class: "btn secondary small", type: "button", onclick: () => go("advanced") }, "Everything on one page (shelf by shelf)"),
+      h("p", { class: "small muted", id: "appVersion", style: "margin-top:14px" }, "")));
+  // the version running on this device (set when the website is published), and the newest one, if different
+  const el = $("appVersion"), mine = /^__/.test(APP_VERSION) ? "" : APP_VERSION;
+  if (el && mine) el.textContent = `Pick & Sort version ${mine}`;
+  if (mine && /^https?:$/.test(location.protocol)) fetch("version.txt", { cache: "no-store" }).then(r => r.ok ? r.text() : "").then(t => {
+    const newest = (t.match(/version ([\d.]+)/) || [])[1];
+    if (el && newest && newest !== mine) el.textContent = `Pick & Sort version ${mine}. Version ${newest} is out: close the app and open it again to get it.`;
+  }).catch(() => {});
   showAppLinks();
 }
 

@@ -201,6 +201,7 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           touch .nojekyll
+          sed -i "s/__APP_VERSION__/$VERSION_NAME/" index.html # the version shown in Settings -> More
           echo "version $VERSION_NAME, built $(date -u +%Y-%m-%dT%H:%MZ) from ${GITHUB_SHA::7}" > version.txt
           ls -la
           git init -q -b gh-pages
