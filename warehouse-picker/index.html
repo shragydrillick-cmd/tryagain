@@ -2386,7 +2386,7 @@ function drawDetail() {
       h("div", { class: "dlist" }, lines.map(u => {
         const ls = lineStatus(u);
         return h("div", { class: "drow static " + ls.cls }, h("span", { class: "dqty" }, `${u.qty}×`),
-          itemText(u, full ? h("div", { class: "small" }, `Box ${boxLabel(u)}`) : null), badge(ls));
+          itemText(u, h("div", { class: "small" }, `Bin ${boxLabel(u)}`)), badge(ls)); // the bin always shows
       }))];
     el.replaceChildren(h("div", { class: "detailbox" }, head(`Order ${o.label}`, { kind: "orders" }), ...body));
   } else if (v.kind === "items") {
@@ -2397,7 +2397,7 @@ function drawDetail() {
         const st = on >= p.qty ? { cls: "st-green", text: "All on their orders" } : on > 0 ? { cls: "st-yellow", text: `${on} of ${p.qty} on their orders` }
           : pickedDone.has(p.step) ? { cls: "st-blue", text: "Picked" } : { cls: "st-red", text: "Not picked yet" };
         return h("div", { class: "drow static " + st.cls }, h("span", { class: "dqty" }, `${p.qty}×`),
-          itemText(p, h("div", { class: "small" }, `Box ${boxLabel(p)}`, full ? ` · for order${p.orders.length > 1 ? "s" : ""} ${p.orders.map(o => o.qty > 1 ? `${o.label} (${o.qty})` : o.label).join(", ")}` : "")), badge(st));
+          itemText(p, h("div", { class: "small" }, `Bin ${boxLabel(p)}`, full ? ` · for order${p.orders.length > 1 ? "s" : ""} ${p.orders.map(o => o.qty > 1 ? `${o.label} (${o.qty})` : o.label).join(", ")}` : "")), badge(st));
       }))];
     el.replaceChildren(h("div", { class: "detailbox" }, head("Items"), ...body));
   } else {
@@ -2442,7 +2442,8 @@ function drawPacking() {
   // just the order and how many items; tap it to see the items in full
   const items = o => packOpen.has(o.raw) ? h("div", { class: "packitems" }, orderLines(o.label).map(u => h("div", null,
     h("b", null, `${u.qty}× `), itemName(u), u.details ? h("span", { class: "idet" }, ` · ${u.details}`) : null,
-    u.barcode ? h("div", { class: "dbarcode small" }, u.barcode) : null, u.sku ? h("div", { class: "icode" }, `SKU ${u.sku}`) : null))) : null;
+    u.barcode ? h("div", { class: "dbarcode small" }, u.barcode) : null, u.sku ? h("div", { class: "icode" }, `SKU ${u.sku}`) : null,
+    h("div", { class: "small" }, `Bin ${boxLabel(u)}`)))) : null;
   const toggle = o => () => { packOpen.has(o.raw) ? packOpen.delete(o.raw) : packOpen.add(o.raw); drawPacking(); };
   el.replaceChildren(h("div", { class: "detailbox" }, head,
     h("p", { class: "small muted", style: "margin-top:0" }, syncOn()
