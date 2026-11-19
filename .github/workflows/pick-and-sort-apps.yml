@@ -221,6 +221,8 @@ jobs:
           printf '%s' "$FIREBASE_SA" > "$RUNNER_TEMP/firebase-key.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-key.json"
           npx -y firebase-tools@15.36.0 deploy --only hosting --project pick-and-sort --non-interactive
+          # the test address (new features switch on only there): a preview copy, renewed for 30 days with each build
+          npx -y firebase-tools@15.36.0 hosting:channel:deploy test --expires 30d --project pick-and-sort --non-interactive || echo "test address not updated"
           rm -f "$RUNNER_TEMP/firebase-key.json"
 
   ios-file:

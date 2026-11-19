@@ -97,3 +97,9 @@ itself and keeps the ticks on the list; a worker can't save it; it stays after r
 `settings-file.test.js`: a full store (aisles of different shapes, picking patterns, a custom walking order, order
 numbering, learned barcodes, inventory) and Bins are saved to a settings file and loaded on an empty device:
 everything must be identical, the same orders must give the same pick order, and it must stay after reopening.
+
+`pack-scan.test.js`: packing by scanning (the test address): the Code 128 barcodes the app draws (and the packing
+slip PDF's order barcode) scan back exactly; the pack screen wants the sheet first, then each item, refuses another
+order's sheet, an item not in the order and an extra one; when all are green the camera goes and Pack & Print / Pack
+shows; Pack records the time and tag and makes the label; Find an order filters as you type and sorts; Scan an order
+opens any order.

@@ -232,6 +232,27 @@ free plan needs no card and can't charge). Once switched on:
   `ACCOUNTS_ON` to `true` in index.html. Until then the app works as before,
   on each device alone.
 
+## Packing by scanning (test address only, for now)
+
+On the test address (the Firebase preview copy, `pick-and-sort--test-….web.app`) the Packing screen works like this.
+The live sites (the old link, pick-and-sort.web.app and the phone apps) don't show it yet.
+
+- **Pack** on a ready order (or **Scan an order** / **Find an order** at the bottom, for any order, even one not
+  picked with the app) opens it: the camera on top, the order below.
+- Scan the **order sheet's barcode** first (top right; or "Can't scan it? Confirm by hand"), then **each item**: each
+  turns green (2 of 2…). Another order's sheet, an item not in the order, or one too many are refused. A box under
+  the camera takes typed codes or a plugged-in scanner.
+- When everything is green the camera goes off and the bottom shows **Pack & Print** (own-driver orders) or **Pack**
+  (UPS / shipped), with a little arrow for **Pack only** / **Print label only**. Pack records the packed time and the
+  tag ("Packed 11/19/2026, 2:31 PM"; with Shopify connected it goes on the order there, and a UPS order opens in
+  Shopify to buy its label). Print makes the 4x6 driver label: a big barcode of the order number, the order, who it's
+  for, the delivery method and date.
+- **Find an order**: type to filter (order number, name, area, or any item: name, SKU, barcode, bin), sort (newest,
+  order number, delivery date, area, customer), show all / not packed / packed, any delivery / own driver / UPS.
+- **Print this order's packing slip**: like the store's, with the order barcode at the top right.
+- Until Shopify is connected, "every order" is a practice store of 40 Shopify-style orders kept on the device; their
+  items use the barcodes on web/barcodes.html.
+
 ## Bins (practice)
 
 Settings → **Bins**: which bin each item is kept in. For now it's practice only: it's kept on the device by

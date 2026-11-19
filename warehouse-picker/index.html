@@ -346,6 +346,34 @@ header.top #title { white-space: nowrap; }
 .binsearch { width: 100%; margin-top: 8px; }
 .updatebar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 90; background: var(--accent); color: var(--accent-text); border: 0; border-radius: 12px; padding: 12px 18px; font: inherit; font-weight: 700; box-shadow: 0 6px 24px rgba(0,0,0,.3); }
 .undobar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 80; display: flex; justify-content: space-between; width: min(440px, calc(100% - 32px)); gap: 12px; align-items: center; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: calc(100% - 32px); }
+
+/* Packing by scanning (test address) */
+.packfindbar { position: sticky; bottom: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 0 4px; background: var(--card); margin-top: 12px; }
+.packfindbar .btn { padding: 14px 8px; font-size: 16px; }
+.packscreen { position: fixed; inset: 0; z-index: 56; background: var(--bg); display: flex; flex-direction: column; }
+.packcam { position: relative; flex: 0 0 38vh; background: #000; overflow: hidden; }
+.packcam video { width: 100%; height: 100%; object-fit: cover; }
+.packcam .scanframe { position: absolute; left: 6%; right: 6%; top: 28%; bottom: 28%; border: 3px solid rgba(255,255,255,.85); border-radius: 12px; }
+.packcam .scanmsg { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; color: #fff; margin: 0; }
+.packwrap { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+.packbody { flex: 1; overflow: auto; padding: 12px 14px 20px; }
+.packhead { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+.packstep { padding: 8px 10px; border-radius: 10px; background: var(--warn-soft); font-weight: 700; margin: 6px 0; }
+.packstep.ok { background: #d9f4e3; color: #14532d; }
+.packmsg { padding: 8px 10px; border-radius: 10px; margin: 6px 0; font-weight: 600; }
+.packmsg.ok, .packmsg.good { background: #d9f4e3; color: #14532d; } .packmsg.bad { background: #fde2e0; color: #8a1f17; } .packmsg.warn { background: #fdf0d5; color: #7a4b00; }
+.packtype { margin: 6px 0 10px; } .packtype input { flex: 1; min-width: 0; }
+.packlist { display: grid; gap: 8px; margin-bottom: 12px; }
+.packrow { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--card); }
+.packrow.part { border-color: #f0b45a; background: #fff6e5; color: #1b1f24; }
+.packrow.got { border-color: #3fbf6f; background: #e3f7ea; color: #1b1f24; }
+.packrow.got .idet, .packrow.part .idet, .packrow.got .icode, .packrow.part .icode { color: #4a525d; }
+.packqty { font-size: 22px; font-weight: 800; min-width: 48px; text-align: center; }
+.packtick { background: #3fbf6f; color: #fff; font-weight: 800; border-radius: 8px; padding: 4px 8px; }
+.packactions { padding: 10px 14px calc(env(safe-area-inset-bottom, 0px) + 12px); border-top: 1px solid var(--line); background: var(--card); }
+.splitbtn { display: flex; } .splitbtn .btn:first-child { flex: 1; border-top-right-radius: 0; border-bottom-right-radius: 0; padding: 14px; font-size: 18px; }
+.splitbtn .splitmore { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid rgba(255,255,255,.35); width: 56px; font-size: 18px; }
+.packmenu { display: grid; gap: 6px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -2492,7 +2520,10 @@ function drawPacking() {
   const el = $("packPanel"); if (!el) return;
   const head = h("div", { class: "detailhead" }, h("h2", null, "Packing"), h("span", { style: "flex:1" }),
     h("button", { class: "btn small", type: "button", onclick: closePacking }, "✕ Close"));
-  if (!plan) { el.replaceChildren(h("div", { class: "detailbox" }, head, h("p", { class: "muted" }, "No orders yet. Orders show up here as soon as all their items are sorted onto their pile."))); return; }
+  const findBar = TEST_FEATURES ? h("div", { class: "packfindbar" },
+    h("button", { class: "btn", type: "button", onclick: scanAnOrder }, "Scan an order"),
+    h("button", { class: "btn secondary", type: "button", onclick: openFind }, "Find an order")) : null;
+  if (!plan) { el.replaceChildren(h("div", { class: "detailbox" }, head, h("p", { class: "muted" }, "No orders yet. Orders show up here as soon as all their items are sorted onto their pile."), findBar)); return; }
   const ready = plan.orders.filter(o => !packed.has(o.raw) && orderReady(o.label));
   const done = plan.orders.filter(o => packed.has(o.raw)).sort((a, b) => packed.get(a.raw) - packed.get(b.raw));
   const waiting = plan.orders.filter(o => !packed.has(o.raw) && !orderReady(o.label));
@@ -2516,13 +2547,293 @@ function drawPacking() {
         h("span", { class: "pile big" }, o.label),
         h("div", { style: "flex:1;min-width:0;cursor:pointer", onclick: toggle(o) }, h("b", null, `Order #${o.raw}`),
           h("div", { class: "small" }, `${o.units} item${o.units === 1 ? "" : "s"} · `, h("span", { class: "packmore" }, packOpen.has(o.raw) ? "hide items" : "show items")), items(o)),
-        h("button", { class: "btn packbtn", type: "button", onclick: () => setPacked(o.raw, true) }, "Packed ✓"))),
+        TEST_FEATURES ? h("button", { class: "btn packbtn", type: "button", onclick: () => startPack(findPackOrder(o.raw), false) }, "Pack")
+          : h("button", { class: "btn packbtn", type: "button", onclick: () => setPacked(o.raw, true) }, "Packed ✓"))),
       done.map(o => h("div", { class: "drow static st-grey" },
         h("span", { class: "pile" }, o.label),
         h("div", { style: "flex:1;min-width:0;cursor:pointer", onclick: toggle(o) }, h("b", null, `Order #${o.raw}`),
           h("div", { class: "small" }, `${o.units} item${o.units === 1 ? "" : "s"} · Packed ${new Date(packed.get(o.raw)).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`), items(o)),
         h("span", { class: "stbadge st-grey" }, "Packed"),
-        h("button", { class: "link small", type: "button", onclick: () => setPacked(o.raw, false) }, "Undo"))))));
+        h("button", { class: "link small", type: "button", onclick: () => setPacked(o.raw, false) }, "Undo")))), findBar));
+}
+
+/* ---------- Packing by scanning (test address only for now) ----------
+   Under Packing: tap a ready order (or Scan an order / Find an order at the bottom) -> the camera on top, the order
+   below. Scan the order sheet's barcode (top right), then each item; each turns green. When all are green the camera
+   goes off and Pack & Print / Pack shows at the bottom. Until Shopify is connected, "every order" is a practice store
+   of Shopify-style orders kept on this device. */
+const TEST_FEATURES = /--test-/.test(location.hostname) || (() => { try { return localStorage.getItem("pick-and-sort-test-features") === "1"; } catch (e) { return false; } })();
+const STORE_PRACTICE_KEY = "pick-and-sort-practice-store-v1";
+let practiceStoreCache = null;
+/** About 40 practice orders shaped like Shopify's: number, time ordered, customer, area, local delivery or UPS, items. */
+function practiceStore() {
+  if (practiceStoreCache) return practiceStoreCache;
+  try { practiceStoreCache = JSON.parse(localStorage.getItem(STORE_PRACTICE_KEY) || "null"); } catch (e) {}
+  if (practiceStoreCache && practiceStoreCache.orders) return practiceStoreCache;
+  let seed = 5; const rnd = n => { seed = (seed * 16807) % 2147483647; return seed % n; };
+  const things = [ // the same items and barcodes as the practice barcode page
+    ["Fleece blanket", "Blue, 50x60 in", "FB-BLU", "5012345000015", "A3"], ["Fleece blanket", "Gray, 50x60 in", "FB-GRY", "5012345000022", "A3"],
+    ["Notebook", "Lined, A5", "NB-A5", "5012345000039", "A14"], ["Desk lamp", "White", "DL-WHT", "5012345000046", "A35"],
+    ["Phone stand", "Black", "PS-BLK", "5012345000053", "B26"], ["Pen set", "Black ink", "PEN-BLK", "5012345000060", "A7"],
+    ["Cable ties", "Pack of 50", "CT-50", "5012345000077", "B33"], ["Sticky notes", "Yellow", "SN-YEL", "5012345000084", "A44"],
+    ["Water bottle", "750 ml", "WB-750", "5012345000091", "B5"]];
+  const first = ["Rivka", "Sara", "Chaya", "Leah", "Miriam", "Esther", "Dina", "Yehudis", "Malky", "Shiffy", "Gitty", "Toby"];
+  const last = ["Klein", "Weiss", "Gross", "Stern", "Friedman", "Katz", "Roth", "Adler", "Braun", "Schwartz"];
+  const places = [["Brooklyn", "11219", "local"], ["Brooklyn", "11204", "local"], ["Brooklyn", "11230", "local"], ["Monsey", "10952", "shipping"],
+    ["Lakewood", "08701", "shipping"], ["Manhattan", "10001", "shipping"], ["Brooklyn", "11211", "local"], ["Queens", "11367", "shipping"]];
+  const now = Date.now(), day = 864e5, orders = [];
+  for (let k = 0; k < 40; k++) {
+    const [city, zip, kind] = places[rnd(places.length)];
+    const created = now - rnd(4 * 24) * 36e5 - rnd(60) * 6e4;
+    const items = [], n = 1 + rnd(3);
+    for (let i = 0; i < n; i++) { const t = things[rnd(things.length)]; if (items.some(x => x.sku === t[2])) continue; items.push({ name: t[0], details: t[1], sku: t[2], barcode: t[3], bin: t[4], qty: rnd(4) === 0 ? 2 : 1 }); }
+    orders.push({ number: String(70001 + k), created, customer: `${first[rnd(first.length)]} ${last[rnd(last.length)]}`,
+      address: `${100 + rnd(1800)} ${["15th Ave", "Ocean Pkwy", "Main St", "Maple Ave", "Lee Ave", "Avenue J"][rnd(6)]}`, city, zip,
+      delivery: kind === "local" ? { type: "local", title: "Brooklyn Next Day Delivery", date: created + day } : { type: "shipping", title: "UPS Ground", date: created + 3 * day },
+      tags: [], items });
+  }
+  practiceStoreCache = { orders };
+  savePracticeStore();
+  return practiceStoreCache;
+}
+function savePracticeStore() { try { localStorage.setItem(STORE_PRACTICE_KEY, JSON.stringify(practiceStoreCache)); } catch (e) {} }
+/** Every order that can be packed: the practice store's (test address), plus the ones on the current list. */
+function allPackOrders() {
+  const out = TEST_FEATURES ? practiceStore().orders.map(o => ({ ...o, source: "store" })) : [];
+  const have = new Set(out.map(o => o.number));
+  if (plan) plan.orders.forEach(o => {
+    if (have.has(String(o.raw))) return;
+    out.push({ number: String(o.raw), label: o.label, created: null, customer: "", address: "", city: "", zip: "", delivery: { type: "local", title: "", date: null }, tags: [], source: "list",
+      items: orderLines(o.label).map(u => ({ name: itemName(u), details: u.details || "", sku: u.sku || "", barcode: u.barcode || "", bin: boxLabel(u), qty: u.qty })) });
+  });
+  out.forEach(o => { o.packedAt = packedTime(o); o.units = o.items.reduce((a, x) => a + x.qty, 0); });
+  return out;
+}
+function packedTime(o) {
+  if (plan && plan.orders.some(x => String(x.raw) === o.number) && packed.has(plan.orders.find(x => String(x.raw) === o.number).raw)) return packed.get(plan.orders.find(x => String(x.raw) === o.number).raw);
+  if (o.source === "store") { const s = practiceStore().orders.find(x => x.number === o.number); return s && s.packedAt || null; }
+  return null;
+}
+const orderKey = c => String(c || "").trim().replace(/^order\s*/i, "").replace(/^#/, "").replace(/\s+/g, "").toUpperCase();
+const findPackOrder = code => { const k = orderKey(code); return k ? allPackOrders().find(o => orderKey(o.number) === k) || null : null; };
+const fmtWhen = t => (t ? new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+const fmtDay = t => (t ? new Date(t).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : "");
+
+/* Code 128 (set B): the bar widths, using the official pattern table from the barcode reader library */
+async function code128(text) {
+  await loadZxing();
+  const P = window.ZXing.Code128Reader.CODE_PATTERNS, vals = [104];
+  for (const ch of String(text)) { const v = ch.charCodeAt(0) - 32; vals.push(v >= 0 && v < 95 ? v : 0); }
+  let sum = 104; vals.slice(1).forEach((v, i) => { sum += v * (i + 1); }); vals.push(sum % 103, 106);
+  return vals.flatMap(v => [...P[v]]); // widths: bar, space, bar, ... (each in modules)
+}
+/** Draw a Code 128 barcode into a jsPDF document (x, y, width, height in points). */
+async function pdfBarcode(doc, text, x, y, w, hgt) {
+  const widths = await code128(text), total = widths.reduce((a, b) => a + b, 0) + 20, m = w / total;
+  let cx = x + 10 * m;
+  widths.forEach((wd, i) => { if (i % 2 === 0) doc.rect(cx, y, wd * m, hgt, "F"); cx += wd * m; });
+}
+/** The packing slip, like the store's: order number with its barcode, delivery, ship to, items with bins, total. */
+async function packingSlipPdf(o) {
+  const doc = newDoc(); if (!doc) return;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text(`Order #${o.number}`, 430, 50);
+  doc.setFillColor(0); await pdfBarcode(doc, o.number, 420, 58, 150, 34);
+  doc.setFontSize(16); doc.text(TEST_FEATURES ? "PRACTICE STORE" : "PICK & SORT", 40, 60);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+  if (o.created) doc.text(new Date(o.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }), 420, 108);
+  let y = 140;
+  if (o.delivery.title) { doc.setFont("helvetica", "bold"); doc.text("Delivery method:", 40, y); doc.setFont("helvetica", "normal"); doc.text(`${o.delivery.title}${o.delivery.date ? " · " + fmtDay(o.delivery.date) : ""}`, 135, y); y += 26; }
+  if (o.customer) { doc.setFont("helvetica", "bold"); doc.text("Ship to", 40, y); doc.setFont("helvetica", "normal");
+    [o.customer, o.address, `${o.city} ${o.zip}`.trim()].filter(Boolean).forEach((t, i) => doc.text(t, 40, y + 14 + i * 13)); y += 70; }
+  doc.setDrawColor(150); doc.line(40, y, 572, y); y += 18;
+  doc.setFont("helvetica", "bold"); doc.text("Items", 40, y); doc.text("Bin", 440, y); doc.text("Qty", 520, y); y += 16;
+  doc.setFont("helvetica", "normal");
+  o.items.forEach(it => {
+    if (y > 740) { doc.addPage(); y = 60; }
+    doc.setFont("helvetica", "bold"); doc.text(doc.splitTextToSize(it.name + (it.details ? ` - ${it.details}` : ""), 380)[0], 40, y);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text([it.sku, it.barcode].filter(Boolean).join("   "), 40, y + 12); doc.setFontSize(10);
+    doc.text(it.bin || "", 440, y); doc.text(String(it.qty), 524, y); doc.setDrawColor(220); doc.line(40, y + 20, 572, y + 20); y += 32;
+  });
+  doc.setFont("helvetica", "bold"); doc.text(`Total items: ${o.units}`, 470, y + 10);
+  await download(doc.output("blob"), `packing-slip-${o.number}.pdf`);
+}
+/** The driver label (4x6 in): a big barcode of the order number, the order, who it's for and how it goes. */
+async function driverLabelPdf(o) {
+  if (!window.jspdf) { toast("Making PDFs needs an internet connection. Reload the page once you're online."); return; }
+  const doc = new window.jspdf.jsPDF({ unit: "pt", format: [288, 432] });
+  doc.setFillColor(0); await pdfBarcode(doc, o.number, 14, 18, 260, 90);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(30); doc.text(`#${o.number}`, 144, 140, { align: "center" });
+  doc.setFontSize(16); doc.text(o.customer || "", 18, 180);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(13);
+  [o.address, `${o.city} ${o.zip}`.trim()].filter(Boolean).forEach((t, i) => doc.text(t, 18, 202 + i * 18));
+  doc.setDrawColor(0); doc.setLineWidth(1.5); doc.line(18, 250, 270, 250);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.text(o.delivery.title || "Delivery", 18, 274);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(12);
+  if (o.delivery.date) doc.text(`Deliver: ${fmtDay(o.delivery.date)}`, 18, 294);
+  doc.text(`${o.units} item${o.units === 1 ? "" : "s"}${o.packedAt ? ` · packed ${fmtWhen(o.packedAt)}` : ""}`, 18, 314);
+  await download(doc.output("blob"), `label-${o.number}.pdf`);
+}
+
+/* the pack screen */
+let pk = null; // { o, paper, got: Map(index -> count), stop }
+function startPack(o, paperDone) {
+  if (!o) return;
+  if (pk && pk.stop) pk.stop();
+  const old = $("packScreen"); if (old) old.remove(); // a fresh screen (and camera) for each order
+  pk = { o, paper: !!paperDone, got: new Map(), msg: paperDone ? { kind: "ok", text: `Order #${o.number}: the sheet is confirmed. Scan each item.` } : null };
+  drawPack(); startPackCamera();
+}
+function closePack() { if (pk && pk.stop) pk.stop(); pk = null; const el = $("packScreen"); if (el) el.remove(); if (!$("packPanel") && !$("packFind")) document.body.style.overflow = ""; drawPacking(); }
+const packDone = () => pk && pk.paper && pk.o.items.every((it, i) => (pk.got.get(i) || 0) >= it.qty);
+function packScan(code) {
+  if (!pk) return;
+  const k = scanKey(code), ok = orderKey(code);
+  // the order sheet (its barcode is the order number)
+  if (ok === orderKey(pk.o.number)) { if (!pk.paper) { pk.paper = true; beep(true); pk.msg = { kind: "ok", text: "Sheet confirmed. Now scan each item." }; } else pk.msg = { kind: "ok", text: "That's this order's sheet: already confirmed." }; return drawPack(); }
+  const other = findPackOrder(code);
+  if (other && other.number !== pk.o.number && !pk.o.items.some(it => scanKey(it.barcode) === k || scanKey(it.sku) === k)) {
+    beep(false); pk.msg = { kind: "bad", text: `That's the sheet for order #${other.number}, not #${pk.o.number}.`, other }; return drawPack();
+  }
+  const i = pk.o.items.findIndex((it, j) => (scanKey(it.barcode) === k || scanKey(it.sku) === k) && (pk.got.get(j) || 0) < it.qty);
+  const any = pk.o.items.findIndex(it => scanKey(it.barcode) === k || scanKey(it.sku) === k);
+  if (!pk.paper && any >= 0) { beep(false); pk.msg = { kind: "bad", text: "Scan the order sheet first (the barcode at the top right), to be sure it's the right order." }; return drawPack(); }
+  if (i >= 0) {
+    pk.got.set(i, (pk.got.get(i) || 0) + 1); beep(true);
+    const it = pk.o.items[i], n = pk.got.get(i);
+    pk.msg = { kind: "ok", text: `${it.name}${it.details ? " · " + it.details : ""}: ${n} of ${it.qty}` };
+    if (packDone()) { pk.msg = { kind: "good", text: "Everything is here." }; if (pk.stop) pk.stop(); }
+    return drawPack();
+  }
+  beep(false);
+  pk.msg = any >= 0 ? { kind: "warn", text: `Already have all ${pk.o.items[any].qty} of ${pk.o.items[any].name}${pk.o.items[any].details ? " · " + pk.o.items[any].details : ""}.` }
+    : { kind: "bad", text: `${code}: not in this order.` };
+  drawPack();
+}
+async function startPackCamera() {
+  const video = $("packVideo"), msg = $("packCamMsg"); if (!video) return;
+  let read, stream, timer, stopped = false;
+  pk.stop = () => { stopped = true; clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); pk && (pk.stop = null); };
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
+    read = await barcodeReader();
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
+    video.srcObject = stream; await video.play();
+    if (msg) msg.textContent = "";
+  } catch (e) { if (msg) msg.textContent = "The camera can't be used here: type the codes below, or use a scanner."; return; }
+  const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
+  let last = "", lastSeen = 0;
+  const tick = async () => {
+    if (stopped || !pk) return;
+    const v = $("packVideo");
+    if (v && v.readyState >= 2 && v.videoWidth) {
+      const vw = v.videoWidth, vh = v.videoHeight, sx = vw * 0.05, sw = vw * 0.9, sy = vh * 0.25, sh = vh * 0.5, w = Math.min(1100, sw);
+      canvas.width = w; canvas.height = Math.round(sh * w / sw); ctx.drawImage(v, sx, sy, sw, sh, 0, 0, w, canvas.height);
+      const code = await read(canvas), now = Date.now();
+      if (code) { if (code !== last || now - lastSeen > 1200) packScan(code); last = code; lastSeen = now; }
+    }
+    timer = setTimeout(tick, 80);
+  };
+  tick();
+}
+function drawPack() {
+  if (!pk) return;
+  let el = $("packScreen");
+  if (!el) { // the camera on top and the order below are separate, so redrawing the order never touches the camera
+    el = h("div", { id: "packScreen", class: "packscreen", role: "dialog", "aria-label": "Pack an order" },
+      h("div", { class: "packcam" }, h("video", { id: "packVideo", playsinline: true, muted: true, autoplay: true }), h("div", { class: "scanframe wide" }), h("p", { id: "packCamMsg", class: "scanmsg small" }, "Starting the camera…")),
+      h("div", { class: "packwrap" }));
+    document.body.append(el); document.body.style.overflow = "hidden";
+  }
+  const o = pk.o, done = packDone(), at = packedTime(o);
+  const rows = o.items.map((it, i) => { const n = pk.got.get(i) || 0, full = n >= it.qty;
+    return h("div", { class: "packrow" + (full ? " got" : n ? " part" : "") },
+      h("div", { class: "packqty" }, `${n}/${it.qty}`),
+      h("div", { style: "flex:1;min-width:0" }, h("b", null, it.name), it.details ? h("div", { class: "idet" }, it.details) : null,
+        it.barcode ? h("div", { class: "dbarcode small" }, it.barcode) : null, it.sku ? h("div", { class: "icode" }, `SKU ${it.sku}`) : null,
+        it.bin ? h("div", { class: "small" }, `Bin ${it.bin}`) : null),
+      full ? h("span", { class: "packtick" }, "OK") : null); });
+  const local = o.delivery.type !== "shipping";
+  const typed = h("input", { type: "text", placeholder: "Or type a barcode / order number", "aria-label": "Type a code", onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) { const v = e.target.value.trim(); e.target.value = ""; packScan(v); } } });
+  const body = h("div", { class: "packbody" },
+    h("div", { class: "packhead" }, h("div", { style: "flex:1;min-width:0" }, h("h2", { style: "margin:0" }, `Order #${o.number}`),
+        h("div", { class: "small muted" }, [o.customer, o.city, o.delivery.title, o.created ? "ordered " + fmtWhen(o.created) : ""].filter(Boolean).join(" · "))),
+      h("button", { class: "btn small secondary", type: "button", onclick: closePack }, "Back")),
+    at ? h("div", { class: "notice good" }, `Packed ${fmtWhen(at)}.`) : null,
+    h("div", { class: "packstep" + (pk.paper ? " ok" : "") }, pk.paper ? "Order sheet: confirmed" : "1. Scan the order sheet (barcode at the top right)",
+      pk.paper ? null : h("button", { class: "link small", type: "button", style: "margin-left:8px", onclick: () => { pk.paper = true; pk.msg = { kind: "ok", text: "Sheet confirmed by hand. Scan each item." }; drawPack(); } }, "Can't scan it? Confirm by hand")),
+    pk.msg ? h("div", { class: "packmsg " + pk.msg.kind }, pk.msg.text,
+      pk.msg.other ? h("button", { class: "btn small", type: "button", style: "margin-left:8px", onclick: () => startPack(pk.msg.other, true) }, `Open #${pk.msg.other.number}`) : null) : null,
+    done ? null : h("div", { class: "row packtype" }, typed, h("button", { class: "btn small", type: "button", onclick: () => { if (typed.value.trim()) { const v = typed.value.trim(); typed.value = ""; packScan(v); } } }, "OK")),
+    h("div", { class: "packlist" }, rows),
+    h("button", { class: "link small", type: "button", onclick: () => packingSlipPdf({ ...o, packedAt: at }) }, "Print this order's packing slip"));
+  const actions = done ? h("div", { class: "packactions" },
+    h("div", { class: "splitbtn" },
+      h("button", { class: "btn", type: "button", onclick: () => packAction(local ? "both" : "pack") }, local ? "Pack & Print" : "Pack"),
+      h("button", { class: "btn splitmore", type: "button", "aria-label": "More choices", onclick: () => { pk.menu = !pk.menu; drawPack(); } }, "▾")),
+    pk.menu ? h("div", { class: "packmenu" },
+      h("button", { class: "btn secondary", type: "button", onclick: () => packAction("pack") }, "Pack only"),
+      h("button", { class: "btn secondary", type: "button", onclick: () => packAction("print") }, "Print label only"),
+      local ? null : h("button", { class: "btn secondary", type: "button", onclick: () => packAction("both") }, "Pack & print our label instead")) : null) : null;
+  // once everything is green the camera is gone and the order takes the whole screen
+  const cam = el.querySelector(".packcam"); if (done && cam) cam.remove();
+  el.querySelector(".packwrap").replaceChildren(body, actions || "");
+  el.classList.toggle("done", done);
+}
+/** Pack (the packed time, and the tag that goes on the order in Shopify) and / or print the driver label. */
+async function packAction(what) {
+  if (!pk) return;
+  const o = pk.o; pk.menu = false;
+  if (what !== "print") {
+    const t = Date.now(), tag = `Packed ${new Date(t).toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" })}`;
+    const lo = plan && plan.orders.find(x => String(x.raw) === o.number);
+    if (lo) { packed.set(lo.raw, t); saveList(); }
+    if (o.source === "store" || !lo) { const s = practiceStore().orders.find(x => x.number === o.number); if (s) { s.packedAt = t; s.tags = (s.tags || []).filter(x => !/^Packed /.test(x)).concat(tag); savePracticeStore(); } }
+    o.packedAt = t;
+    pk.msg = { kind: "good", text: `Packed. Tag added: "${tag}"${TEST_FEATURES ? " (practice: with Shopify connected it goes on the order there" + (o.delivery.type === "shipping" ? ", and the order opens in Shopify to buy the UPS label" : "") + ")" : ""}.` };
+  }
+  if (what !== "pack") { pk.msg = pk.msg && what === "both" ? pk.msg : { kind: "good", text: "Label made." }; await driverLabelPdf({ ...o, packedAt: o.packedAt || packedTime(o) }); }
+  drawPack(); drawPacking();
+  const el = $("packScreen");
+  if (el && what !== "print") el.querySelector(".packactions").append(h("button", { class: "btn secondary", type: "button", style: "width:100%;margin-top:8px", onclick: closePack }, "Back to Packing"));
+}
+
+/* Find an order: type to filter, sort, tap to pack */
+let pf = { q: "", sort: "created", show: "all", kind: "all" };
+function openFind() { pf.q = ""; drawFind(); setTimeout(() => { const i = document.querySelector('#packFind input[type=search]'); if (i) i.focus(); }, 50); }
+function closeFind() { const el = $("packFind"); if (el) el.remove(); if (!$("packPanel") && !$("packScreen")) document.body.style.overflow = ""; }
+function drawFind() {
+  let el = $("packFind");
+  if (!el) { el = h("div", { id: "packFind", class: "detailpanel", role: "dialog", "aria-label": "Find an order", style: "z-index:55" }); document.body.append(el); document.body.style.overflow = "hidden"; }
+  const q = pf.q.trim().toLowerCase(), qk = scanKey(pf.q);
+  let list = allPackOrders().filter(o => (pf.show === "all" || (pf.show === "packed") === !!o.packedAt) && (pf.kind === "all" || (o.delivery.type === "shipping") === (pf.kind === "shipping")));
+  if (q) list = list.filter(o => orderKey(o.number).includes(orderKey(pf.q)) || [o.customer, o.city, o.zip, o.address, o.delivery.title].some(x => String(x || "").toLowerCase().includes(q))
+    || o.items.some(it => [it.name, it.details, it.sku, it.bin].some(x => String(x || "").toLowerCase().includes(q)) || (qk && scanKey(it.barcode) === qk)));
+  const by = { created: (a, b) => (b.created || 0) - (a.created || 0), number: (a, b) => natural(a.number, b.number), delivery: (a, b) => (a.delivery.date || 9e15) - (b.delivery.date || 9e15) || natural(a.number, b.number),
+    place: (a, b) => natural(a.city || "~", b.city || "~") || natural(a.zip, b.zip) || natural(a.number, b.number), customer: (a, b) => natural(a.customer || "~", b.customer || "~") }[pf.sort];
+  list.sort(by);
+  const sel = (label, key, opts) => h("label", { class: "binctl" }, h("span", { class: "fixlab" }, label), h("select", { "aria-label": label, onchange: e => { pf[key] = e.target.value; drawFind(); } }, opts.map(([v, t]) => h("option", { value: v, selected: pf[key] === v }, t))));
+  const search = h("input", { type: "search", class: "binsearch", value: pf.q, placeholder: "Order number, name, area, or any item (name, SKU, barcode, bin)", "aria-label": "Search orders",
+    oninput: e => { pf.q = e.target.value; clearTimeout(search.t); search.t = setTimeout(() => { drawFind(); const s = document.querySelector('#packFind input[type=search]'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }, 200); } });
+  el.replaceChildren(h("div", { class: "detailbox" },
+    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, "Find an order"), h("button", { class: "btn small", type: "button", onclick: closeFind }, "Back")),
+    search,
+    h("div", { class: "binctls" },
+      sel("Sort", "sort", [["created", "Newest first"], ["number", "Order number"], ["delivery", "Delivery date"], ["place", "Area"], ["customer", "Customer"]]),
+      sel("Show", "show", [["all", "All orders"], ["open", "Not packed"], ["packed", "Packed"]]),
+      sel("Delivery", "kind", [["all", "Any delivery"], ["local", "Own driver"], ["shipping", "UPS / shipped"]])),
+    h("p", { class: "small muted", style: "margin:4px 0 8px" }, `${list.length} order${list.length === 1 ? "" : "s"}${TEST_FEATURES ? " · practice store" : ""}`),
+    h("div", { class: "dlist" }, list.slice(0, 200).map(o => h("button", { class: "drow" + (o.packedAt ? " st-grey" : ""), type: "button", onclick: () => { closeFind(); startPack(o, false); } },
+      h("div", { style: "flex:1;min-width:0;text-align:left" }, h("b", null, `#${o.number}`), o.customer ? ` · ${o.customer}` : "",
+        h("div", { class: "small" }, [o.city, `${o.units} item${o.units === 1 ? "" : "s"}`, o.created ? "ordered " + fmtWhen(o.created) : "", o.delivery.date ? "deliver " + fmtDay(o.delivery.date) : ""].filter(Boolean).join(" · ")),
+        h("div", { class: "small muted" }, o.delivery.title || (o.source === "list" ? "On the current list" : ""), o.packedAt ? ` · packed ${fmtWhen(o.packedAt)}` : "")),
+      h("span", { class: "small" }, o.delivery.type === "shipping" ? "UPS" : "Driver")))),
+    list.length > 200 ? h("p", { class: "small muted" }, "Showing the first 200: type to narrow it down.") : null));
+}
+/** Scan an order: the order sheet's barcode opens it, already confirmed. */
+function scanAnOrder() {
+  binScan(code => { const o = findPackOrder(code); if (o) startPack(o, true); else toast(`${code}: no order with that number.`); },
+    { title: "Scan the order sheet", ok: code => !!findPackOrder(code) });
 }
 
 /* ---------- Accounts: sign in (Google or email), allowed / blocked, companies, admin ----------
@@ -3477,7 +3788,7 @@ async function binScan(onCode, opts = {}) {
       const code = await read(canvas), now = Date.now();
       if (code) {
         // the same code held in view counts once; again only after it has left the picture
-        if (code !== last || now - lastSeen > 1200) { beep(readBinCode(code).none == null); handle(code); }
+        if (code !== last || now - lastSeen > 1200) { beep(opts.ok ? opts.ok(code) : readBinCode(code).none == null); handle(code); }
         last = code; lastSeen = now;
         if (!opts.keep) return;
       }
