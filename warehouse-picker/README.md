@@ -256,6 +256,16 @@ The live sites (the old link, pick-and-sort.web.app and the phone apps) don't sh
 - Until Shopify is connected, "every order" is a practice store of 40 Shopify-style orders kept on the device; their
   items use the barcodes on web/barcodes.html.
 
+## Devices and the print station
+
+Signed in to a company: **Settings → More → This device** gives each device a name and a type (phone or computer;
+automatic, or chosen). **Holding the green circle** at the top lists every device in the company: online ones green at
+the top, the others with when they were last seen. An admin makes a computer the **print station** (from that list,
+or on the computer itself). On the test address, packing then works like this: a local order's label prints on the
+print station and the phone goes back to the list; a UPS order opens on the print station to buy its label in Shopify.
+If the print station is offline, the phone prints the label itself, and UPS orders wait and open there when it's back.
+On the print station, a strip at the bottom shows what it's printed and opened.
+
 ## Bins (practice)
 
 Settings → **Bins**: which bin each item is kept in. For now it's practice only: it's kept on the device by

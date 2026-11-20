@@ -103,3 +103,8 @@ slip PDF's order barcode) scan back exactly; the pack screen wants the sheet fir
 order's sheet, an item not in the order and an extra one; when all are green the camera goes and Pack & Print / Pack
 shows; Pack records the time and tag and makes the label; Find an order filters as you type and sorts; Scan an order
 opens any order.
+
+`print-station.test.js` (with the Firebase emulator): devices are named; holding the green circle lists every device in
+the company, online first; the admin makes a computer the print station; a phone packing a local order sends its label
+there and goes back to the list; a UPS order opens there for Shopify; with the station offline the phone prints its own
+label and the UPS order waits, then reaches the station when it's back.

@@ -348,6 +348,12 @@ header.top #title { white-space: nowrap; }
 .undobar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 80; display: flex; justify-content: space-between; width: min(440px, calc(100% - 32px)); gap: 12px; align-items: center; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: calc(100% - 32px); }
 
 /* Packing by scanning (test address) */
+.devrow { align-items: center; }
+.devdot { width: 12px; height: 12px; border-radius: 50%; background: #9aa4b0; flex: none; }
+.devdot.on { background: #3fbf6f; box-shadow: 0 0 0 3px rgba(63,191,111,.25); }
+.devrow .stbadge { margin-left: 6px; font-size: 12px; }
+.stationbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--card); border-top: 2px solid var(--accent); padding: 8px 14px calc(env(safe-area-inset-bottom, 0px) + 8px); box-shadow: 0 -4px 16px rgba(0,0,0,.12); }
+.stationrow { margin-top: 4px; }
 .packfindbar { position: sticky; bottom: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 0 4px; background: var(--card); margin-top: 12px; }
 .packfindbar .btn { padding: 14px 8px; font-size: 16px; }
 .packscreen { position: fixed; inset: 0; z-index: 56; background: var(--bg); display: flex; flex-direction: column; }
@@ -380,7 +386,7 @@ input.bigscan { font-size: 20px; padding: 12px 14px; border: 2px solid var(--acc
 <body>
 <header class="top">
   <h1 id="title">Pick &amp; Sort</h1>
-  <div class="headbtns"><button id="syncDot" class="syncdot hidden" type="button" aria-label="Live sharing: tap to update now" title="Live sharing: tap to update now"><span></span></button>
+  <div class="headbtns"><button id="syncDot" class="syncdot hidden" type="button" aria-label="Live sharing: tap to update now, hold to see the devices" title="Tap: update now. Hold: the devices in your company"><span></span></button>
   <button id="packBtn" type="button">Packing</button>
   <button id="navBtn" type="button" aria-label="Settings">Settings</button></div>
 </header>
@@ -2829,10 +2835,25 @@ async function packAction(what) {
     o.packedAt = t;
     pk.msg = { kind: "good", text: `Packed. Tag added: "${tag}"${TEST_FEATURES ? " (practice: with Shopify connected it goes on the order there" + (o.delivery.type === "shipping" ? ", and the order opens in Shopify to buy the UPS label" : "") + ")" : ""}.` };
   }
-  if (what !== "pack") { pk.msg = pk.msg && what === "both" ? pk.msg : { kind: "good", text: "Label made." }; await driverLabelPdf({ ...o, packedAt: o.packedAt || packedTime(o) }); }
+  const full = { ...o, packedAt: o.packedAt || packedTime(o) };
+  let sentTo = null;
+  // a UPS / shipped order: its label is bought in Shopify on the print station (it waits there if the station is offline)
+  if (what !== "print" && o.delivery.type === "shipping" && station.id && !amStation()) {
+    if (await sendToStation("shopify", full)) sentTo = stationOnline() ? `${station.doc.name} is opening it in Shopify for the label.` : `${(station.doc && station.doc.name) || "The print station"} is offline: it opens there in Shopify as soon as it's back.`;
+  }
+  if (what !== "pack" && !(o.delivery.type === "shipping" && what === "pack")) {
+    if (stationOnline() && await sendToStation("label", full)) sentTo = `Label sent to ${station.doc.name}.`;
+    else {
+      if (station.id && !amStation()) sentTo = `${(station.doc && station.doc.name) || "The print station"} is offline: printing here.`;
+      await driverLabelPdf(full);
+    }
+  }
+  if (sentTo) pk.msg = { kind: "good", text: (what !== "print" ? "Packed. " : "") + sentTo };
   drawPack(); drawPacking();
   const el = $("packScreen");
   if (el && what !== "print") el.querySelector(".packactions").append(h("button", { class: "btn secondary", type: "button", style: "width:100%;margin-top:8px", onclick: closePack }, "Back to Packing"));
+  // sent to the print station: the phone goes straight back to the list of orders to pack
+  if (sentTo && /sent to|opening it|opens there/.test(sentTo) && what !== "print") setTimeout(() => { if (pk && pk.o === o) { closePack(); toast(sentTo); } }, 1500);
 }
 
 /* Find an order: type to filter, sort, tap to pack */
@@ -2888,6 +2909,162 @@ function scanAnOrderCamera() {
     { title: "Scan the order sheet", ok: code => !!findPackOrder(code) });
 }
 
+/* ---------- Devices and the print station ----------
+   Every device signed in to a company has a name and a type (Settings -> More -> This device) and checks in every
+   minute while it's open. Holding the green circle shows them all, online first. An admin picks which computer is the
+   print station: packers' labels print there, and UPS orders open there in Shopify; if it's offline, local labels
+   print on the phone and UPS orders wait for it. */
+const DEVICE_KEY = "pick-and-sort-device-v1";
+const ONLINE_MS = (() => { try { return Number(localStorage.getItem("pick-and-sort-online-window")) || 150000; } catch (e) { return 150000; } })(); // seen in the last 2.5 min
+function guessDeviceName() {
+  const ua = navigator.userAgent;
+  return /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? "iPad" : /Android.+Mobile/.test(ua) ? "Android phone"
+    : /Android/.test(ua) ? "Android tablet" : /CrOS/.test(ua) ? "Chromebook" : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows computer" : "Computer";
+}
+const device = (() => {
+  let d = null; try { d = JSON.parse(localStorage.getItem(DEVICE_KEY) || "null"); } catch (e) {}
+  if (!d || !d.id) d = { id: Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4), name: guessDeviceName(), type: null };
+  return d;
+})();
+const deviceType = () => device.type || (phoneLike() ? "phone" : "computer");
+function keepDevice() { try { localStorage.setItem(DEVICE_KEY, JSON.stringify(device)); } catch (e) {} }
+keepDevice();
+const devCol = () => fb.db.collection("companies").doc(acct.company).collection("devices");
+const printDoc = () => fb.db.collection("companies").doc(acct.company).collection("settings").doc("print");
+const jobCol = () => fb.db.collection("companies").doc(acct.company).collection("jobs");
+const devicesOn = () => !!(typeof acct !== "undefined" && acct && acct.status === "allowed" && acct.company && fb.db);
+const isOnline = d => d && Date.now() - (d.lastSeen || 0) < ONLINE_MS;
+const station = { id: null, doc: null, unsub: null, unsubDev: null, unsubJobs: null, jobs: [] }; // the company's print station
+/** Check in: this device is here (every minute while open, and on coming back to the front). */
+function heartbeat() {
+  if (!devicesOn()) return;
+  devCol().doc(device.id).set({ name: device.name, type: deviceType(), email: acct.email, lastSeen: Date.now(), version: typeof APP_VERSION !== "undefined" ? APP_VERSION : "" }, { merge: true }).catch(() => {});
+}
+setInterval(() => { if (!document.hidden) heartbeat(); }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) heartbeat(); });
+/** Follow which device is the print station (and whether it's online); and be one, if it's this device. */
+function watchStation() {
+  ["unsub", "unsubDev", "unsubJobs"].forEach(k => { if (station[k]) { station[k](); station[k] = null; } });
+  station.id = null; station.doc = null;
+  if (!devicesOn()) return;
+  heartbeat();
+  station.unsub = printDoc().onSnapshot(s => {
+    const id = s.exists ? s.data().station || null : null;
+    if (id === station.id) return;
+    station.id = id; station.doc = null;
+    if (station.unsubDev) { station.unsubDev(); station.unsubDev = null; }
+    if (station.unsubJobs) { station.unsubJobs(); station.unsubJobs = null; }
+    if (id) station.unsubDev = devCol().doc(id).onSnapshot(d => { station.doc = d.exists ? { id, ...d.data() } : null; drawStationBar(); }, () => {});
+    if (id && id === device.id) runStation();
+    drawStationBar(); if (view === "settings") renderSettings();
+  }, () => {});
+}
+const stationOnline = () => station.id && station.id !== device.id && isOnline(station.doc);
+const amStation = () => station.id && station.id === device.id;
+
+/* the print station: picks up the jobs packers send, prints labels, opens UPS orders in Shopify */
+function runStation() {
+  station.unsubJobs = jobCol().where("station", "==", device.id).where("status", "==", "waiting").onSnapshot(snap => {
+    snap.docChanges().forEach(ch => { if (ch.type === "added") doJob({ id: ch.doc.id, ...ch.doc.data() }); });
+  }, () => {});
+}
+const stationLog = []; // what this station did, newest first (shown on its screen)
+async function doJob(j) {
+  const ref = jobCol().doc(j.id);
+  try { await fb.db.runTransaction(async tx => { const s = await tx.get(ref); if (!s.exists || s.data().status !== "waiting") throw new Error("taken"); tx.update(ref, { status: "working", at2: Date.now() }); }); }
+  catch (e) { return; } // already done (another tab of this station)
+  const o = j.order || {};
+  if (j.kind === "label") {
+    await stationPrint(o);
+    await ref.update({ status: "done", doneAt: Date.now() }).catch(() => {});
+    stationLog.unshift({ at: Date.now(), text: `Label printed: #${o.number}${o.customer ? " · " + o.customer : ""}`, by: j.byName });
+  } else { // a shipped order: its label is bought in Shopify
+    await ref.update({ status: "done", doneAt: Date.now() }).catch(() => {});
+    const url = o.shopifyUrl || "";
+    stationLog.unshift({ at: Date.now(), text: `#${o.number} (${o.delivery && o.delivery.title || "shipping"}): buy its label in Shopify`, by: j.byName, url, order: o });
+    if (url) { const w = window.open(url, "_blank"); if (!w) toast(`Allow pop-ups for Pick & Sort so Shopify opens by itself. #${o.number}: tap Open below.`); }
+  }
+  beep(true); drawStationBar();
+}
+/** Print a label on this computer without a new window: the PDF asks to be printed as it loads in a hidden frame
+    (with Chrome's silent printing set up, it goes straight to the printer). */
+async function stationPrint(o) {
+  let blob = null; await driverLabelPdf(o, b => { blob = b; }); if (!blob) return;
+  if (window.__stationPrint) return window.__stationPrint(o, blob); // tests
+  const old = $("stationFrame"); if (old) old.remove();
+  const f = h("iframe", { id: "stationFrame", style: "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0" });
+  f.src = URL.createObjectURL(blob); document.body.append(f);
+  f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) {} };
+}
+/** A strip at the bottom of the screen on the print station: what it's done, and UPS orders to open. */
+function drawStationBar() {
+  let el = $("stationBar");
+  if (!amStation()) { if (el) el.remove(); return; }
+  if (!el) { el = h("div", { id: "stationBar", class: "stationbar" }); document.body.append(el); }
+  el.replaceChildren(h("div", { class: "row", style: "justify-content:space-between;align-items:center" },
+      h("b", null, `Print station: ${device.name}`), h("span", { class: "small" }, stationLog.length ? `${stationLog.length} done` : "waiting for labels")),
+    ...stationLog.slice(0, 4).map(l => h("div", { class: "small stationrow" }, `${new Date(l.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · ${l.text}${l.by ? " (from " + l.by + ")" : ""}`,
+      l.order ? h("button", { class: "btn small", type: "button", style: "margin-left:8px", onclick: () => l.url ? window.open(l.url, "_blank") : toast("Shopify isn't connected yet: this would open the order there to buy its label.") }, "Open in Shopify") : null)));
+}
+/** From a packer's device: send the label (or the UPS order) to the print station. true if sent, false if it isn't there. */
+async function sendToStation(kind, o) {
+  if (!devicesOn() || !station.id || amStation()) return false;
+  const slim = { number: o.number, customer: o.customer || "", address: o.address || "", city: o.city || "", zip: o.zip || "", delivery: o.delivery || {}, units: o.units || 0, packedAt: o.packedAt || null, shopifyUrl: o.shopifyUrl || "" };
+  await jobCol().add({ station: station.id, kind, order: slim, status: "waiting", at: Date.now(), by: acct.email, byName: device.name });
+  return true;
+}
+
+/* Holding the green circle: every device in the company, online first */
+let devicesView = null; // { list, unsub }
+function openDevices() {
+  if (!devicesOn()) return;
+  closeDevices();
+  devicesView = { list: [] };
+  devicesView.unsub = devCol().onSnapshot(s => { if (!devicesView) return; devicesView.list = s.docs.map(d => ({ id: d.id, ...d.data() })); drawDevices(); }, () => {});
+  drawDevices();
+}
+function closeDevices() { if (devicesView && devicesView.unsub) devicesView.unsub(); devicesView = null; const el = $("devicesPanel"); if (el) el.remove(); if (!document.querySelector(".detailpanel, .packscreen")) document.body.style.overflow = ""; }
+function drawDevices() {
+  if (!devicesView) return;
+  let el = $("devicesPanel");
+  if (!el) { el = h("div", { id: "devicesPanel", class: "detailpanel", role: "dialog", "aria-label": "Devices", style: "z-index:58" }); document.body.append(el); document.body.style.overflow = "hidden"; }
+  const admin = acct.role === "owner" || acct.role === "admin";
+  const list = devicesView.list.slice().sort((a, b) => (isOnline(b) - isOnline(a)) || (b.lastSeen || 0) - (a.lastSeen || 0));
+  const on = list.filter(isOnline).length;
+  const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+  el.replaceChildren(h("div", { class: "detailbox" },
+    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, `Devices in ${acct.companyName}`), h("button", { class: "btn small", type: "button", onclick: closeDevices }, "Back")),
+    h("p", { class: "small muted", style: "margin-top:0" }, `${on} online now · ${list.length} in all`),
+    h("div", { class: "dlist" }, list.map(d => h("div", { class: "drow static devrow " + (isOnline(d) ? "st-green" : "st-grey") },
+      h("span", { class: "devdot" + (isOnline(d) ? " on" : "") }),
+      h("div", { style: "flex:1;min-width:0" },
+        h("b", null, d.name || "Device"), d.id === device.id ? h("span", { class: "stbadge" }, "This device") : null, d.id === station.id ? h("span", { class: "stbadge st-blue" }, "Print station") : null,
+        h("div", { class: "small" }, [d.type === "phone" ? "Phone" : "Computer", d.email, isOnline(d) ? "online" : d.lastSeen ? "last seen " + ago(d.lastSeen) : ""].filter(Boolean).join(" · "))),
+      admin && d.type !== "phone" && d.id !== station.id ? h("button", { class: "btn small secondary", type: "button", onclick: () => setStation(d.id, d.name) }, "Make print station") : null)))));
+}
+async function setStation(id, name) {
+  try { await printDoc().set({ station: id || null, at: Date.now(), by: acct.email }); toast(id ? `${name} is now the print station.` : "No print station now: labels print on each device."); }
+  catch (e) { toast(e.code === "permission-denied" ? "Only the company's admin can choose the print station." : "Couldn't save: " + e.message); }
+}
+/** Settings -> More: this device's name and type, and the company's print station. */
+function deviceSection() {
+  const name = h("input", { type: "text", value: device.name, "aria-label": "This device's name", style: "flex:1;min-width:0",
+    onchange: e => { device.name = e.target.value.trim() || guessDeviceName(); keepDevice(); heartbeat(); toast("Saved."); } });
+  const type = h("select", { "aria-label": "This device's type", onchange: e => { device.type = e.target.value || null; keepDevice(); heartbeat(); } },
+    [["", `Automatic (${phoneLike() ? "phone" : "computer"})`], ["phone", "Phone (camera for scanning)"], ["computer", "Computer (scanner or typing)"]].map(([v, t]) => h("option", { value: v, selected: (device.type || "") === v }, t)));
+  const admin = devicesOn() && (acct.role === "owner" || acct.role === "admin");
+  const st = station.id ? (station.id === device.id ? "this device" : (station.doc && station.doc.name) || "another device") : "none";
+  return h("div", null,
+    h("div", { class: "row" }, name), h("div", { class: "row", style: "margin-top:6px" }, type),
+    devicesOn() ? h("p", { class: "small", style: "margin:10px 0 6px" }, h("b", null, "Print station: "), st,
+      station.id && station.id !== device.id ? (isOnline(station.doc) ? " (online)" : " (offline)") : "") : null,
+    devicesOn() ? h("div", { class: "row" },
+      h("button", { class: "btn small secondary", type: "button", onclick: openDevices }, "All devices"),
+      admin && deviceType() !== "phone" && !amStation() ? h("button", { class: "btn small secondary", type: "button", onclick: () => setStation(device.id, device.name) }, "Make this the print station") : null,
+      admin && station.id ? h("button", { class: "link small", type: "button", onclick: e => tapTwice(e.currentTarget, "No print station?", () => setStation(null)) }, "No print station") : null) : null,
+    h("p", { class: "small muted" }, "Names show in the device list (hold the green circle at the top). Labels from phones print on the print station; if it's offline they print on the phone, and UPS orders wait for it."));
+}
+
 /* ---------- Accounts: sign in (Google or email), allowed / blocked, companies, admin ----------
    Everything is in the owner's own Firebase project. The database rules (firebase/firestore.rules)
    decide who may see what; the screens here only follow them. */
@@ -2902,7 +3079,7 @@ const keepAcct = () => { try { acct ? localStorage.setItem(ACCT_KEY, JSON.string
 const ACCOUNTS_ON = false;
 // The Firebase address (pick-and-sort.web.app) always uses sign-in. The old address (github.io) and the phone apps
 // carry on without it until ACCOUNTS_ON is switched on, so nobody working there is interrupted.
-const onFirebaseSite = /(^|\.)pick-and-sort\.(web\.app|firebaseapp\.com)$/.test(location.hostname);
+const onFirebaseSite = /(^|\.)pick-and-sort(--test-[a-z0-9]+)?\.(web\.app|firebaseapp\.com)$/.test(location.hostname); // and the test address
 const accountsOn = () => { try { return ACCOUNTS_ON || onFirebaseSite || localStorage.getItem("pick-and-sort-accounts-on") === "1"; } catch (e) { return ACCOUNTS_ON || onFirebaseSite; } };
 const testNoAuth = (() => { try { return localStorage.getItem("pick-and-sort-test-noauth") === "1"; } catch (e) { return false; } })(); // the automatic tests only
 const useEmulator = (() => { try { return localStorage.getItem("pick-and-sort-emulator") === "1"; } catch (e) { return false; } })();
@@ -3096,6 +3273,7 @@ function stopWatching() {
   if (unwatchAccount) { unwatchAccount(); unwatchAccount = null; }
   if (unwatchCompany) { unwatchCompany(); unwatchCompany = null; }
   if (unwatchStore) { unwatchStore(); unwatchStore = null; }
+  ["unsub", "unsubDev", "unsubJobs"].forEach(k => { if (station[k]) { station[k](); station[k] = null; } }); station.id = null; drawStationBar();
 }
 /* ---------- the company's store setup (aisles, shelves, boxes, walking order): saved by an admin, used by everyone in it ---------- */
 let unwatchStore = null;
@@ -3165,7 +3343,7 @@ function watchAccount() {
   }, e => { if (e && e.code === "permission-denied") checkAccount(false); });
   if (!acct.company) return;
   const id = acct.company;
-  watchStore();
+  watchStore(); watchStation();
   unwatchCompany = fb.db.collection("companies").doc(id).onSnapshot({ includeMetadataChanges: true }, s => {
     if (s.metadata.fromCache || !acct || acct.company !== id) return;
     touchChecked();
@@ -3271,7 +3449,12 @@ document.addEventListener("visibilitychange", () => {
   syncRefresh();
 });
 window.addEventListener("online", () => syncRefresh());
+let dotHold = null, dotHeld = false;
+$("syncDot").addEventListener("pointerdown", () => { dotHeld = false; clearTimeout(dotHold); dotHold = setTimeout(() => { dotHeld = true; openDevices(); }, 600); });
+["pointerup", "pointerleave", "pointercancel"].forEach(ev => $("syncDot").addEventListener(ev, () => clearTimeout(dotHold)));
+$("syncDot").addEventListener("contextmenu", e => e.preventDefault()); // a long press on a phone: no menu
 $("syncDot").addEventListener("click", async () => {
+  if (dotHeld) { dotHeld = false; return; } // that was a hold: the devices list opened
   if (!syncOn()) return;
   const d = $("syncDot"); d.classList.add("busy");
   startSync(); await syncRefresh();
@@ -5036,6 +5219,8 @@ function renderMorePage(v) {
         } }))),
       h("h3", null, "Account"),
       accountSection(),
+      h("h3", null, "This device"),
+      deviceSection(),
       h("h3", null, "Bins"),
       binsSettingsSection(),
       h("h3", null, "Look"),

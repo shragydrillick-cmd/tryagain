@@ -79,6 +79,13 @@ service cloud.firestore {
         allow read: if isOwner() || inCompany(c);
         allow write: if isOwner() || manages(c);
       }
+      // the company's devices (name, type, last seen) and the print station's jobs (labels, UPS orders to open)
+      match /devices/{d} {
+        allow read, write: if isOwner() || inCompany(c);
+      }
+      match /jobs/{j} {
+        allow read, write: if isOwner() || inCompany(c);
+      }
     }
   }
 }
