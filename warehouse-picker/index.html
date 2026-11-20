@@ -363,6 +363,7 @@ header.top #title { white-space: nowrap; }
 .packmsg { padding: 8px 10px; border-radius: 10px; margin: 6px 0; font-weight: 600; }
 .packmsg.ok, .packmsg.good { background: #d9f4e3; color: #14532d; } .packmsg.bad { background: #fde2e0; color: #8a1f17; } .packmsg.warn { background: #fdf0d5; color: #7a4b00; }
 .packtype { margin: 6px 0 10px; } .packtype input { flex: 1; min-width: 0; }
+input.bigscan { font-size: 20px; padding: 12px 14px; border: 2px solid var(--accent); border-radius: 12px; width: 100%; }
 .packlist { display: grid; gap: 8px; margin-bottom: 12px; }
 .packrow { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--card); }
 .packrow.part { border-color: #f0b45a; background: #fff6e5; color: #1b1f24; }
@@ -2634,8 +2635,24 @@ async function pdfBarcode(doc, text, x, y, w, hgt) {
   widths.forEach((wd, i) => { if (i % 2 === 0) doc.rect(cx, y, wd * m, hgt, "F"); cx += wd * m; });
 }
 /** The packing slip, like the store's: order number with its barcode, delivery, ship to, items with bins, total. */
-async function packingSlipPdf(o) {
-  const doc = newDoc(); if (!doc) return;
+/** A window for printing, opened straight away on the tap (pop-up blockers allow that), filled once the PDF is made.
+    In the phone apps there's no such window: the PDF goes to the phone, which opens it to print or share. */
+function openPrintWindow() {
+  if (inApp || inClaude) return null;
+  const w = window.open("", "_blank");
+  if (w) try { w.document.write("<title>Printing…</title><p style='font:16px system-ui,sans-serif;padding:20px'>Making it ready to print…</p>"); } catch (e) {}
+  return w;
+}
+/** Show the PDF in the print window with the print dialog open (or save it, if there's no window). sink: tests. */
+async function printPdf(doc, name, w, sink) {
+  if (sink) { if (w) w.close(); return sink(doc.output("blob")); }
+  if (!w || w.closed) return download(doc.output("blob"), name);
+  doc.autoPrint(); // the PDF asks to be printed as soon as it opens
+  w.location.href = URL.createObjectURL(doc.output("blob"));
+}
+async function packingSlipPdf(o, sink) {
+  const w = sink ? null : openPrintWindow();
+  const doc = newDoc(); if (!doc) { if (w) w.close(); return; }
   doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text(`Order #${o.number}`, 430, 50);
   doc.setFillColor(0); await pdfBarcode(doc, o.number, 420, 58, 150, 34);
   doc.setFontSize(16); doc.text(TEST_FEATURES ? "PRACTICE STORE" : "PICK & SORT", 40, 60);
@@ -2655,11 +2672,12 @@ async function packingSlipPdf(o) {
     doc.text(it.bin || "", 440, y); doc.text(String(it.qty), 524, y); doc.setDrawColor(220); doc.line(40, y + 20, 572, y + 20); y += 32;
   });
   doc.setFont("helvetica", "bold"); doc.text(`Total items: ${o.units}`, 470, y + 10);
-  await download(doc.output("blob"), `packing-slip-${o.number}.pdf`);
+  await printPdf(doc, `packing-slip-${o.number}.pdf`, w, sink);
 }
 /** The driver label (4x6 in): a big barcode of the order number, the order, who it's for and how it goes. */
-async function driverLabelPdf(o) {
+async function driverLabelPdf(o, sink) {
   if (!window.jspdf) { toast("Making PDFs needs an internet connection. Reload the page once you're online."); return; }
+  const w = sink ? null : openPrintWindow();
   const doc = new window.jspdf.jsPDF({ unit: "pt", format: [288, 432] });
   doc.setFillColor(0); await pdfBarcode(doc, o.number, 14, 18, 260, 90);
   doc.setFont("helvetica", "bold"); doc.setFontSize(30); doc.text(`#${o.number}`, 144, 140, { align: "center" });
@@ -2671,17 +2689,19 @@ async function driverLabelPdf(o) {
   doc.setFont("helvetica", "normal"); doc.setFontSize(12);
   if (o.delivery.date) doc.text(`Deliver: ${fmtDay(o.delivery.date)}`, 18, 294);
   doc.text(`${o.units} item${o.units === 1 ? "" : "s"}${o.packedAt ? ` · packed ${fmtWhen(o.packedAt)}` : ""}`, 18, 314);
-  await download(doc.output("blob"), `label-${o.number}.pdf`);
+  await printPdf(doc, `label-${o.number}.pdf`, w, sink);
 }
 
 /* the pack screen */
 let pk = null; // { o, paper, got: Map(index -> count), stop }
+/** A phone or tablet (a touch screen): the camera on top. A computer: no camera, a box ready for a plugged-in scanner. */
+const phoneLike = () => { try { return matchMedia("(pointer: coarse)").matches || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent); } catch (e) { return false; } };
 function startPack(o, paperDone) {
   if (!o) return;
   if (pk && pk.stop) pk.stop();
   const old = $("packScreen"); if (old) old.remove(); // a fresh screen (and camera) for each order
-  pk = { o, paper: !!paperDone, got: new Map(), msg: paperDone ? { kind: "ok", text: `Order #${o.number}: the sheet is confirmed. Scan each item.` } : null };
-  drawPack(); startPackCamera();
+  pk = { o, paper: !!paperDone, got: new Map(), cam: phoneLike(), msg: paperDone ? { kind: "ok", text: `Order #${o.number}: the sheet is confirmed. Scan each item.` } : null };
+  drawPack(); if (pk.cam) startPackCamera();
 }
 function closePack() { if (pk && pk.stop) pk.stop(); pk = null; const el = $("packScreen"); if (el) el.remove(); if (!$("packPanel") && !$("packFind")) document.body.style.overflow = ""; drawPacking(); }
 const packDone = () => pk && pk.paper && pk.o.items.every((it, i) => (pk.got.get(i) || 0) >= it.qty);
@@ -2741,7 +2761,7 @@ function drawPack() {
   let el = $("packScreen");
   if (!el) { // the camera on top and the order below are separate, so redrawing the order never touches the camera
     el = h("div", { id: "packScreen", class: "packscreen", role: "dialog", "aria-label": "Pack an order" },
-      h("div", { class: "packcam" }, h("video", { id: "packVideo", playsinline: true, muted: true, autoplay: true }), h("div", { class: "scanframe wide" }), h("p", { id: "packCamMsg", class: "scanmsg small" }, "Starting the camera…")),
+      pk.cam ? h("div", { class: "packcam" }, h("video", { id: "packVideo", playsinline: true, muted: true, autoplay: true }), h("div", { class: "scanframe wide" }), h("p", { id: "packCamMsg", class: "scanmsg small" }, "Starting the camera…")) : null,
       h("div", { class: "packwrap" }));
     document.body.append(el); document.body.style.overflow = "hidden";
   }
@@ -2754,7 +2774,9 @@ function drawPack() {
         it.bin ? h("div", { class: "small" }, `Bin ${it.bin}`) : null),
       full ? h("span", { class: "packtick" }, "OK") : null); });
   const local = o.delivery.type !== "shipping";
-  const typed = h("input", { type: "text", placeholder: "Or type a barcode / order number", "aria-label": "Type a code", onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) { const v = e.target.value.trim(); e.target.value = ""; packScan(v); } } });
+  const typed = h("input", { type: "text", placeholder: pk.cam ? "Or type a barcode / order number" : "Scan with the scanner, or type a barcode / order number", "aria-label": "Type a code", class: pk.cam ? "" : "bigscan",
+    autocomplete: "off", onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) { const v = e.target.value.trim(); e.target.value = ""; packScan(v); } } });
+  if (!pk.cam && !done) setTimeout(() => { const i = document.querySelector('#packScreen input[aria-label="Type a code"]'); if (i && document.activeElement !== i && !document.querySelector("#packScreen .packmenu")) i.focus(); }, 0);
   const body = h("div", { class: "packbody" },
     h("div", { class: "packhead" }, h("div", { style: "flex:1;min-width:0" }, h("h2", { style: "margin:0" }, `Order #${o.number}`),
         h("div", { class: "small muted" }, [o.customer, o.city, o.delivery.title, o.created ? "ordered " + fmtWhen(o.created) : ""].filter(Boolean).join(" · "))),
@@ -2765,6 +2787,7 @@ function drawPack() {
     pk.msg ? h("div", { class: "packmsg " + pk.msg.kind }, pk.msg.text,
       pk.msg.other ? h("button", { class: "btn small", type: "button", style: "margin-left:8px", onclick: () => startPack(pk.msg.other, true) }, `Open #${pk.msg.other.number}`) : null) : null,
     done ? null : h("div", { class: "row packtype" }, typed, h("button", { class: "btn small", type: "button", onclick: () => { if (typed.value.trim()) { const v = typed.value.trim(); typed.value = ""; packScan(v); } } }, "OK")),
+    done || pk.cam ? null : h("button", { class: "link small", type: "button", onclick: () => { pk.cam = true; const old = $("packScreen"); if (old) old.remove(); drawPack(); startPackCamera(); } }, "Use this computer's camera instead"),
     h("div", { class: "packlist" }, rows),
     h("button", { class: "link small", type: "button", onclick: () => packingSlipPdf({ ...o, packedAt: at }) }, "Print this order's packing slip"));
   const actions = done ? h("div", { class: "packactions" },
@@ -2832,6 +2855,21 @@ function drawFind() {
 }
 /** Scan an order: the order sheet's barcode opens it, already confirmed. */
 function scanAnOrder() {
+  if (!phoneLike()) {
+    const over = h("div", { id: "scanOrderBox", class: "detailpanel", role: "dialog", "aria-label": "Scan an order", style: "z-index:57" });
+    const close = () => over.remove();
+    const input = h("input", { type: "text", class: "bigscan", placeholder: "Scan the order sheet, or type the order number", "aria-label": "Order number", autocomplete: "off",
+      onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) { const v = e.target.value.trim(); const o = findPackOrder(v); if (o) { close(); startPack(o, true); } else { e.target.value = ""; msg.textContent = `${v}: no order with that number.`; } } } });
+    const msg = h("p", { class: "small", style: "color:var(--danger);min-height:1.2em" });
+    over.append(h("div", { class: "detailbox" }, h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, "Scan an order"), h("button", { class: "btn small", type: "button", onclick: close }, "Back")),
+      h("p", { class: "muted" }, "Scan the barcode at the top right of the order sheet with the scanner, or type the order number and press Enter."), input, msg,
+      h("button", { class: "link small", type: "button", onclick: () => { close(); scanAnOrderCamera(); } }, "Use this computer's camera instead")));
+    document.body.append(over); setTimeout(() => input.focus(), 30);
+    return;
+  }
+  scanAnOrderCamera();
+}
+function scanAnOrderCamera() {
   binScan(code => { const o = findPackOrder(code); if (o) startPack(o, true); else toast(`${code}: no order with that number.`); },
     { title: "Scan the order sheet", ok: code => !!findPackOrder(code) });
 }

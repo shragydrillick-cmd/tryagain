@@ -28,7 +28,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   const slip = await p.evaluate(async () => {
     const o = practiceStore().orders[11]; const doc = newDoc();
     // the same slip as "Print this order's packing slip", rendered like the printed page, then the top right read
-    const orig = window.download; let blob = null; window.download = async bl => { blob = bl; }; await packingSlipPdf({ ...o, units: 1 }); window.download = orig;
+    let blob = null; await packingSlipPdf({ ...o, units: 1 }, bl => { blob = bl; });
     await loadPdfJs(); const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise, page = await pdf.getPage(1);
     const vp = page.getViewport({ scale: 2 }), cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
     await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
@@ -44,7 +44,8 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('Packing: ready orders with Pack, and Scan an order / Find an order at the bottom', /Ready to pack: 5.*Pack.*Scan an order.*Find an order/.test(await txt('#packPanel')));
   const first = await p.evaluate(() => plan.orders.find(o => orderReady(o.label)).raw);
   await p.click('#packPanel .packcard >> nth=0 >> button:text-is("Pack")');
-  ok('Pack opens the order under the camera', !!(await p.$('#packScreen .packcam video')) && /Order #/.test(await txt('#packScreen')));
+  ok('on a computer: no camera, the order full screen, the box ready for a scanner', !(await p.$('#packScreen .packcam')) && /Order #/.test(await txt('#packScreen'))
+    && await p.evaluate(() => document.activeElement && document.activeElement.getAttribute('aria-label') === 'Type a code'));
   const o = await p.evaluate(() => ({ number: pk.o.number, items: pk.o.items.map(i => [i.barcode, i.qty]) }));
   await type(o.items[0][0]);
   ok('an item before the sheet: asks for the sheet first', /Scan the order sheet first/.test(await txt('#packScreen .packmsg')));
@@ -59,8 +60,11 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('every item green: camera gone, Pack & Print at the bottom', !(await p.$('#packScreen .packcam')) && /Pack & Print/.test(await txt('#packScreen .packactions')));
   await p.click('#packScreen .splitmore');
   ok('the little arrow: Pack only / Print label only', /Pack only.*Print label only/.test(await txt('#packScreen .packactions')));
-  const [label] = await Promise.all([p.waitForEvent('download'), p.click('#packScreen .splitbtn .btn >> nth=0')]);
-  ok('Pack & Print: packed with its time and tag, and the driver label made', /Packed\. Tag added: "Packed /.test(await txt('#packScreen')) && /label-/.test(label.suggestedFilename()) && await p.evaluate(n => packed.has(n), first), label.suggestedFilename());
+  // (the test browser has no PDF viewer, so the print window is a stand-in that records what it was sent)
+  await p.evaluate(() => { window.__printed = []; window.open = () => ({ closed: false, close() {}, document: { write() {} }, location: { set href(v) { window.__printed.push(v); } } }); });
+  await p.click('#packScreen .splitbtn .btn >> nth=0'); await p.waitForTimeout(1500);
+  const sent = await p.evaluate(() => window.__printed);
+  ok('Pack & Print: packed with its time and tag, and the label goes to a new window to print (not a download)', /Packed\. Tag added: "Packed /.test(await txt('#packScreen')) && sent.length === 1 && /^blob:/.test(sent[0]) && await p.evaluate(n => packed.has(n), first), (sent[0] || '').slice(0, 20));
   await p.click('#packScreen button:has-text("Back to Packing")');
   ok('back on Packing: that order is packed', new RegExp(`Order #${first}.*Packed`).test(await txt('#packPanel')));
 
@@ -86,9 +90,15 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await p.click('#packScreen button:text-is("Back")');
 
   // 4. Scan an order (any order, even one that wasn't picked with the app)
-  await p.click('#packPanel button:has-text("Scan an order")');
-  await p.fill('.scanner input[aria-label="Barcode or SKU"]', '70005'); await p.click('.scanner button:text-is("OK")');
-  ok('Scan an order: opens it with the sheet already confirmed', await p.evaluate(() => pk && pk.o.number === '70005' && pk.paper));
+  await p.click('#packPanel button:has-text("Scan an order")'); await p.waitForTimeout(200);
+  ok('Scan an order on a computer: a box ready for the scanner (no camera)', !(await p.$('.scanner')) && await p.evaluate(() => document.activeElement && document.activeElement.getAttribute('aria-label') === 'Order number'));
+  await p.keyboard.type('70005'); await p.keyboard.press('Enter');
+  ok('…scanning the sheet opens the order, already confirmed', await p.evaluate(() => pk && pk.o.number === '70005' && pk.paper));
+  // a phone: the camera on top
+  const ph = await (await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })).newPage();
+  await ph.addInitScript(() => { try { localStorage.setItem('pick-and-sort-test-features', '1'); } catch (e) {} });
+  await ph.goto(BASE); await ph.click('#exampleBtn'); await ph.evaluate(() => startPack(findPackOrder('70001'), false));
+  ok('on a phone: the camera on top, the order below', !!(await ph.$('#packScreen .packcam video')) && !!(await ph.$('#packScreen .packwrap')));
   ok('no page errors', !errs.length, errs.join(' / '));
   console.log(bad ? `${bad} FAILED` : 'all ok'); await b.close(); process.exit(bad ? 1 : 0);
 })();

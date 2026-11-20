@@ -238,7 +238,9 @@ On the test address (the Firebase preview copy, `pick-and-sort--test-….web.app
 The live sites (the old link, pick-and-sort.web.app and the phone apps) don't show it yet.
 
 - **Pack** on a ready order (or **Scan an order** / **Find an order** at the bottom, for any order, even one not
-  picked with the app) opens it: the camera on top, the order below.
+  picked with the app) opens it. On a phone: the camera on top, the order below. On a computer: no camera, the order
+  full screen with a big box that's always ready for a plugged-in scanner (or typing); "Use this computer's camera
+  instead" if wanted.
 - Scan the **order sheet's barcode** first (top right; or "Can't scan it? Confirm by hand"), then **each item**: each
   turns green (2 of 2…). Another order's sheet, an item not in the order, or one too many are refused. A box under
   the camera takes typed codes or a plugged-in scanner.
@@ -246,7 +248,8 @@ The live sites (the old link, pick-and-sort.web.app and the phone apps) don't sh
   (UPS / shipped), with a little arrow for **Pack only** / **Print label only**. Pack records the packed time and the
   tag ("Packed 11/19/2026, 2:31 PM"; with Shopify connected it goes on the order there, and a UPS order opens in
   Shopify to buy its label). Print makes the 4x6 driver label: a big barcode of the order number, the order, who it's
-  for, the delivery method and date.
+  for, the delivery method and date. Printing opens a new window with the print dialog (in the phone apps the PDF
+  goes to the phone to print or share).
 - **Find an order**: type to filter (order number, name, area, or any item: name, SKU, barcode, bin), sort (newest,
   order number, delivery date, area, customer), show all / not packed / packed, any delivery / own driver / UPS.
 - **Print this order's packing slip**: like the store's, with the order barcode at the top right.
