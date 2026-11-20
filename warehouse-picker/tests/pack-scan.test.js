@@ -99,6 +99,12 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await ph.addInitScript(() => { try { localStorage.setItem('pick-and-sort-test-features', '1'); } catch (e) {} });
   await ph.goto(BASE); await ph.click('#exampleBtn'); await ph.evaluate(() => startPack(findPackOrder('70001'), false));
   ok('on a phone: the camera on top, the order below', !!(await ph.$('#packScreen .packcam video')) && !!(await ph.$('#packScreen .packwrap')));
+  // the choice by hand is remembered on the device
+  await ph.click('#packScreen button:has-text("Use a scanner or typing instead")');
+  ok('a phone switched to a scanner: no camera, and remembered', !(await ph.$('#packScreen .packcam')) && await ph.evaluate(() => localStorage.getItem('pick-and-sort-scan-mode') === 'scanner' && !phoneLike()));
+  // a touch-screen laptop (touch AND a trackpad) counts as a computer
+  const lap = await p.evaluate(() => { const real = window.matchMedia; window.matchMedia = q => ({ matches: /any-pointer: (fine|coarse)/.test(q) }); try { localStorage.removeItem('pick-and-sort-scan-mode'); return phoneLike(); } finally { window.matchMedia = real; } });
+  ok('a touch-screen laptop counts as a computer', lap === false);
   ok('no page errors', !errs.length, errs.join(' / '));
   console.log(bad ? `${bad} FAILED` : 'all ok'); await b.close(); process.exit(bad ? 1 : 0);
 })();

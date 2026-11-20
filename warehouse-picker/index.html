@@ -2695,7 +2695,18 @@ async function driverLabelPdf(o, sink) {
 /* the pack screen */
 let pk = null; // { o, paper, got: Map(index -> count), stop }
 /** A phone or tablet (a touch screen): the camera on top. A computer: no camera, a box ready for a plugged-in scanner. */
-const phoneLike = () => { try { return matchMedia("(pointer: coarse)").matches || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent); } catch (e) { return false; } };
+// A phone or tablet = only a finger to point with (no mouse or trackpad), or a phone's browser. A touch-screen laptop
+// still has a trackpad, so it counts as a computer. The choice made on the pack screen is remembered on the device.
+const SCAN_MODE_KEY = "pick-and-sort-scan-mode"; // "camera" | "scanner" (chosen by hand) or nothing (automatic)
+const phoneLike = () => {
+  try { const m = localStorage.getItem(SCAN_MODE_KEY); if (m === "camera") return true; if (m === "scanner") return false; } catch (e) {}
+  try {
+    if (/Android.+Mobile|iPhone|iPod|Windows Phone/i.test(navigator.userAgent)) return true; // a phone
+    const fine = matchMedia("(any-pointer: fine)").matches, coarse = matchMedia("(any-pointer: coarse)").matches;
+    return coarse && !fine; // a tablet with no mouse or trackpad; anything with one is a computer
+  } catch (e) { return false; }
+};
+const setScanMode = m => { try { localStorage.setItem(SCAN_MODE_KEY, m); } catch (e) {} };
 function startPack(o, paperDone) {
   if (!o) return;
   if (pk && pk.stop) pk.stop();
@@ -2787,7 +2798,10 @@ function drawPack() {
     pk.msg ? h("div", { class: "packmsg " + pk.msg.kind }, pk.msg.text,
       pk.msg.other ? h("button", { class: "btn small", type: "button", style: "margin-left:8px", onclick: () => startPack(pk.msg.other, true) }, `Open #${pk.msg.other.number}`) : null) : null,
     done ? null : h("div", { class: "row packtype" }, typed, h("button", { class: "btn small", type: "button", onclick: () => { if (typed.value.trim()) { const v = typed.value.trim(); typed.value = ""; packScan(v); } } }, "OK")),
-    done || pk.cam ? null : h("button", { class: "link small", type: "button", onclick: () => { pk.cam = true; const old = $("packScreen"); if (old) old.remove(); drawPack(); startPackCamera(); } }, "Use this computer's camera instead"),
+    done ? null : h("button", { class: "link small", type: "button", onclick: () => {
+      if (pk.stop) pk.stop(); pk.cam = !pk.cam; setScanMode(pk.cam ? "camera" : "scanner"); // remembered on this device
+      const old = $("packScreen"); if (old) old.remove(); drawPack(); if (pk.cam) startPackCamera(); } },
+      pk.cam ? "Use a scanner or typing instead (no camera)" : "Use this device's camera instead"),
     h("div", { class: "packlist" }, rows),
     h("button", { class: "link small", type: "button", onclick: () => packingSlipPdf({ ...o, packedAt: at }) }, "Print this order's packing slip"));
   const actions = done ? h("div", { class: "packactions" },
@@ -2863,7 +2877,7 @@ function scanAnOrder() {
     const msg = h("p", { class: "small", style: "color:var(--danger);min-height:1.2em" });
     over.append(h("div", { class: "detailbox" }, h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, "Scan an order"), h("button", { class: "btn small", type: "button", onclick: close }, "Back")),
       h("p", { class: "muted" }, "Scan the barcode at the top right of the order sheet with the scanner, or type the order number and press Enter."), input, msg,
-      h("button", { class: "link small", type: "button", onclick: () => { close(); scanAnOrderCamera(); } }, "Use this computer's camera instead")));
+      h("button", { class: "link small", type: "button", onclick: () => { close(); setScanMode("camera"); scanAnOrderCamera(); } }, "Use this device's camera instead")));
     document.body.append(over); setTimeout(() => input.focus(), 30);
     return;
   }
