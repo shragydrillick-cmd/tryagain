@@ -2799,6 +2799,8 @@ function drawPack() {
         h("div", { class: "small muted" }, [o.customer, o.city, o.delivery.title, o.created ? "ordered " + fmtWhen(o.created) : ""].filter(Boolean).join(" · "))),
       h("button", { class: "btn small secondary", type: "button", onclick: closePack }, "Back")),
     at ? h("div", { class: "notice good" }, `Packed ${fmtWhen(at)}.`) : null,
+    devicesOn() ? h("div", { class: "small muted", style: "margin:2px 0 6px" }, "Labels go to: ", h("b", null, station.id ? `${(station.doc && station.doc.name) || "print station"}${stationOnline() ? " (online)" : " (offline)"}` : "this device"), " · ",
+      h("button", { class: "link small", type: "button", onclick: () => openDevices() }, "Change")) : null,
     h("div", { class: "packstep" + (pk.paper ? " ok" : "") }, pk.paper ? "Order sheet: confirmed" : "1. Scan the order sheet (barcode at the top right)",
       pk.paper ? null : h("button", { class: "link small", type: "button", style: "margin-left:8px", onclick: () => { pk.paper = true; pk.msg = { kind: "ok", text: "Sheet confirmed by hand. Scan each item." }; drawPack(); } }, "Can't scan it? Confirm by hand")),
     pk.msg ? h("div", { class: "packmsg " + pk.msg.kind }, pk.msg.text,
@@ -2838,13 +2840,13 @@ async function packAction(what) {
   const full = { ...o, packedAt: o.packedAt || packedTime(o) };
   let sentTo = null;
   // a UPS / shipped order: its label is bought in Shopify on the print station (it waits there if the station is offline)
-  if (what !== "print" && o.delivery.type === "shipping" && station.id && !amStation()) {
+  if (what !== "print" && o.delivery.type === "shipping" && station.id) {
     if (await sendToStation("shopify", full)) sentTo = stationOnline() ? `${station.doc.name} is opening it in Shopify for the label.` : `${(station.doc && station.doc.name) || "The print station"} is offline: it opens there in Shopify as soon as it's back.`;
   }
   if (what !== "pack" && !(o.delivery.type === "shipping" && what === "pack")) {
     if (stationOnline() && await sendToStation("label", full)) sentTo = `Label sent to ${station.doc.name}.`;
     else {
-      if (station.id && !amStation()) sentTo = `${(station.doc && station.doc.name) || "The print station"} is offline: printing here.`;
+      if (station.id) sentTo = `${(station.doc && station.doc.name) || "The print station"} is offline: printing here.`;
       await driverLabelPdf(full);
     }
   }
@@ -2930,37 +2932,36 @@ const deviceType = () => device.type || (phoneLike() ? "phone" : "computer");
 function keepDevice() { try { localStorage.setItem(DEVICE_KEY, JSON.stringify(device)); } catch (e) {} }
 keepDevice();
 const devCol = () => fb.db.collection("companies").doc(acct.company).collection("devices");
-const printDoc = () => fb.db.collection("companies").doc(acct.company).collection("settings").doc("print");
 const jobCol = () => fb.db.collection("companies").doc(acct.company).collection("jobs");
 const devicesOn = () => !!(typeof acct !== "undefined" && acct && acct.status === "allowed" && acct.company && fb.db);
 const isOnline = d => d && Date.now() - (d.lastSeen || 0) < ONLINE_MS;
-const station = { id: null, doc: null, unsub: null, unsubDev: null, unsubJobs: null, jobs: [] }; // the company's print station
+// station.id: where THIS device's labels go (chosen on this device); device.isStation: this computer is a print station
+const station = { id: null, doc: null, unsub: null, unsubDev: null, unsubJobs: null, jobs: [] };
 /** Check in: this device is here (every minute while open, and on coming back to the front). */
 function heartbeat() {
   if (!devicesOn()) return;
-  devCol().doc(device.id).set({ name: device.name, type: deviceType(), email: acct.email, lastSeen: Date.now(), version: typeof APP_VERSION !== "undefined" ? APP_VERSION : "" }, { merge: true }).catch(() => {});
+  devCol().doc(device.id).set({ name: device.name, type: deviceType(), email: acct.email, lastSeen: Date.now(), station: !!device.isStation, version: typeof APP_VERSION !== "undefined" ? APP_VERSION : "" }, { merge: true }).catch(() => {});
 }
 setInterval(() => { if (!document.hidden) heartbeat(); }, 60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) heartbeat(); });
-/** Follow which device is the print station (and whether it's online); and be one, if it's this device. */
+/** Follow the print station this device sends its labels to (online or not); and be one, if this computer is. */
 function watchStation() {
   ["unsub", "unsubDev", "unsubJobs"].forEach(k => { if (station[k]) { station[k](); station[k] = null; } });
   station.id = null; station.doc = null;
   if (!devicesOn()) return;
   heartbeat();
-  station.unsub = printDoc().onSnapshot(s => {
-    const id = s.exists ? s.data().station || null : null;
-    if (id === station.id) return;
-    station.id = id; station.doc = null;
-    if (station.unsubDev) { station.unsubDev(); station.unsubDev = null; }
-    if (station.unsubJobs) { station.unsubJobs(); station.unsubJobs = null; }
-    if (id) station.unsubDev = devCol().doc(id).onSnapshot(d => { station.doc = d.exists ? { id, ...d.data() } : null; drawStationBar(); }, () => {});
-    if (id && id === device.id) runStation();
-    drawStationBar(); if (view === "settings") renderSettings();
-  }, () => {});
+  if (device.isStation) runStation();
+  const id = device.printTo && device.printTo !== device.id ? device.printTo : null;
+  station.id = id;
+  if (id) station.unsubDev = devCol().doc(id).onSnapshot(d => { station.doc = d.exists ? { id, ...d.data() } : null; drawStationBar(); if (pk) drawPack(); }, () => {});
+  drawStationBar();
 }
-const stationOnline = () => station.id && station.id !== device.id && isOnline(station.doc);
-const amStation = () => station.id && station.id === device.id;
+/** Choose where this device's labels print (null: on this device). Remembered on the device. */
+function chooseStation(id) { device.printTo = id || null; keepDevice(); watchStation(); if (view === "settings") renderSettings(); if (devicesView) drawDevices(); toast(id ? "Your labels print there now." : "Your labels print on this device now."); }
+/** Turn this computer into a print station (or not). */
+function setIsStation(on) { device.isStation = !!on; keepDevice(); heartbeat(); watchStation(); if (view === "settings") renderSettings(); toast(on ? "This computer is a print station: pickers can send their labels here." : "This computer isn't a print station any more."); }
+const stationOnline = () => !!(station.id && isOnline(station.doc) && station.doc.station);
+const amStation = () => !!device.isStation;
 
 /* the print station: picks up the jobs packers send, prints labels, opens UPS orders in Shopify */
 function runStation() {
@@ -3008,7 +3009,7 @@ function drawStationBar() {
 }
 /** From a packer's device: send the label (or the UPS order) to the print station. true if sent, false if it isn't there. */
 async function sendToStation(kind, o) {
-  if (!devicesOn() || !station.id || amStation()) return false;
+  if (!devicesOn() || !station.id) return false;
   const slim = { number: o.number, customer: o.customer || "", address: o.address || "", city: o.city || "", zip: o.zip || "", delivery: o.delivery || {}, units: o.units || 0, packedAt: o.packedAt || null, shopifyUrl: o.shopifyUrl || "" };
   await jobCol().add({ station: station.id, kind, order: slim, status: "waiting", at: Date.now(), by: acct.email, byName: device.name });
   return true;
@@ -3028,7 +3029,6 @@ function drawDevices() {
   if (!devicesView) return;
   let el = $("devicesPanel");
   if (!el) { el = h("div", { id: "devicesPanel", class: "detailpanel", role: "dialog", "aria-label": "Devices", style: "z-index:58" }); document.body.append(el); document.body.style.overflow = "hidden"; }
-  const admin = acct.role === "owner" || acct.role === "admin";
   const list = devicesView.list.slice().sort((a, b) => (isOnline(b) - isOnline(a)) || (b.lastSeen || 0) - (a.lastSeen || 0));
   const on = list.filter(isOnline).length;
   const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
@@ -3038,33 +3038,34 @@ function drawDevices() {
     h("div", { class: "dlist" }, list.map(d => h("div", { class: "drow static devrow " + (isOnline(d) ? "st-green" : "st-grey") },
       h("span", { class: "devdot" + (isOnline(d) ? " on" : "") }),
       h("div", { style: "flex:1;min-width:0" },
-        h("b", null, d.name || "Device"), d.id === device.id ? h("span", { class: "stbadge" }, "This device") : null, d.id === station.id ? h("span", { class: "stbadge st-blue" }, "Print station") : null,
+        h("b", null, d.name || "Device"), d.id === device.id ? h("span", { class: "stbadge" }, "This device") : null, d.station ? h("span", { class: "stbadge st-blue" }, "Print station") : null,
+        d.id === station.id ? h("span", { class: "stbadge st-green" }, "Your labels print here") : null,
         h("div", { class: "small" }, [d.type === "phone" ? "Phone" : "Computer", d.email, isOnline(d) ? "online" : d.lastSeen ? "last seen " + ago(d.lastSeen) : ""].filter(Boolean).join(" · "))),
-      admin && d.type !== "phone" && d.id !== station.id ? h("button", { class: "btn small secondary", type: "button", onclick: () => setStation(d.id, d.name) }, "Make print station") : null)))));
+      d.station && d.id !== device.id && d.id !== station.id ? h("button", { class: "btn small secondary", type: "button", onclick: () => chooseStation(d.id) }, "Print here")
+        : d.id === device.id && station.id ? h("button", { class: "btn small secondary", type: "button", onclick: () => chooseStation(null) }, "Print on this device") : null)))));
 }
-async function setStation(id, name) {
-  try { await printDoc().set({ station: id || null, at: Date.now(), by: acct.email }); toast(id ? `${name} is now the print station.` : "No print station now: labels print on each device."); }
-  catch (e) { toast(e.code === "permission-denied" ? "Only the company's admin can choose the print station." : "Couldn't save: " + e.message); }
-}
-/** Settings -> More: this device's name and type, and the company's print station. */
+/** Settings -> More: this device's name and type; whether it's a print station; where its labels print. */
+let stationChoices = null; // the company's print stations, for the "Labels print on" list
 function deviceSection() {
   const name = h("input", { type: "text", value: device.name, "aria-label": "This device's name", style: "flex:1;min-width:0",
     onchange: e => { device.name = e.target.value.trim() || guessDeviceName(); keepDevice(); heartbeat(); toast("Saved."); } });
-  const type = h("select", { "aria-label": "This device's type", onchange: e => { device.type = e.target.value || null; keepDevice(); heartbeat(); } },
+  const type = h("select", { "aria-label": "This device's type", onchange: e => { device.type = e.target.value || null; keepDevice(); heartbeat(); renderSettings(); } },
     [["", `Automatic (${phoneLike() ? "phone" : "computer"})`], ["phone", "Phone (camera for scanning)"], ["computer", "Computer (scanner or typing)"]].map(([v, t]) => h("option", { value: v, selected: (device.type || "") === v }, t)));
-  const admin = devicesOn() && (acct.role === "owner" || acct.role === "admin");
-  const st = station.id ? (station.id === device.id ? "this device" : (station.doc && station.doc.name) || "another device") : "none";
+  if (devicesOn() && !stationChoices) devCol().where("station", "==", true).get().then(q => { stationChoices = q.docs.map(d => ({ id: d.id, ...d.data() })); if (view === "settings" && setPage === "more") renderSettings(); }).catch(() => { stationChoices = []; });
+  const choices = (stationChoices || []).filter(d => d.id !== device.id);
+  const where = h("select", { "aria-label": "Labels print on", onchange: e => chooseStation(e.target.value || null) },
+    h("option", { value: "", selected: !station.id }, "This device"),
+    choices.map(d => h("option", { value: d.id, selected: d.id === station.id }, `${d.name}${isOnline(d) ? " (online)" : " (offline)"}`)),
+    station.id && !choices.some(d => d.id === station.id) ? h("option", { value: station.id, selected: true }, (station.doc && station.doc.name) || "A print station") : null);
   return h("div", null,
     h("div", { class: "row" }, name), h("div", { class: "row", style: "margin-top:6px" }, type),
-    devicesOn() ? h("p", { class: "small", style: "margin:10px 0 6px" }, h("b", null, "Print station: "), st,
-      station.id && station.id !== device.id ? (isOnline(station.doc) ? " (online)" : " (offline)") : "") : null,
-    devicesOn() ? h("div", { class: "row" },
-      h("button", { class: "btn small secondary", type: "button", onclick: openDevices }, "All devices"),
-      admin && deviceType() !== "phone" && !amStation() ? h("button", { class: "btn small secondary", type: "button", onclick: () => setStation(device.id, device.name) }, "Make this the print station") : null,
-      admin && station.id ? h("button", { class: "link small", type: "button", onclick: e => tapTwice(e.currentTarget, "No print station?", () => setStation(null)) }, "No print station") : null) : null,
-    h("p", { class: "small muted" }, "Names show in the device list (hold the green circle at the top). Labels from phones print on the print station; if it's offline they print on the phone, and UPS orders wait for it."));
+    devicesOn() ? h("div", null,
+      deviceType() !== "phone" ? h("label", { class: "checkrow", style: "margin-top:8px" }, h("input", { type: "checkbox", checked: !!device.isStation, onchange: e => setIsStation(e.target.checked) }),
+        h("span", null, " Use this computer as a print station (pickers can send their labels here)")) : null,
+      h("div", { class: "row", style: "margin-top:8px;align-items:center" }, h("b", null, "My labels print on: "), where),
+      h("div", { class: "row", style: "margin-top:8px" }, h("button", { class: "btn small secondary", type: "button", onclick: () => { stationChoices = null; openDevices(); } }, "All devices"))) : null,
+    h("p", { class: "small muted" }, "Hold the green circle at the top to see every device; tap Print here next to a print station to send your labels there. If it's offline, labels print on this device and UPS orders wait for it."));
 }
-
 /* ---------- Accounts: sign in (Google or email), allowed / blocked, companies, admin ----------
    Everything is in the owner's own Firebase project. The database rules (firebase/firestore.rules)
    decide who may see what; the screens here only follow them. */

@@ -1,6 +1,6 @@
-// Devices and the print station (needs the Firebase emulator, see README): devices are named; holding the green circle
-// lists them, online first; the admin makes a computer the print station; a phone packing a local order sends its
-// label there and goes back to the list; a UPS order opens there for Shopify; with the station offline the phone
+// Devices and print stations (needs the Firebase emulator, see README): devices are named; a computer is made a print
+// station on itself; holding the green circle lists every device, online first, and the picker taps "Print here" to
+// send their labels to that station; a phone packing a local order sends its label there and goes back to the list; a UPS order opens there for Shopify; with the station offline the phone
 // prints its own label and the UPS order waits, then reaches the station when it's back.
 const { chromium } = require('playwright');
 const BASE = process.argv[2] || 'http://localhost:8765/index.html', EMU = 'http://127.0.0.1:9099', P = 'pick-and-sort';
@@ -23,14 +23,13 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await a.click('button:has-text("Turn on")'); await a.waitForTimeout(500);
   await a.fill('input[aria-label="Email to add"]', 'w@test.com'); await a.click('button:text-is("Add")'); await a.waitForTimeout(600);
   await a.evaluate(() => go('more')); await a.fill('input[aria-label="This device\'s name"]', 'Packing desk'); await a.press('input[aria-label="This device\'s name"]', 'Tab');
-  await a.click('button:has-text("Make this the print station")'); await a.waitForTimeout(1200);
+  await a.click('label:has-text("Use this computer as a print station") input'); await a.waitForTimeout(1200);
   ok('the computer is the print station', await a.evaluate(() => amStation()) && !!(await a.$('#stationBar')), await a.$eval('#stationBar', x => x.innerText.replace(/\n+/g, ' | ')).catch(() => ''));
   await a.evaluate(() => { window.__labels = []; window.__stationPrint = o => { window.__labels.push(o.number); }; });
   await home(a);
   // the phone: worker, named
   let ph = await open(cb, 'phone'); await signIn(ph, 'w1', 'w@test.com');
   await ph.click('#navBtn'); await ph.evaluate(() => go('more')); await ph.fill('input[aria-label="This device\'s name"]', 'Packer phone'); await ph.press('input[aria-label="This device\'s name"]', 'Tab'); await ph.waitForTimeout(800);
-  ok('the phone knows the print station and that it\'s online', /Print station: Packing desk \(online\)/.test(await ph.$eval('#settingsView', x => x.innerText)));
   await home(ph);
   // hold the green circle
   const box = await ph.$('#syncDot'); const bb = await box.boundingBox();
@@ -38,7 +37,12 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await ph.waitForTimeout(800);
   const list = await ph.$$eval('#devicesPanel .devrow', r => r.map(x => x.innerText.replace(/\n+/g, ' | ')));
   ok('holding the green circle: every device, online first, green', list.length === 2 && list.every(x => /online/.test(x)) && list.some(x => /Packing desk.*Print station/.test(x)) && list.some(x => /Packer phone.*This device/.test(x)), list.join(' // '));
+  await ph.click('#devicesPanel .devrow:has-text("Packing desk") button:has-text("Print here")'); await ph.waitForTimeout(1200);
+  ok('the picker chose Packing desk: "Your labels print here"', /Packing desk.*Your labels print here/.test(await ph.$eval('#devicesPanel', x => x.innerText.replace(/\n+/g, ' '))));
   await ph.click('#devicesPanel button:has-text("Back")');
+  await ph.click('#navBtn'); await ph.evaluate(() => go('more')); await ph.waitForTimeout(800);
+  ok('This device: "My labels print on: Packing desk (online)"', await ph.$eval('select[aria-label="Labels print on"]', x => x.options[x.selectedIndex].text) === 'Packing desk (online)');
+  await home(ph);
   // pack a local order: the label prints on the desk, the phone goes back to the list
   const pack = async (pageP, number, what) => pageP.evaluate(async ([n, w]) => { startPack(findPackOrder(n), true); pk.o.items.forEach((it, i) => pk.got.set(i, it.qty)); drawPack(); await packAction(w); }, [number, what]);
   const local = await ph.evaluate(() => practiceStore().orders.find(o => o.delivery.type === 'local').number);
@@ -62,7 +66,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   const ups2 = await ph.evaluate(() => practiceStore().orders.filter(o => o.delivery.type === 'shipping')[1].number);
   await pack(ph, ups2, 'pack');
   // the desk comes back: the waiting UPS order reaches it
-  a = await open(ca, 'desk again'); await a.waitForFunction(() => acct && amStation(), null, { timeout: 15000 }).catch(() => {});
+  a = await open(ca, 'desk again'); await a.waitForFunction(() => acct && amStation() && station.unsubJobs, null, { timeout: 15000 }).catch(() => {});
   await a.waitForTimeout(3000);
   ok('desk back: the UPS order that waited is there', new RegExp(`#${ups2}.*buy its label in Shopify`).test(await a.$eval('#stationBar', x => x.innerText.replace(/\n+/g, ' ')).catch(() => '')));
   ok('no page errors', !errs.length, errs.join(' / '));
