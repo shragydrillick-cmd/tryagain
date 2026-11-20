@@ -2640,7 +2640,7 @@ async function pdfBarcode(doc, text, x, y, w, hgt) {
 function openPrintWindow() {
   if (inApp || inClaude) return null;
   const w = window.open("", "_blank");
-  if (w) try { w.document.write("<title>Printing…</title><p style='font:16px system-ui,sans-serif;padding:20px'>Making it ready to print…</p>"); } catch (e) {}
+  if (w) try { w.document.title = "Printing…"; w.document.body.innerHTML = "<p style='font:16px system-ui,sans-serif;padding:20px'>Making it ready to print…</p>"; } catch (e) {}
   return w;
 }
 /** Show the PDF in the print window with the print dialog open (or save it, if there's no window). sink: tests. */

@@ -19,7 +19,7 @@ sed -e 's#https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js#ve
     ../index.html | awk '
   /<\/body>/ { while ((getline line < "pwa.js") > 0) body = body line "\n"; print "<script>\n" body "</script>" }
   { print }
-  /<\/title>/ {
+  !titled && /<\/title>/ { titled = 1
     print "<link rel=\"manifest\" href=\"manifest.webmanifest\">"
     print "<link rel=\"icon\" href=\"icon-192.png\">"
     print "<link rel=\"apple-touch-icon\" href=\"apple-touch-icon.png\">"
@@ -29,4 +29,8 @@ sed -e 's#https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js#ve
     print "<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\">"
   }' > dist/index.html
 if grep -q "cdnjs\|jsdelivr" dist/index.html; then echo "index.html still points at the internet" >&2; exit 1; fi
+# the page's code must still be whole after the steps above (if not, stop: nothing broken gets published)
+if command -v node >/dev/null; then
+  node -e 'const s=require("fs").readFileSync("dist/index.html","utf8"),re=/<script>([\s\S]*?)<\/script>/g;let m,n=0;while((m=re.exec(s))){try{new Function(m[1]);n++}catch(e){console.error("The built page has broken code: "+e.message);process.exit(1)}}if(n<2){console.error("The built page is missing its code");process.exit(1)}'
+fi
 echo "Website built in $(pwd)/dist (version $VERSION)"
