@@ -3148,9 +3148,11 @@ function shopifyArrival() {
   const q = new URLSearchParams(location.search), what = q.get("shopify"); if (!what) return;
   try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
   if (what === "connected") setTimeout(() => toast("Shopify store connected."), 800);
+  if (what === "open") setTimeout(() => { if (acct) openAddOrders(); }, 1200); // opened from the store's Apps: straight to its orders
   if (what === "connect") { shop.want = q.get("shop") || ""; setTimeout(() => { try { if (view !== "settings") $("navBtn").click(); go("more"); } catch (e) {} toast("As the company's admin, tap Connect under Shopify store."); }, 800); }
 }
 if (TEST_FEATURES) shopifyArrival();
+else if (/[?&]shopify=/.test(location.search) && /^pick-and-sort\.(web\.app|firebaseapp\.com)$/.test(location.hostname)) location.replace("https://pick-and-sort--test-6xyzdn76.web.app/" + location.search);
 
 /* "From Shopify" under Orders: the store's open orders, filtered and sorted; tick the ones to pick and add them to the list.
    They go through the same check as slips: an item without a bin (or SKU, barcode) shows in "Please look". */

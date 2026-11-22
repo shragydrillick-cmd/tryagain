@@ -44,6 +44,8 @@ const server = app.listen(8766);
   const o2 = toPackOrder(ORDERS[1], "practice-store.myshopify.com");
   ok("a Shopify order becomes a pack order (UPS = shipping, fulfilled lines left out, no 'Default Title')", o2.number === "1002" && o2.delivery.type === "shipping" && o2.items.length === 1 && o2.items[0].details === "" && o2.items[0].barcode === "5012345000039" && /admin\.shopify\.com\/store\/practice-store\/orders\/5502/.test(o2.shopifyUrl));
 
+  const launch = await fetch(SRV + "/shopify/app?" + new URLSearchParams(sign({ shop: "practice-store.myshopify.com", timestamp: "1" })), { redirect: "manual" });
+  ok("opened from the store's Apps: goes to the test address, ready to connect", launch.status === 302 && launch.headers.get("location") === "https://pick-and-sort--test-6xyzdn76.web.app/?shopify=connect&shop=practice-store.myshopify.com", launch.headers.get("location"));
   await fetch(`${EMU}/emulator/v1/projects/${P}/accounts`, { method: "DELETE" }); await fetch(`http://127.0.0.1:8080/emulator/v1/projects/${P}/databases/(default)/documents`, { method: "DELETE" });
   const b = await chromium.launch(); const errs = [];
   const open = async (c, n) => { const p = await c.newPage(); p.on("pageerror", e => errs.push(n + ": " + e.message));

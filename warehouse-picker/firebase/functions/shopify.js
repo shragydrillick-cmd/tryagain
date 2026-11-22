@@ -21,6 +21,8 @@ const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || "55a9bba1b5e7545f3227a01633c9
 const SCOPES = "read_orders,write_orders,read_products,write_products,read_fulfillments";
 const API_VERSION = process.env.SHOPIFY_API_VERSION || "2026-07";
 const HOME = "https://pick-and-sort.web.app";
+// where the app opens from Shopify (and comes back to after connecting): the test address while Shopify is only there
+const LAUNCH = process.env.SHOPIFY_LAUNCH || "https://pick-and-sort--test-6xyzdn76.web.app";
 // where the app may ask to come back to after connecting: the main address and its test copies
 const RETURN_OK = /^https:\/\/pick-and-sort(--[a-z0-9-]+)?\.(web\.app|firebaseapp\.com)$/;
 // the automatic tests run the app on this computer (only when they point the server at a pretend Shopify)
@@ -114,9 +116,9 @@ async function route(req, res) {
 
   if (path === "/app" || path === "/") { // opened from Shopify
     const shop = cleanShop(q.shop);
-    if (!shop || !signedByShopify(q)) return res.redirect(302, HOME + "/");
+    if (!shop || !signedByShopify(q)) return res.redirect(302, LAUNCH + "/");
     const known = await getDb().collection("shopifyTokens").where("shop", "==", shop).limit(1).get();
-    return res.redirect(302, HOME + "/?shopify=" + (known.empty ? "connect&shop=" + encodeURIComponent(shop) : "open"));
+    return res.redirect(302, LAUNCH + "/?shopify=" + (known.empty ? "connect&shop=" + encodeURIComponent(shop) : "open"));
   }
   if (path === "/callback") { // Shopify, after the admin said yes
     const shop = cleanShop(q.shop);
@@ -132,7 +134,7 @@ async function route(req, res) {
     const { company, uid, email, back } = st.data(), at = Date.now();
     await getDb().doc(`shopifyTokens/${company}`).set({ shop, token: t.access_token, scope: t.scope || "", at, by: uid });
     await getDb().doc(`companies/${company}/settings/shopify`).set({ shop, at, byEmail: email });
-    return res.redirect(302, (backOk(back) ? back : HOME) + "/?shopify=connected");
+    return res.redirect(302, (backOk(back) ? back : LAUNCH) + "/?shopify=connected");
   }
 
   if (req.method === "OPTIONS") return res.status(204).end();
@@ -141,7 +143,7 @@ async function route(req, res) {
     if (!shop) throw new Problem(400, "Type the store's Shopify address, like your-store.myshopify.com.");
     await dailyGuard("shopifyStart", 200);
     const state = crypto.randomBytes(24).toString("hex");
-    await getDb().doc(`shopifyStates/${state}`).set({ shop, company: who.company, uid: who.uid, email: who.email, at: Date.now(), back: backOk(body.back) ? body.back : HOME });
+    await getDb().doc(`shopifyStates/${state}`).set({ shop, company: who.company, uid: who.uid, email: who.email, at: Date.now(), back: backOk(body.back) ? body.back : LAUNCH });
     const url = `https://${shop}/admin/oauth/authorize?` + new URLSearchParams({ client_id: CLIENT_ID, scope: SCOPES, redirect_uri: HOME + "/shopify/callback", state });
     return res.json({ url });
   }
@@ -181,7 +183,7 @@ async function handle(req, res) {
     const status = e.status || (e.code === "resource-exhausted" ? 429 : 500);
     if (status >= 500) console.error(e);
     const msg = e.status || status === 429 ? e.message : "Something went wrong on the server.";
-    if ((req.path || "").includes("/callback")) return res.status(status).type("html").send(`<!doctype html><meta name=viewport content="width=device-width"><body style="font:16px system-ui;padding:24px"><h2>Pick &amp; Sort</h2><p>${msg.replace(/</g, "&lt;")}</p><p><a href="${HOME}/">Back to Pick &amp; Sort</a></p>`);
+    if ((req.path || "").includes("/callback")) return res.status(status).type("html").send(`<!doctype html><meta name=viewport content="width=device-width"><body style="font:16px system-ui;padding:24px"><h2>Pick &amp; Sort</h2><p>${msg.replace(/</g, "&lt;")}</p><p><a href="${LAUNCH}/">Back to Pick &amp; Sort</a></p>`);
     res.status(status).json({ error: msg });
   }
 }
