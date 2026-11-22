@@ -108,3 +108,7 @@ opens any order.
 the company, online first; the admin makes a computer the print station; a phone packing a local order sends its label
 there and goes back to the list; a UPS order opens there for Shopify; with the station offline the phone prints its own
 label and the UPS order waits, then reaches the station when it's back.
+
+`inventory-edit.test.js`: adding and editing the inventory in Bins (with Allow inventory changes on): a new item from
+its name, company, colours and sizes; scanning its barcodes in order (a duplicate is refused); adding a colour;
+removing a size; renaming; deleting; Undo.

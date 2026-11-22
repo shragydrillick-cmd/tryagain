@@ -299,7 +299,10 @@ for orders" stays Off).
   **Keep in both**) or the bin already has something else in it (**Add anyway**), with **Cancel**.
 - **Undo** for a few seconds after each change, and **History** of every change.
 - Settings → More → Bins → **Allow inventory changes** (off): lets item names, companies, sizes, colours,
-  barcodes and SKUs be changed here too.
+  barcodes and SKUs be changed here too, and items be added and removed: **Add a new item** (name, company, colours
+  and sizes: every combination is made, with SKUs from a start like LL2232 → LL2232-BLA-2T); on an item, **Scan
+  barcodes in order** (each scan fills the next size; a barcode used elsewhere is refused), add a colour or size,
+  remove one, or delete the item.
 
 ## Settings: Map and Order
 
