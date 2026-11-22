@@ -23,3 +23,7 @@ exports.billingCap = onMessagePublished({ topic: "billing-cap", maxInstances: 1 
   await billing.updateProjectBillingInfo({ name, projectBillingInfo: { billingAccountName: "" } });
   console.log("The budget was reached: billing is now OFF for the project. Put the card back in Firebase to turn it on again.");
 });
+
+// shopify: the Shopify connection (see shopify.js), at pick-and-sort.web.app/shopify/...
+const { onRequest } = require("firebase-functions/v2/https");
+exports.shopify = onRequest({ maxInstances: 2, concurrency: 20, memory: "256MiB", timeoutSeconds: 60 }, require("./shopify").handle);

@@ -212,6 +212,22 @@ jobs:
           git push -f -q "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
           echo "Published. Once GitHub Pages is switched on (Settings > Pages > gh-pages), it's at https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
 
+      - name: Publish the server code (the spending cut-off and the Shopify connection), when its key is set up
+        if: env.FIREBASE_SA != ''
+        continue-on-error: true # the website is already published
+        working-directory: warehouse-picker/firebase
+        env:
+          SHOPIFY_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: |
+          printf '%s' "$FIREBASE_SA" > "$RUNNER_TEMP/firebase-key.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-key.json"
+          (cd functions && npm ci --omit=dev --no-audit --no-fund)
+          # the Shopify app's client secret (GitHub secret SHOPIFY_CLIENT_SECRET) goes to the server only, never into the website
+          if [ -n "$SHOPIFY_SECRET" ]; then printf 'SHOPIFY_CLIENT_SECRET=%s\n' "$SHOPIFY_SECRET" > functions/.env; fi
+          # unchanged server code is skipped, so this is quick on most updates
+          npx -y firebase-tools@15.36.0 deploy --only functions --project pick-and-sort --non-interactive --force
+          rm -f "$RUNNER_TEMP/firebase-key.json" functions/.env
+
       - name: Publish to Firebase Hosting (https://pick-and-sort.web.app), when its key is set up
         if: env.FIREBASE_SA != ''
         continue-on-error: true # the GitHub Pages copy above is already published
@@ -220,21 +236,14 @@ jobs:
           rm -rf dist/.git
           printf '%s' "$FIREBASE_SA" > "$RUNNER_TEMP/firebase-key.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-key.json"
+          # pick-and-sort.web.app/shopify/... goes to the server's Shopify code, once that's published (before that the site works without it)
+          if npx -y firebase-tools@15.36.0 functions:list --project pick-and-sort --non-interactive 2>/dev/null | grep -q '\bshopify\b'; then
+            node -e 'const f="firebase.json",j=JSON.parse(require("fs").readFileSync(f));j.hosting.rewrites=[{source:"/shopify/**",function:{functionId:"shopify",region:"us-central1"}}];require("fs").writeFileSync(f,JSON.stringify(j,null,2))'
+            echo "Shopify addresses on"
+          fi
           npx -y firebase-tools@15.36.0 deploy --only hosting --project pick-and-sort --non-interactive
           # the test address (new features switch on only there): a preview copy, renewed for 30 days with each build
           npx -y firebase-tools@15.36.0 hosting:channel:deploy test --expires 30d --project pick-and-sort --non-interactive || echo "test address not updated"
-          rm -f "$RUNNER_TEMP/firebase-key.json"
-
-      - name: Publish the server code (the spending cut-off; the Shopify connection later), when its key is set up
-        if: env.FIREBASE_SA != ''
-        continue-on-error: true # the website is already published
-        working-directory: warehouse-picker/firebase
-        run: |
-          printf '%s' "$FIREBASE_SA" > "$RUNNER_TEMP/firebase-key.json"
-          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-key.json"
-          (cd functions && npm ci --omit=dev --no-audit --no-fund)
-          # unchanged server code is skipped, so this is quick on most updates
-          npx -y firebase-tools@15.36.0 deploy --only functions --project pick-and-sort --non-interactive --force
           rm -f "$RUNNER_TEMP/firebase-key.json"
 
   ios-file:

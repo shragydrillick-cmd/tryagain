@@ -354,6 +354,9 @@ header.top #title { white-space: nowrap; }
 .devrow .stbadge { margin-left: 6px; font-size: 12px; }
 .stationbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--card); border-top: 2px solid var(--accent); padding: 8px 14px calc(env(safe-area-inset-bottom, 0px) + 8px); box-shadow: 0 -4px 16px rgba(0,0,0,.12); }
 .stationrow { margin-top: 4px; }
+.aorow { align-items: flex-start; cursor: pointer; }
+.aorow input[type=checkbox] { width: 22px; height: 22px; margin-top: 2px; flex: none; }
+.aobar { position: sticky; bottom: 0; padding: 10px 0 4px; background: var(--card); }
 .packfindbar { position: sticky; bottom: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 0 4px; background: var(--card); margin-top: 12px; }
 .packfindbar .btn { padding: 14px 8px; font-size: 16px; }
 .packscreen { position: fixed; inset: 0; z-index: 56; background: var(--bg); display: flex; flex-direction: column; }
@@ -398,6 +401,7 @@ input.bigscan { font-size: 20px; padding: 12px 14px; border: 2px solid var(--acc
       <label class="addtile"><b>Add file</b><input id="fileInput" type="file" multiple accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls,.json,text/csv,application/pdf,application/json" hidden></label>
       <button class="addtile" id="exampleBtn" type="button"><b>Practice</b></button>
       <button class="addtile" id="pasteToggle" type="button"><b>Manual</b></button>
+      <button class="addtile hidden" id="shopifyAddBtn" type="button"><b>From Shopify</b><span class="small muted">choose orders</span></button>
       <div class="addpair">
         <button class="addtile" id="sendBtn" type="button"><b>Send</b><span class="small muted">QR code</span></button>
         <button class="addtile" id="scanBtn" type="button"><b>Receive</b><span class="small muted">scan QR</span></button>
@@ -1562,7 +1566,7 @@ function reviewCard(r) {
     h("div", { class: "row", style: "justify-content:space-between" },
       o.order ? h("b", null, `Order #${o.order}`) : h("label", null, h("b", null, "Order # "),
         h("input", { type: "text", placeholder: "type it", style: "width:120px", onchange: e => { o.order = e.target.value.trim(); lines().forEach(l => l.order = o.order); refresh(); } })),
-      h("span", { class: "small muted" }, `page ${o.page}`)),
+      o.fromShop ? h("span", { class: "small muted" }, "from Shopify") : h("span", { class: "small muted" }, `page ${o.page}`)),
     probs,
     o.dupOf ? h("div", { class: "row", style: "margin:6px 0" },
       h("button", { class: "btn secondary small", type: "button", onclick: e => {
@@ -2518,6 +2522,7 @@ function openPacking() {
   let el = $("packPanel");
   if (!el) { el = h("div", { id: "packPanel", class: "detailpanel", role: "dialog", "aria-label": "Packing" }); document.body.append(el); }
   document.body.style.overflow = "hidden"; packSeen = null;
+  if (TEST_FEATURES) refreshShopify(false);
   try { beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); beepCtx.resume(); } catch (e) {}
   drawPacking();
 }
@@ -2529,7 +2534,8 @@ function drawPacking() {
     h("button", { class: "btn small", type: "button", onclick: closePacking }, "✕ Close"));
   const findBar = TEST_FEATURES ? h("div", { class: "packfindbar" },
     h("button", { class: "btn", type: "button", onclick: scanAnOrder }, "Scan an order"),
-    h("button", { class: "btn secondary", type: "button", onclick: openFind }, "Find an order")) : null;
+    h("button", { class: "btn secondary", type: "button", onclick: openFind }, "Find an order"),
+    shopLine()) : null;
   if (!plan) { el.replaceChildren(h("div", { class: "detailbox" }, head, h("p", { class: "muted" }, "No orders yet. Orders show up here as soon as all their items are sorted onto their pile."), findBar)); return; }
   const ready = plan.orders.filter(o => !packed.has(o.raw) && orderReady(o.label));
   const done = plan.orders.filter(o => packed.has(o.raw)).sort((a, b) => packed.get(a.raw) - packed.get(b.raw));
@@ -2606,7 +2612,7 @@ function practiceStore() {
 function savePracticeStore() { try { localStorage.setItem(STORE_PRACTICE_KEY, JSON.stringify(practiceStoreCache)); } catch (e) {} }
 /** Every order that can be packed: the practice store's (test address), plus the ones on the current list. */
 function allPackOrders() {
-  const out = TEST_FEATURES ? practiceStore().orders.map(o => ({ ...o, source: "store" })) : [];
+  const out = !TEST_FEATURES ? [] : shop.orders ? shop.orders.map(o => ({ ...o, source: "shopify" })) : practiceStore().orders.map(o => ({ ...o, source: "store" }));
   const have = new Set(out.map(o => o.number));
   if (plan) plan.orders.forEach(o => {
     if (have.has(String(o.raw))) return;
@@ -2619,6 +2625,7 @@ function allPackOrders() {
 function packedTime(o) {
   if (plan && plan.orders.some(x => String(x.raw) === o.number) && packed.has(plan.orders.find(x => String(x.raw) === o.number).raw)) return packed.get(plan.orders.find(x => String(x.raw) === o.number).raw);
   if (o.source === "store") { const s = practiceStore().orders.find(x => x.number === o.number); return s && s.packedAt || null; }
+  if (o.source === "shopify") return shop.packed[o.number] || (o.packed ? o.created || 1 : null);
   return null;
 }
 const orderKey = c => String(c || "").trim().replace(/^order\s*/i, "").replace(/^#/, "").replace(/\s+/g, "").toUpperCase();
@@ -2833,9 +2840,13 @@ async function packAction(what) {
     const t = Date.now(), tag = `Packed ${new Date(t).toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" })}`;
     const lo = plan && plan.orders.find(x => String(x.raw) === o.number);
     if (lo) { packed.set(lo.raw, t); saveList(); }
-    if (o.source === "store" || !lo) { const s = practiceStore().orders.find(x => x.number === o.number); if (s) { s.packedAt = t; s.tags = (s.tags || []).filter(x => !/^Packed /.test(x)).concat(tag); savePracticeStore(); } }
+    if (o.source === "shopify") {
+      shop.packed[o.number] = t; keepShopPacked();
+      const s = shop.orders && shop.orders.find(x => x.number === o.number); if (s) { s.packed = true; s.tags = (s.tags || []).concat(tag); }
+      shopifyApi("packed", { id: o.id, tag }).catch(e => toast(`Packed here, but Shopify didn't get the tag: ${e.message}`));
+    } else if (o.source === "store" || !lo) { const s = practiceStore().orders.find(x => x.number === o.number); if (s) { s.packedAt = t; s.tags = (s.tags || []).filter(x => !/^Packed /.test(x)).concat(tag); savePracticeStore(); } }
     o.packedAt = t;
-    pk.msg = { kind: "good", text: `Packed. Tag added: "${tag}"${TEST_FEATURES ? " (practice: with Shopify connected it goes on the order there" + (o.delivery.type === "shipping" ? ", and the order opens in Shopify to buy the UPS label" : "") + ")" : ""}.` };
+    pk.msg = { kind: "good", text: `Packed. Tag added: "${tag}"${o.source === "shopify" ? " in Shopify" : TEST_FEATURES ? " (practice: with Shopify connected it goes on the order there" + (o.delivery.type === "shipping" ? ", and the order opens in Shopify to buy the UPS label" : "") + ")" : ""}.` };
   }
   const full = { ...o, packedAt: o.packedAt || packedTime(o) };
   let sentTo = null;
@@ -2882,7 +2893,7 @@ function drawFind() {
       sel("Sort", "sort", [["created", "Newest first"], ["number", "Order number"], ["delivery", "Delivery date"], ["place", "Area"], ["customer", "Customer"]]),
       sel("Show", "show", [["all", "All orders"], ["open", "Not packed"], ["packed", "Packed"]]),
       sel("Delivery", "kind", [["all", "Any delivery"], ["local", "Own driver"], ["shipping", "UPS / shipped"]])),
-    h("p", { class: "small muted", style: "margin:4px 0 8px" }, `${list.length} order${list.length === 1 ? "" : "s"}${TEST_FEATURES ? " · practice store" : ""}`),
+    h("p", { class: "small muted", style: "margin:4px 0 8px" }, `${list.length} order${list.length === 1 ? "" : "s"}${shop.orders ? " · Shopify" : TEST_FEATURES ? " · practice store" : ""}`),
     h("div", { class: "dlist" }, list.slice(0, 200).map(o => h("button", { class: "drow" + (o.packedAt ? " st-grey" : ""), type: "button", onclick: () => { closeFind(); startPack(o, false); } },
       h("div", { style: "flex:1;min-width:0;text-align:left" }, h("b", null, `#${o.number}`), o.customer ? ` · ${o.customer}` : "",
         h("div", { class: "small" }, [o.city, `${o.units} item${o.units === 1 ? "" : "s"}`, o.created ? "ordered " + fmtWhen(o.created) : "", o.delivery.date ? "deliver " + fmtDay(o.delivery.date) : ""].filter(Boolean).join(" · ")),
@@ -3071,6 +3082,145 @@ function deviceSection() {
    decide who may see what; the screens here only follow them. */
 const FIREBASE_CONFIG = { apiKey: "AIzaSyA7t4nGvilLjmpVGS7ECN63m-P2ikpz5Ao", authDomain: "pick-and-sort.firebaseapp.com", projectId: "pick-and-sort",
   storageBucket: "pick-and-sort.firebasestorage.app", messagingSenderId: "702275381347", appId: "1:702275381347:web:fc1e0ab3bb2c232ded7056" };
+/* ---------- Shopify (test address for now): the company's store, through our server at /shopify/... ----------
+   An admin connects the store once in Settings → More → Shopify store; then Packing's Find / Scan use the store's
+   open orders, Pack puts the "Packed ..." tag on the order in Shopify, and a UPS order opens there on the print station. */
+const SHOP_PACKED_KEY = "pick-and-sort-shopify-packed-v1";
+const shop = { status: null, orders: null, at: 0, busy: false, err: "", people: true, want: "",
+  packed: (() => { try { return JSON.parse(localStorage.getItem(SHOP_PACKED_KEY) || "{}"); } catch (e) { return {}; } })() };
+function keepShopPacked() { shop.packed = Object.fromEntries(Object.entries(shop.packed).sort((a, b) => b[1] - a[1]).slice(0, 2000)); try { localStorage.setItem(SHOP_PACKED_KEY, JSON.stringify(shop.packed)); } catch (e) {} }
+const shopServer = () => { try { return localStorage.getItem("pick-and-sort-shopify-base") || "/shopify"; } catch (e) { return "/shopify"; } }; // tests: a pretend server
+async function shopifyApi(path, body) {
+  const u = fb.auth && fb.auth.currentUser; if (!u) throw new Error("not signed in");
+  const r = await fetch(`${shopServer()}/${path}`, { method: body ? "POST" : "GET", headers: { Authorization: "Bearer " + await u.getIdToken(), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  let d = null; try { d = await r.json(); } catch (e) {}
+  if (!r.ok || !d) throw new Error((d && d.error) || (r.status === 404 ? "the Shopify connection isn't on the server yet" : `server ${r.status}`));
+  return d;
+}
+/** Is a store connected, and its open orders (at most once a minute unless asked). */
+async function refreshShopify(force) {
+  if (!TEST_FEATURES || !acct || !acct.company || !fb.auth || !fb.auth.currentUser || shop.busy) return;
+  if (!force && Date.now() - shop.at < 60e3) return;
+  shop.busy = true; shop.err = "";
+  try {
+    shop.status = await shopifyApi("status");
+    if (shop.status.connected) { const d = await shopifyApi("orders"); shop.orders = d.orders; shop.people = d.people !== false; }
+    else shop.orders = null;
+    shop.at = Date.now();
+  } catch (e) { shop.err = e.message; }
+  shop.busy = false;
+  if ($("packPanel")) drawPacking();
+  if ($("packFind")) drawFind();
+  if (view === "settings" && setPage === "more") renderSettings();
+}
+/** Under Packing: where the orders come from. */
+function shopLine() {
+  if (!acct || !acct.company) return null;
+  const st = shop.status;
+  const t = st && st.connected
+    ? `Shopify: ${st.shop.replace(/\.myshopify\.com$/, "")} · ${shop.orders ? shop.orders.length : "…"} open order${shop.orders && shop.orders.length === 1 ? "" : "s"}${shop.at ? " · " + new Date(shop.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : ""}`
+    : st ? "Practice orders (no Shopify store connected: Settings → More)" : shop.err ? `Shopify: ${shop.err}` : "";
+  return h("div", { class: "small muted shopline", style: "width:100%;text-align:center;margin-top:6px" }, t,
+    st && st.connected ? h("button", { class: "link small", type: "button", style: "margin-left:6px", onclick: () => refreshShopify(true) }, shop.busy ? "updating…" : "Update") : null);
+}
+/** Settings → More → Shopify store: connect (admins), which store, disconnect. */
+function shopifySection() {
+  if (!shop.status && !shop.busy && !shop.err) setTimeout(() => refreshShopify(true), 0);
+  const isAdmin = acct.role === "owner" || acct.role === "admin", st = shop.status;
+  if (st && st.connected) return h("div", null,
+    h("p", null, h("b", null, st.shop), h("br"), h("span", { class: "small muted" }, `Connected ${new Date(st.at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}. Packing uses its open orders; Pack tags them in Shopify.`)),
+    !shop.people ? h("p", { class: "small" }, "Shopify isn't sharing customer names and addresses with Pick & Sort yet (Shopify Dev Dashboard: the app → API access → Protected customer data).") : null,
+    isAdmin ? h("div", { class: "row" }, h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Disconnect the Shopify store?", async () => {
+      try { await shopifyApi("disconnect", {}); shop.status = null; shop.orders = null; shop.at = 0; toast("Disconnected."); refreshShopify(true); } catch (err) { toast(err.message); }
+    }) }, "Disconnect")) : null);
+  if (!isAdmin) return h("p", { class: "small muted" }, st ? "No Shopify store connected. Your company's admin connects it here." : shop.err || "Checking…");
+  const name = h("input", { type: "text", "aria-label": "Shopify store address", placeholder: "your-store.myshopify.com", value: shop.want, style: "flex:1;min-width:0", autocapitalize: "off", autocomplete: "off", spellcheck: "false" });
+  const out = h("p", { class: "small gateerr" }, shop.err || "");
+  return h("div", null,
+    h("p", { class: "small muted" }, "Connect the company's Shopify store so Packing uses its real orders. Shopify will ask you to allow Pick & Sort."),
+    h("div", { class: "row" }, name, h("button", { class: "btn small", type: "button", onclick: async () => {
+      out.textContent = "";
+      try { const d = await shopifyApi("start", { shop: name.value, back: location.origin }); location.href = d.url; } catch (err) { out.textContent = err.message; }
+    } }, "Connect")), out);
+}
+/** Coming back from Shopify (?shopify=connected), or opened from the store's admin (?shopify=connect&shop=...). */
+function shopifyArrival() {
+  const q = new URLSearchParams(location.search), what = q.get("shopify"); if (!what) return;
+  try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
+  if (what === "connected") setTimeout(() => toast("Shopify store connected."), 800);
+  if (what === "connect") { shop.want = q.get("shop") || ""; setTimeout(() => { try { if (view !== "settings") $("navBtn").click(); go("more"); } catch (e) {} toast("As the company's admin, tap Connect under Shopify store."); }, 800); }
+}
+if (TEST_FEATURES) shopifyArrival();
+
+/* "From Shopify" under Orders: the store's open orders, filtered and sorted; tick the ones to pick and add them to the list.
+   They go through the same check as slips: an item without a bin (or SKU, barcode) shows in "Please look". */
+let ao = null; // { q, sort, kind, area, when, show, chosen: Set of numbers }
+const aoOrders = () => (shop.orders || (TEST_FEATURES ? practiceStore().orders : [])).map(o => ({ ...o, units: o.items.reduce((a, x) => a + x.qty, 0) }));
+const onList = n => !!(plan && plan.orders.some(x => String(x.raw) === String(n)));
+function openAddOrders() {
+  ao = { q: "", sort: "created", kind: "all", area: "", when: "all", show: "new", chosen: new Set() };
+  if (TEST_FEATURES) refreshShopify(true);
+  drawAddOrders();
+}
+function closeAddOrders() { ao = null; const el = $("addOrders"); if (el) el.remove(); document.body.style.overflow = ""; }
+function aoShown() {
+  const q = ao.q.trim().toLowerCase(), now = Date.now(), H = 36e5;
+  const within = { all: Infinity, today: (now - new Date().setHours(0, 0, 0, 0)), day: 24 * H, three: 72 * H, week: 168 * H }[ao.when];
+  let list = aoOrders().filter(o => (ao.show === "all" || !onList(o.number)) && (ao.kind === "all" || (o.delivery.type === "shipping") === (ao.kind === "shipping"))
+    && (!ao.area || (o.city || "") === ao.area) && (ao.when === "older" ? now - (o.created || 0) > 72 * H : !o.created || now - o.created <= within));
+  if (q) list = list.filter(o => orderKey(o.number).includes(orderKey(ao.q)) || [o.customer, o.city, o.zip, o.address, o.delivery.title].some(x => String(x || "").toLowerCase().includes(q))
+    || o.items.some(it => [it.name, it.details, it.sku, it.barcode].some(x => String(x || "").toLowerCase().includes(q))));
+  const by = { created: (a, b) => (b.created || 0) - (a.created || 0), oldest: (a, b) => (a.created || 0) - (b.created || 0), number: (a, b) => natural(a.number, b.number),
+    delivery: (a, b) => (a.delivery.date || 9e15) - (b.delivery.date || 9e15) || natural(a.number, b.number),
+    place: (a, b) => natural(a.city || "~", b.city || "~") || natural(a.zip, b.zip) || natural(a.number, b.number), items: (a, b) => b.units - a.units }[ao.sort];
+  return list.sort(by);
+}
+function drawAddOrders() {
+  if (!ao) return;
+  let el = $("addOrders");
+  if (!el) { el = h("div", { id: "addOrders", class: "detailpanel", role: "dialog", "aria-label": "Add orders from Shopify", style: "z-index:55" }); document.body.append(el); document.body.style.overflow = "hidden"; }
+  const all = aoOrders(), list = aoShown(), areas = [...new Set(all.map(o => o.city).filter(Boolean))].sort(natural);
+  [...ao.chosen].forEach(n => { if (!all.some(o => o.number === n)) ao.chosen.delete(n); });
+  const sel = (label, key, opts) => h("label", { class: "binctl" }, h("span", { class: "fixlab" }, label), h("select", { "aria-label": label, onchange: e => { ao[key] = e.target.value; drawAddOrders(); } }, opts.map(([v, t]) => h("option", { value: v, selected: ao[key] === v }, t))));
+  const search = h("input", { type: "search", class: "binsearch", value: ao.q, placeholder: "Order number, name, area, or an item", "aria-label": "Search orders",
+    oninput: e => { ao.q = e.target.value; clearTimeout(search.t); search.t = setTimeout(() => { drawAddOrders(); const x = document.querySelector('#addOrders input[type=search]'); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } }, 200); } });
+  const allShown = list.length && list.every(o => ao.chosen.has(o.number));
+  const n = ao.chosen.size;
+  el.replaceChildren(h("div", { class: "detailbox" },
+    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, "Add orders"), h("button", { class: "btn small", type: "button", onclick: closeAddOrders }, "Back")),
+    h("p", { class: "small muted", style: "margin-top:0" }, shop.orders ? `Open orders in ${shop.status.shop.replace(/\.myshopify\.com$/, "")}${shop.busy ? " (updating…)" : ""}` : shop.busy ? "Getting the orders…" : "Practice orders (no Shopify store connected: Settings → More)"),
+    search,
+    h("div", { class: "binctls" },
+      sel("Sort", "sort", [["created", "Newest first"], ["oldest", "Oldest first"], ["number", "Order number"], ["delivery", "Delivery date"], ["place", "Area"], ["items", "Most items"]]),
+      sel("Area", "area", [["", "Every area"], ...areas.map(a => [a, a])]),
+      sel("Ordered", "when", [["all", "Any time"], ["today", "Today"], ["day", "Last 24 hours"], ["three", "Last 3 days"], ["week", "Last week"], ["older", "Over 3 days ago"]]),
+      sel("Delivery", "kind", [["all", "Any delivery"], ["local", "Own driver"], ["shipping", "UPS / shipped"]]),
+      sel("Show", "show", [["new", "Not on the list yet"], ["all", "All open orders"]])),
+    h("div", { class: "row", style: "align-items:center;margin:6px 0" },
+      h("label", { class: "checkrow", style: "flex:1" }, h("input", { type: "checkbox", "aria-label": "Select all shown", checked: !!allShown, onchange: e => { list.forEach(o => e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number)); drawAddOrders(); } }),
+        h("span", null, ` ${list.length} order${list.length === 1 ? "" : "s"} shown`)),
+      n ? h("button", { class: "link small", type: "button", onclick: () => { ao.chosen.clear(); drawAddOrders(); } }, "Clear") : null),
+    h("div", { class: "dlist" }, list.slice(0, 300).map(o => h("label", { class: "drow aorow" + (ao.chosen.has(o.number) ? " st-blue" : "") },
+      h("input", { type: "checkbox", "aria-label": `Order ${o.number}`, checked: ao.chosen.has(o.number), onchange: e => { e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number); drawAddOrders(); } }),
+      h("div", { style: "flex:1;min-width:0;text-align:left;margin-left:8px" }, h("b", null, `#${o.number}`), o.customer ? ` · ${o.customer}` : "",
+        h("div", { class: "small" }, [o.city, `${o.units} item${o.units === 1 ? "" : "s"}`, o.created ? "ordered " + fmtWhen(o.created) : "", o.delivery.date ? "deliver " + fmtDay(o.delivery.date) : ""].filter(Boolean).join(" · ")),
+        h("div", { class: "small muted" }, o.items.map(it => `${it.qty}× ${it.name}${it.details ? " (" + it.details + ")" : ""}`).join(", ")),
+        onList(o.number) ? h("div", { class: "small muted" }, "Already on the list") : null),
+      h("span", { class: "small" }, o.delivery.type === "shipping" ? "UPS" : "Driver")))),
+    list.length > 300 ? h("p", { class: "small muted" }, "Showing the first 300: narrow it down to see the rest.") : null,
+    h("div", { class: "aobar" }, h("button", { class: "btn", type: "button", disabled: !n, style: "width:100%", onclick: addChosenOrders }, n ? `Add ${n} order${n === 1 ? "" : "s"} to pick` : "Tick the orders to pick"))));
+}
+/** The ticked orders become the list (or join it: the usual Replace / Merge question), like packing slips. */
+function addChosenOrders() {
+  const chosen = aoOrders().filter(o => ao.chosen.has(o.number));
+  if (!chosen.length) return;
+  const orders = chosen.map((o, i) => ({ order: o.number, page: i + 1, total: o.units, fromShop: true,
+    items: o.items.map(it => ({ name: it.name, details: it.details || "", sku: it.sku || "", barcode: it.barcode || "", bin: it.bin || "", qty: it.qty })) }));
+  closeAddOrders();
+  useSlips({ orders, warnings: [], pages: 0, all: orders.length, checked: orders.length }, `${orders.length} order${orders.length === 1 ? "" : "s"} from ${shop.orders ? "Shopify" : "the practice store"}`);
+}
+if (TEST_FEATURES) { const b = $("shopifyAddBtn"); if (b) { b.classList.remove("hidden"); b.onclick = openAddOrders; } }
+
 const fb = { ready: null, auth: null, db: null };
 const ACCT_KEY = "pick-and-sort-account-v1";
 let acct = (() => { try { return JSON.parse(localStorage.getItem(ACCT_KEY) || "null"); } catch (e) { return null; } })(); // last known, so the app opens offline
@@ -5298,6 +5448,7 @@ function renderMorePage(v) {
         } }))),
       h("h3", null, "Account"),
       accountSection(),
+      TEST_FEATURES && acct && acct.company && fb.db ? h("div", null, h("h3", null, "Shopify store"), shopifySection()) : null,
       h("h3", null, "This device"),
       deviceSection(),
       h("h3", null, "Bins"),

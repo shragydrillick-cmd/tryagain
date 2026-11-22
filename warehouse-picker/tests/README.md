@@ -109,6 +109,13 @@ the company, online first; the admin makes a computer the print station; a phone
 there and goes back to the list; a UPS order opens there for Shopify; with the station offline the phone prints its own
 label and the UPS order waits, then reaches the station when it's back.
 
+`shopify.test.js` (with the Firebase emulator): the Shopify connection. The real server code
+(`firebase/functions/shopify.js`) runs against the emulator and a pretend Shopify: the admin connects the store from
+Settings → More (a worker can't); the store's key can't be read from the app; a callback used twice or not signed by
+Shopify is refused; Packing and Find use the store's open orders; Pack puts the "Packed ..." tag on the order in
+Shopify; Orders → From Shopify lists the open orders, filtered by area, sorted, ticked and added to the list (items
+without a bin go to Please look); Disconnect forgets the key.
+
 `inventory-edit.test.js`: adding and editing the inventory in Bins (with Allow inventory changes on): a new item from
 its name, company, colours and sizes; scanning its barcodes in order (a duplicate is refused); adding a colour;
 removing a size; renaming; deleting; Undo.

@@ -1,7 +1,7 @@
 {
   "name": "pick-and-sort-server",
   "private": true,
-  "description": "Pick & Sort's server code on Firebase: the spending cut-off, and (later) the Shopify connection.",
+  "description": "Pick & Sort's server code on Firebase: the spending cut-off, and the Shopify connection.",
   "main": "index.js",
   "engines": { "node": "22" },
   "dependencies": {

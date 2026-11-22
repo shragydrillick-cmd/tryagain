@@ -1,0 +1,188 @@
+// The Shopify connection. One small server function behind the website's own address (pick-and-sort.web.app/shopify/...),
+// so the app talks to it like any other page and Shopify's secret never reaches a phone.
+//
+//   /shopify/app       Shopify opens this when the app is installed or opened from the store's admin.
+//   /shopify/start     (signed-in company admin) where to send them to let Pick & Sort into their store.
+//   /shopify/callback  Shopify comes back here once they've said yes; the store's key is kept for the company.
+//   /shopify/orders    (signed-in, in the company) the store's open orders that aren't sent out yet, for packing.
+//   /shopify/packed    (signed-in, in the company) puts the "Packed ..." tag on an order.
+//   /shopify/status    (signed-in, in the company) whether a store is connected, and which.
+//   /shopify/disconnect (company admin) forgets the store's key.
+//
+// The store's key is in Firestore under shopifyTokens/{company}, which the database rules let nobody read: only this code
+// (running as the project itself) can. The client secret comes from the GitHub secret SHOPIFY_CLIENT_SECRET at deploy.
+const crypto = require("crypto");
+const { initializeApp, getApps } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
+const { dailyGuard } = require("./guard");
+
+const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || "55a9bba1b5e7545f3227a01633c9693e";
+const SCOPES = "read_orders,write_orders,read_products,write_products,read_fulfillments";
+const API_VERSION = process.env.SHOPIFY_API_VERSION || "2026-07";
+const HOME = "https://pick-and-sort.web.app";
+// where the app may ask to come back to after connecting: the main address and its test copies
+const RETURN_OK = /^https:\/\/pick-and-sort(--[a-z0-9-]+)?\.(web\.app|firebaseapp\.com)$/;
+// the automatic tests run the app on this computer (only when they point the server at a pretend Shopify)
+const backOk = u => RETURN_OK.test(u || "") || (!!process.env.SHOPIFY_TEST_BASE && /^http:\/\/localhost:\d+$/.test(u || ""));
+const SHOP_OK = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+
+const secret = () => process.env.SHOPIFY_CLIENT_SECRET || "";
+// tests point this at a pretend Shopify; for real it's the store's own address
+const shopBase = shop => (process.env.SHOPIFY_TEST_BASE ? `${process.env.SHOPIFY_TEST_BASE}/${shop}` : `https://${shop}`);
+let db = null;
+const getDb = () => { if (!db) { if (!getApps().length) initializeApp(); db = getFirestore(); } return db; };
+
+class Problem extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+
+/** Shopify signs what it sends with the client secret: check it, so nobody can pretend to be Shopify. */
+function signedByShopify(query) {
+  const given = String(query.hmac || ""); if (!given || !secret()) return false;
+  const msg = Object.keys(query).filter(k => k !== "hmac" && k !== "signature").sort()
+    .map(k => `${k}=${Array.isArray(query[k]) ? query[k].join(",") : query[k]}`).join("&");
+  const want = crypto.createHmac("sha256", secret()).update(msg).digest("hex");
+  return given.length === want.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(want));
+}
+const cleanShop = s => { s = String(s || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""); if (s && !s.includes(".")) s += ".myshopify.com"; return SHOP_OK.test(s) ? s : ""; };
+
+/** Who's asking: their Firebase sign-in, and their place in an accepted company. */
+async function caller(req, needAdmin) {
+  const m = /^Bearer (.+)$/.exec(req.get("authorization") || ""); if (!m) throw new Problem(401, "Sign in first.");
+  let tok; try { getDb(); tok = await getAuth().verifyIdToken(m[1]); } catch (e) { throw new Problem(401, "Sign in again."); }
+  const u = await getDb().doc(`users/${tok.uid}`).get();
+  if (!u.exists || u.data().status !== "allowed" || !u.data().company) throw new Problem(403, "This account isn't in a company.");
+  const c = await getDb().doc(`companies/${u.data().company}`).get();
+  if (!c.exists || c.data().status !== "approved") throw new Problem(403, "The company isn't accepted yet.");
+  const isAdmin = ["admin", "owner"].includes(u.data().role);
+  if (needAdmin && !isAdmin) throw new Problem(403, "Only the company's admin can connect the Shopify store.");
+  return { uid: tok.uid, email: tok.email || "", company: u.data().company, isAdmin };
+}
+async function storeKey(company) {
+  const t = await getDb().doc(`shopifyTokens/${company}`).get();
+  if (!t.exists) throw new Problem(409, "No Shopify store is connected yet.");
+  return t.data();
+}
+async function graphql(key, query, variables) {
+  const r = await fetch(`${shopBase(key.shop)}/admin/api/${API_VERSION}/graphql.json`, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": key.token }, body: JSON.stringify({ query, variables }) });
+  if (r.status === 401 || r.status === 403) throw new Problem(409, "Shopify refused the store's key: connect the store again in Settings.");
+  if (!r.ok) throw new Problem(502, `Shopify answered ${r.status}.`);
+  return r.json();
+}
+
+const ORDER_FIELDS = (withPeople) => `id name createdAt tags displayFulfillmentStatus
+  ${withPeople ? "customer { displayName } shippingAddress { name address1 address2 city zip }" : ""}
+  shippingLine { title }
+  lineItems(first: 100) { nodes { name title variantTitle quantity currentQuantity unfulfilledQuantity sku variant { barcode sku } } }`;
+const ORDERS = withPeople => `query($n: Int!, $after: String) {
+  orders(first: $n, after: $after, sortKey: CREATED_AT, reverse: true, query: "status:open AND (fulfillment_status:unfulfilled OR fulfillment_status:partial)") {
+    pageInfo { hasNextPage endCursor } nodes { ${ORDER_FIELDS(withPeople)} } } }`;
+/** A Shopify order in the shape the app packs: number, customer, area, local delivery or shipping, items. */
+function toPackOrder(o, shop) {
+  const a = o.shippingAddress || {}, title = (o.shippingLine && o.shippingLine.title) || "";
+  const local = /local|deliver|pick ?up|pickup/i.test(title) && !/ups|usps|fedex|dhl|ground|priority|express/i.test(title);
+  const idNum = String(o.id).split("/").pop();
+  return {
+    number: String(o.name || "").replace(/^#/, ""), id: o.id, created: Date.parse(o.createdAt) || null,
+    customer: (o.customer && o.customer.displayName) || a.name || "", address: [a.address1, a.address2].filter(Boolean).join(", "), city: a.city || "", zip: a.zip || "",
+    delivery: { type: local || !title ? "local" : "shipping", title, date: null },
+    tags: o.tags || [], packed: (o.tags || []).some(t => /^packed\b/i.test(t)),
+    shopifyUrl: `https://admin.shopify.com/store/${shop.replace(/\.myshopify\.com$/, "")}/orders/${idNum}`,
+    items: (o.lineItems && o.lineItems.nodes || []).map(l => ({
+      name: l.title || l.name || "", details: l.variantTitle && l.variantTitle !== "Default Title" ? l.variantTitle : "",
+      sku: l.sku || (l.variant && l.variant.sku) || "", barcode: (l.variant && l.variant.barcode) || "", bin: "",
+      qty: l.unfulfilledQuantity != null ? l.unfulfilledQuantity : l.currentQuantity != null ? l.currentQuantity : l.quantity })).filter(x => x.qty > 0),
+  };
+}
+async function openOrders(key) {
+  // names and addresses are "protected customer data" in Shopify: if the app hasn't been allowed them yet, the orders come without
+  let withPeople = true, out = [], after = null;
+  for (let page = 0; page < 5; page++) {
+    let d = await graphql(key, ORDERS(withPeople), { n: 100, after });
+    if (d.errors && withPeople && JSON.stringify(d.errors).match(/ACCESS_DENIED|customer|shippingAddress|protected/i)) { withPeople = false; d = await graphql(key, ORDERS(false), { n: 100, after }); }
+    if (d.errors) throw new Problem(502, "Shopify: " + (d.errors[0] && d.errors[0].message || "error"));
+    const c = d.data.orders; out = out.concat(c.nodes.map(o => toPackOrder(o, key.shop)));
+    if (!c.pageInfo.hasNextPage) break; after = c.pageInfo.endCursor;
+  }
+  return { orders: out.filter(o => o.items.length), people: withPeople };
+}
+
+async function route(req, res) {
+  const path = (req.path || "").replace(/^\/shopify/, "").replace(/\/+$/, "") || "/";
+  const q = req.query || {};
+  const body = typeof req.body === "object" && req.body ? req.body : (() => { try { return JSON.parse(req.body || "{}"); } catch (e) { return {}; } })();
+
+  if (path === "/app" || path === "/") { // opened from Shopify
+    const shop = cleanShop(q.shop);
+    if (!shop || !signedByShopify(q)) return res.redirect(302, HOME + "/");
+    const known = await getDb().collection("shopifyTokens").where("shop", "==", shop).limit(1).get();
+    return res.redirect(302, HOME + "/?shopify=" + (known.empty ? "connect&shop=" + encodeURIComponent(shop) : "open"));
+  }
+  if (path === "/callback") { // Shopify, after the admin said yes
+    const shop = cleanShop(q.shop);
+    if (!shop || !signedByShopify(q)) throw new Problem(400, "This didn't come from Shopify.");
+    const sref = getDb().doc(`shopifyStates/${String(q.state || "x").replace(/[^a-zA-Z0-9]/g, "") || "x"}`);
+    const st = await sref.get();
+    if (!st.exists || st.data().shop !== shop || Date.now() - st.data().at > 15 * 60e3) throw new Problem(400, "That took too long or didn't start here: tap Connect again in Pick & Sort.");
+    await sref.delete();
+    const r = await fetch(`${shopBase(shop)}/admin/oauth/access_token`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: CLIENT_ID, client_secret: secret(), code: String(q.code || "") }) });
+    const t = r.ok ? await r.json() : null;
+    if (!t || !t.access_token) throw new Problem(502, "Shopify didn't give the key. Try Connect again.");
+    const { company, uid, email, back } = st.data(), at = Date.now();
+    await getDb().doc(`shopifyTokens/${company}`).set({ shop, token: t.access_token, scope: t.scope || "", at, by: uid });
+    await getDb().doc(`companies/${company}/settings/shopify`).set({ shop, at, byEmail: email });
+    return res.redirect(302, (backOk(back) ? back : HOME) + "/?shopify=connected");
+  }
+
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (path === "/start") {
+    const who = await caller(req, true), shop = cleanShop(body.shop);
+    if (!shop) throw new Problem(400, "Type the store's Shopify address, like your-store.myshopify.com.");
+    await dailyGuard("shopifyStart", 200);
+    const state = crypto.randomBytes(24).toString("hex");
+    await getDb().doc(`shopifyStates/${state}`).set({ shop, company: who.company, uid: who.uid, email: who.email, at: Date.now(), back: backOk(body.back) ? body.back : HOME });
+    const url = `https://${shop}/admin/oauth/authorize?` + new URLSearchParams({ client_id: CLIENT_ID, scope: SCOPES, redirect_uri: HOME + "/shopify/callback", state });
+    return res.json({ url });
+  }
+  if (path === "/status") {
+    const who = await caller(req, false);
+    const t = await getDb().doc(`shopifyTokens/${who.company}`).get();
+    return res.json(t.exists ? { connected: true, shop: t.data().shop, at: t.data().at } : { connected: false });
+  }
+  if (path === "/orders") {
+    const who = await caller(req, false); await dailyGuard("shopifyOrders");
+    const key = await storeKey(who.company);
+    return res.json({ shop: key.shop, at: Date.now(), ...(await openOrders(key)) });
+  }
+  if (path === "/packed") {
+    const who = await caller(req, false); await dailyGuard("shopifyPacked");
+    const key = await storeKey(who.company);
+    const id = String(body.id || ""), tag = String(body.tag || "Packed").slice(0, 60);
+    if (!/^gid:\/\/shopify\/Order\/\d+$/.test(id)) throw new Problem(400, "Which order?");
+    const d = await graphql(key, `mutation($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { message } } }`, { id, tags: [tag] });
+    const err = d.errors ? d.errors[0].message : d.data && d.data.tagsAdd.userErrors.length ? d.data.tagsAdd.userErrors[0].message : "";
+    if (err) throw new Problem(502, "Shopify: " + err);
+    return res.json({ ok: true });
+  }
+  if (path === "/disconnect") {
+    const who = await caller(req, true);
+    await getDb().doc(`shopifyTokens/${who.company}`).delete();
+    await getDb().doc(`companies/${who.company}/settings/shopify`).delete();
+    return res.json({ ok: true });
+  }
+  throw new Problem(404, "Not here.");
+}
+
+/** The whole thing, for the server function (and the tests). Errors come back as { error } with a plain message. */
+async function handle(req, res) {
+  try { await route(req, res); }
+  catch (e) {
+    const status = e.status || (e.code === "resource-exhausted" ? 429 : 500);
+    if (status >= 500) console.error(e);
+    const msg = e.status || status === 429 ? e.message : "Something went wrong on the server.";
+    if ((req.path || "").includes("/callback")) return res.status(status).type("html").send(`<!doctype html><meta name=viewport content="width=device-width"><body style="font:16px system-ui;padding:24px"><h2>Pick &amp; Sort</h2><p>${msg.replace(/</g, "&lt;")}</p><p><a href="${HOME}/">Back to Pick &amp; Sort</a></p>`);
+    res.status(status).json({ error: msg });
+  }
+}
+module.exports = { handle, signedByShopify, cleanShop, toPackOrder };
