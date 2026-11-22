@@ -225,6 +225,18 @@ jobs:
           npx -y firebase-tools@15.36.0 hosting:channel:deploy test --expires 30d --project pick-and-sort --non-interactive || echo "test address not updated"
           rm -f "$RUNNER_TEMP/firebase-key.json"
 
+      - name: Publish the server code (the spending cut-off; the Shopify connection later), when its key is set up
+        if: env.FIREBASE_SA != ''
+        continue-on-error: true # the website is already published
+        working-directory: warehouse-picker/firebase
+        run: |
+          printf '%s' "$FIREBASE_SA" > "$RUNNER_TEMP/firebase-key.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-key.json"
+          (cd functions && npm ci --omit=dev --no-audit --no-fund)
+          # unchanged server code is skipped, so this is quick on most updates
+          npx -y firebase-tools@15.36.0 deploy --only functions --project pick-and-sort --non-interactive --force
+          rm -f "$RUNNER_TEMP/firebase-key.json"
+
   ios-file:
     needs: [ios, website]
     runs-on: ubuntu-latest

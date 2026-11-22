@@ -268,6 +268,15 @@ the chosen station and the phone goes back to the list; a UPS order opens there 
 station is offline, the phone prints the label itself, and UPS orders wait and open there when it's back. On a print
 station, a strip at the bottom shows what it's printed and opened.
 
+## Server code and the spending cut-off
+
+`firebase/functions` is the app's server code on Firebase (published by the GitHub build when the
+`FIREBASE_SERVICE_ACCOUNT` key is set; unchanged code is skipped). For now it's the **spending cut-off**: the $5
+budget in Google Cloud (Billing → Budgets & alerts) is connected to a Pub/Sub topic called `billing-cap`; when the
+spending reaches the budget, `billingCap` removes the card from the project, so nothing more can be charged until it's
+put back by hand (Google's figures can run a few hours behind). `guard.js` is our own daily count for the Shopify
+connection (coming next): above the daily limit it refuses until the next day.
+
 ## Bins (practice)
 
 Settings → **Bins**: which bin each item is kept in. For now it's practice only: it's kept on the device by
