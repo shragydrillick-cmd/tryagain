@@ -367,6 +367,8 @@ header.top #title { white-space: nowrap; }
 .aorow { align-items: flex-start; cursor: pointer; }
 .aorow input[type=checkbox] { width: 22px; height: 22px; margin-top: 2px; flex: none; }
 .aobar { position: sticky; bottom: 0; padding: 10px 0 4px; background: var(--card); }
+.addtiles.one { grid-template-columns: 1fr; }
+.addtiles.one .addtile { padding: 18px; }
 .packfindbar { position: sticky; bottom: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 0 4px; background: var(--card); margin-top: 12px; }
 .packfindbar .btn { padding: 14px 8px; font-size: 16px; }
 .packscreen { position: fixed; inset: 0; z-index: 56; background: var(--bg); display: flex; flex-direction: column; }
@@ -3248,11 +3250,27 @@ function addChosenOrders() {
   const chosen = aoOrders().filter(o => ao.chosen.has(o.number));
   if (!chosen.length) return;
   const orders = chosen.map((o, i) => ({ order: o.number, page: i + 1, total: o.units, fromShop: true,
-    items: o.items.map(it => ({ name: it.name, details: it.details || "", sku: it.sku || "", barcode: it.barcode || "", bin: it.bin || "", qty: it.qty })) }));
+    items: o.items.map(it => {
+      const x = useBinsForOrders() ? ((it.barcode && findCode(it.barcode)) || (it.sku && findCode(it.sku))) : null, bs = x ? x.v.bins.map(b => b.bin) : [];
+      return { name: it.name, details: it.details || "", sku: it.sku || "", barcode: it.barcode || "", bin: useBinsForOrders() ? (bs[0] || "") : (it.bin || ""), also: bs.slice(1), qty: it.qty }; // the test address: bins only ever come from Bins
+    }) }));
   closeAddOrders();
   useSlips({ orders, warnings: [], pages: 0, all: orders.length, checked: orders.length }, `${orders.length} order${orders.length === 1 ? "" : "s"} from ${shop.orders ? "Shopify" : "the practice store"}`);
 }
-if (TEST_FEATURES) { const b = $("shopifyAddBtn"); if (b) { b.classList.remove("hidden"); b.onclick = openAddOrders; } }
+/* the test address: orders come only from the store. One button, Add orders: the store's open orders to choose from
+   (no slips, files, typing or QR codes: nothing has to be printed). */
+if (TEST_FEATURES) {
+  const b = $("shopifyAddBtn");
+  if (b) { b.classList.remove("hidden"); b.onclick = openAddOrders; b.replaceChildren(h("b", null, "Add orders"), h("span", { class: "small muted" }, "from the store")); }
+  document.querySelectorAll('#homeView .addtiles > label.addtile, #exampleBtn, #pasteToggle, #homeView .addpair').forEach(x => x.classList.add("hidden"));
+  $("homeView").querySelector(".addtiles").classList.add("one");
+  $("ordersHelp").onclick = () => {
+    const over = h("div", { class: "helpover", role: "dialog", "aria-label": "How to add orders" }, h("div", { class: "helpbox" },
+      h("p", null, h("b", null, "Add orders: "), "the store's open orders. Search, filter by area, when they were ordered or delivery, sort them, tick the ones to pick and add them. Each item goes to its bin from Bins; an item with no bin yet shows under Please look."),
+      h("p", { class: "small muted" }, "Every device in the company sees the same list. Tap anywhere to close.")));
+    over.addEventListener("click", () => over.remove()); document.body.append(over);
+  };
+}
 
 const fb = { ready: null, auth: null, db: null };
 const ACCT_KEY = "pick-and-sort-account-v1";
@@ -3457,6 +3475,7 @@ function stopWatching() {
   if (unwatchAccount) { unwatchAccount(); unwatchAccount = null; }
   if (unwatchCompany) { unwatchCompany(); unwatchCompany = null; }
   if (unwatchStore) { unwatchStore(); unwatchStore = null; }
+  if (unwatchBins) { unwatchBins(); unwatchBins = null; }
   ["unsub", "unsubDev", "unsubJobs"].forEach(k => { if (station[k]) { station[k](); station[k] = null; } }); station.id = null; drawStationBar();
 }
 /* ---------- the company's store setup (aisles, shelves, boxes, walking order): saved by an admin, used by everyone in it ---------- */
@@ -3527,7 +3546,7 @@ function watchAccount() {
   }, e => { if (e && e.code === "permission-denied") checkAccount(false); });
   if (!acct.company) return;
   const id = acct.company;
-  watchStore(); watchStation();
+  watchStore(); watchStation(); watchBins();
   unwatchCompany = fb.db.collection("companies").doc(id).onSnapshot({ includeMetadataChanges: true }, s => {
     if (s.metadata.fromCache || !acct || acct.company !== id) return;
     touchChecked();
@@ -3778,8 +3797,98 @@ function accountSection() {
    and never read by picking, sorting, packing or anything else in the app. (Settings → More → Bins.) */
 const BINS_KEY = "pick-and-sort-bins-practice-v1";
 let bins = (() => { try { return JSON.parse(localStorage.getItem(BINS_KEY) || "null"); } catch (e) { return null; } })();
+setTimeout(() => { if (binsSnap == null) binsSnap = snapOf(bins); }, 0); // what's here when the app opens
 const binsSettings = () => (bins && bins.settings) || { inventoryEdits: false };
-function saveBins() { try { localStorage.setItem(BINS_KEY, JSON.stringify(bins)); } catch (e) {} }
+function saveBins() { stampBins(); try { localStorage.setItem(BINS_KEY, JSON.stringify(bins)); } catch (e) {} scheduleBinsUpload(); }
+/* ---------- Bins shared by everyone in the company (test address): companies/{c}/bins/state ----------
+   Every item and every size remembers when it last changed, so two people changing different things at the same
+   time both keep their change; the same thing changed twice: the later one wins. Deleted ones are remembered too. */
+let binsSnap = null; // what each item was when last saved / received (to see what changed)
+const pJSON = p => JSON.stringify({ ...p, mt: 0, goneV: 0, variants: 0, sending: 0 });
+const vJSON = v => JSON.stringify({ ...v, mt: 0 });
+const snapOf = b => new Map(((b && b.products) || []).map(p => [p.id, { p: pJSON(p), v: new Map(p.variants.map(v => [v.id, vJSON(v)])) }]));
+function stampBins() {
+  if (!bins) return;
+  const now = Date.now(), old = binsSnap || new Map(), ids = new Set(bins.products.map(p => p.id));
+  bins.gone = bins.gone || {};
+  old.forEach((_, id) => { if (!ids.has(id)) bins.gone[id] = now; });
+  Object.keys(bins.gone).forEach(k => { if (now - bins.gone[k] > 30 * 864e5) delete bins.gone[k]; });
+  bins.products.forEach(p => {
+    const o = old.get(p.id); p.goneV = p.goneV || {};
+    if (!o || o.p !== pJSON(p)) p.mt = now;
+    if (o) o.v.forEach((_, vid) => { if (!p.variants.some(v => v.id === vid)) p.goneV[vid] = now; });
+    p.variants.forEach(v => { if (!o || o.v.get(v.id) !== vJSON(v)) v.mt = now; });
+  });
+  binsSnap = snapOf(bins);
+}
+const newer = (a, b) => { const out = { ...(a || {}) }; Object.entries(b || {}).forEach(([k, t]) => { if (!(out[k] >= t)) out[k] = t; }); return out; };
+function mergeProduct(x, y) {
+  const [n, o] = (y.mt || 0) >= (x.mt || 0) ? [y, x] : [x, y], goneV = newer(o.goneV, n.goneV), vs = new Map();
+  [...n.variants, ...o.variants].forEach(v => { const w = vs.get(v.id); if (!w || (v.mt || 0) > (w.mt || 0)) vs.set(v.id, v); });
+  const order = [...new Set([...n.variants, ...o.variants].map(v => v.id))];
+  return { ...n, goneV, variants: order.map(id => vs.get(id)).filter(v => !(goneV[v.id] > (v.mt || 0))) };
+}
+/** Two copies of the bins together: the newest of each item and each size. This device keeps its own settings. */
+function mergeBins(mine, theirs) {
+  const gone = newer(mine.gone, theirs.gone), byId = new Map();
+  [...(theirs.products || []), ...(mine.products || [])].forEach(p => { const q = byId.get(p.id); byId.set(p.id, q ? mergeProduct(q, p) : p); });
+  const log = [...new Map([...(mine.log || []), ...(theirs.log || [])].map(l => [l.at + "|" + l.text, l])).values()].sort((a, b) => b.at - a.at).slice(0, 300);
+  return { ...theirs, products: [...byId.values()].filter(p => !(gone[p.id] > (p.mt || 0))), log, gone, settings: mine.settings || theirs.settings };
+}
+const binsSyncOn = () => !!(TEST_FEATURES && !testNoAuth && acct && acct.company && fb.db);
+const binsDoc = () => fb.db.collection("companies").doc(acct.company).collection("bins").doc("state");
+let unwatchBins = null, binsUpTimer = null, binsRemoteAt = 0, binsDirty = false, binsUploading = false;
+function scheduleBinsUpload() { if (!binsSyncOn()) return; binsDirty = true; clearTimeout(binsUpTimer); binsUpTimer = setTimeout(uploadBins, 800); }
+function applyBins(next) {
+  bins = next; try { localStorage.setItem(BINS_KEY, JSON.stringify(bins)); } catch (e) {}
+  binsSnap = snapOf(bins); refreshBins(); fillListBins();
+}
+function watchBins() {
+  if (unwatchBins) { unwatchBins(); unwatchBins = null; }
+  if (!binsSyncOn()) return;
+  binsRemoteAt = 0;
+  unwatchBins = binsDoc().onSnapshot(async s => {
+    if (s.metadata.hasPendingWrites) return;
+    if (!s.exists) { if (bins && bins.products.length) { binsDirty = true; uploadBins(); } return; }
+    const d = s.data(); if (d.at === binsRemoteAt) return;
+    let remote; try { remote = JSON.parse(await unpackText(d.z)); } catch (e) { return; }
+    binsRemoteAt = d.at;
+    applyBins(bins ? mergeBins(bins, remote) : { ...remote, settings: binsSettings() });
+    if (binsDirty) uploadBins();
+  }, () => {});
+}
+async function uploadBins() {
+  if (!binsSyncOn() || !bins || binsUploading) return;
+  binsUploading = true; binsDirty = false;
+  const ref = binsDoc(); let at = 0, merged = null;
+  try {
+    await fb.db.runTransaction(async tx => {
+      const s = await tx.get(ref);
+      merged = bins;
+      if (s.exists && s.data().at !== binsRemoteAt) merged = mergeBins(bins, JSON.parse(await unpackText(s.data().z)));
+      at = Date.now();
+      const out = { ...merged, log: (merged.log || []).slice(0, 150) }; delete out.settings;
+      tx.set(ref, { z: await packText(JSON.stringify(out)), at, by: acct.uid, byEmail: acct.email });
+    });
+    binsRemoteAt = at;
+    if (merged !== bins) applyBins(merged);
+  } catch (e) { binsDirty = true; if (e.code !== "permission-denied") setTimeout(uploadBins, 5000); else toast("Bins can't be shared yet: the database rules need the bins part (ask the app's owner)."); }
+  binsUploading = false;
+  if (binsDirty) scheduleBinsUpload();
+}
+/** Items on the list still waiting for a bin get theirs from Bins (as soon as one is set). */
+function fillListBins() {
+  if (!useBinsForOrders() || !current || !current.lines) return;
+  let n = 0;
+  current.lines.forEach(l => {
+    if (l.box && l.box !== "?") return;
+    const x = (l.barcode && findCode(l.barcode)) || (l.sku && findCode(l.sku));
+    if (x && x.v.bins.length) { l.box = x.v.bins[0].bin; l.also = x.v.bins.slice(1).map(b => b.bin).join(", "); n++; }
+  });
+  if (!n) return;
+  const keep = plan ? tickKeys() : null; rebuild(); if (keep) applyTickKeys(keep); saveListSoon();
+  toast(`${plural(n, "item")} on the list got ${n === 1 ? "its bin" : "their bins"} from Bins.`);
+}
 const B = { pid: null, bin: null, sort: "bin", vendor: "", show: "all", q: "", pick: null, choice: "one", chosen: new Set() }; // where you are in Bins
 
 /** Practice items: a few brands, items in several sizes and colours, most placed, some not; some bins empty. */
@@ -3853,6 +3962,7 @@ function binsChange(text, fn, opts = {}) {
   saveBins();
   showBinsUndo(text, before);
   if (!opts.noPush) pushShopifyChanges(before);
+  fillListBins();
 }
 /* ---------- where each one is: in its bin, picked, sorted (on its order's pile), packed ----------
    Worked out from the current list: an order line's item is matched by barcode or SKU. Picked ones aren't in the bin
@@ -4033,6 +4143,8 @@ const plural = (n, w, many) => (many ? `${n} ${n === 1 ? w : many}` : `${n} ${w}
 
 /* the Bins pages */
 function binsNotice() {
+  if (TEST_FEATURES) return binsSyncOn() ? h("p", { class: "small muted", style: "margin-top:0" }, `Shared with everyone in ${acct.companyName || "the company"}. Orders added from the store get each item's bin from here.`)
+    : h("div", { class: "notice warn" }, "Sign in to share Bins with your company. Until then it's kept on this device.");
   return h("div", { class: "notice warn" }, "Practice only. Nothing here is used for picking, sorting, packing or anything else, and it isn't shared with other phones.");
 }
 function renderBinsHome(v) {
@@ -4040,7 +4152,8 @@ function renderBinsHome(v) {
   v.replaceChildren(h("section", { class: "card" }, backRow("Settings", "home"),
     h("h2", null, "Bins"), binsNotice(),
     h("div", { class: "binhome" },
-      h("button", { class: "btn secondary", type: "button", onclick: e => bins ? tapTwice(e.currentTarget, "Start the practice again?", loadPractice) : loadPractice() },
+      TEST_FEATURES ? (bins && bins.products.length ? null : h("button", { class: "btn secondary", type: "button", onclick: loadPractice }, "Try it with example items"))
+      : h("button", { class: "btn secondary", type: "button", onclick: e => bins ? tapTwice(e.currentTarget, "Start the practice again?", loadPractice) : loadPractice() },
         bins ? "Practice: start again" : "Practice: load example items"),
       bins ? h("p", { class: "small muted", style: "margin:0" }, `${plural(bins.products.length, "item")} (${plural(vs.length, "variant")}) · ${plural(used, "bin")} in use · ${vs.length - placed} not in a bin yet`)
         : h("p", { class: "small muted", style: "margin:0" }, "Loads example items in several sizes and colours, with most of them already in bins, so you can try everything."),
@@ -5017,7 +5130,7 @@ function renderAdvanced() {
 function showAppLinks() {
   const box = $("appLinks");
   if (!box || !/^https?:$/.test(location.protocol)) return;
-  [["PickAndSort.apk", "⬇ Android app (APK)"], ["PickAndSort-unsigned.ipa", "⬇ iPhone app file (for Sideloadly / AltStore)"]].forEach(([file, label]) => {
+  [["PickAndSort.apk", "Android app (APK)"], ["PickAndSort-unsigned.ipa", "iPhone app file (for Sideloadly / AltStore)"]].forEach(([file, label]) => {
     // the Firebase site can't hold app files (free plan): they're downloaded from the GitHub site
     const url = (onFirebaseSite ? SITE : "") + file;
     fetch(url, { method: "HEAD" }).then(r => {
@@ -5059,7 +5172,7 @@ function aisleForm(u, refreshGrid) {
           const a = endNumber(e.first), z = endNumber(e.last), L = specLetter(u.spec);
           if (a != null && z != null) { const lo = a + Math.floor((z - a) / by) * by; msg = `${L}${z} doesn't fit. Going down ${by} shelves, this shelf has ${L}${a}, ${L}${a + by}, ${L}${a + 2 * by}… so its last box is probably ${L}${lo} or ${L}${lo + by}.`; }
         }
-        return h("div", { style: "color:var(--danger);font-weight:600" }, `${name}: ⚠ ${msg}`);
+        return h("div", { style: "color:var(--danger);font-weight:600" }, `${name}: ${msg}`);
       }
       return h("div", null, `${name}: ${sh.boxes ? prettyBoxes(sh.boxes) : "–"} (${r.boxes.length} box${r.boxes.length === 1 ? "" : "es"})${u.spec.vertical ? "" : sh.rtl ? " (numbers run ←)" : " (numbers run →)"}`);
     }));
@@ -5215,17 +5328,17 @@ function renderSettingsPage() {
     h("h2", null, "Settings"),
     h("div", { class: "tiles" },
       h("button", { class: "tile", type: "button", onclick: () => go("map") },
-        h("span", { class: "tileicon" }, "🗺"), h("b", null, "Map"),
+        h("b", null, "Map"),
         h("span", { class: "small muted" }, `How the store is laid out. ${settings.units.length} aisle${settings.units.length === 1 ? "" : "s"}, ${boxes} boxes.`)),
       h("button", { class: "tile", type: "button", onclick: () => go("order") },
-        h("span", { class: "tileicon" }, "🚶"), h("b", null, "Order"),
+        h("b", null, "Order"),
         h("span", { class: "small muted" }, "Which aisle first, and how to pick each one.")),
-      h("button", { class: "tile", type: "button", onclick: () => go("inventory") },
-        h("span", { class: "tileicon" }, "📦"), h("b", null, "Inventory"),
+      TEST_FEATURES ? null : h("button", { class: "tile", type: "button", onclick: () => go("inventory") },
+        h("b", null, "Inventory"),
         h("span", { class: "small muted" }, settings.inventory && settings.inventory.rows ? `${settings.inventory.rows.length} items with their bins.` : "Item numbers and their bins (if your orders don't list the bin).")),
       h("button", { class: "tile", type: "button", onclick: () => go("bins") },
         h("b", null, "Bins"),
-        h("span", { class: "small muted" }, "Practice: which bin each item is in. Not used for orders yet."))),
+        h("span", { class: "small muted" }, TEST_FEATURES ? "Every item, how many there are, which bin it's in and how many are in each bin." : "Practice: which bin each item is in. Not used for orders yet."))),
     h("button", { class: "link", type: "button", style: "margin-top:14px", onclick: () => go("more") }, "More: order numbers, backup, look, get the app")));
 }
 

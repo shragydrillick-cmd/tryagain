@@ -86,6 +86,10 @@ service cloud.firestore {
       match /jobs/{j} {
         allow read, write: if isOwner() || inCompany(c);
       }
+      // the company's bins: every item, which bin it's in and how many (everyone in the company places items)
+      match /bins/{doc} {
+        allow read, write: if isOwner() || inCompany(c);
+      }
     }
   }
 }

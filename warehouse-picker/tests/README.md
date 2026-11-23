@@ -119,6 +119,11 @@ Bridge): an admin opening it there connects by itself with Shopify's session tok
 changing a name, barcode or how many here goes to the store (and Undo too); adding a colour, removing a size, a
 brand-new item (a draft in the store, with its amounts) and deleting an item all reach the store.
 
+`bins-share.test.js` (with the Firebase emulator, test address): Orders has only Add orders; Bins are shared by
+everyone in the company (two people changing different sizes at once both keep their change; a deleted item goes on
+both); orders added from the store get each item's bin from Bins, one without a bin waits under Please look and gets
+its bin as soon as it's set on any phone.
+
 `statuses.test.js` (test address, Use bins for orders on): an order list made of items in Bins (matched by barcode or
 SKU): each item says how many are in its bin now, to pick, picked, sorted, packed; the bin's page shows how many are
 in it now; finishing the list takes what was picked out of its bin and what was packed out of the inventory; with the
