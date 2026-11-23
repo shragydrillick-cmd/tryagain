@@ -84,8 +84,9 @@ async function graphql(key, query, variables) {
   return r.json();
 }
 
-const ORDER_FIELDS = (withPeople) => `id name createdAt tags displayFulfillmentStatus
-  ${withPeople ? "customer { displayName } shippingAddress { name address1 address2 city zip }" : ""}
+// people: "all" (name and address), "address" (address only), "none"
+const ORDER_FIELDS = (people) => `id name createdAt tags displayFulfillmentStatus
+  ${people === "all" ? "customer { displayName } " : ""}${people !== "none" ? "shippingAddress { name address1 address2 city zip }" : ""}
   shippingLine { title }
   lineItems(first: 100) { nodes { name title variantTitle quantity currentQuantity unfulfilledQuantity sku variant { barcode sku } } }`;
 const ORDERS = withPeople => `query($n: Int!, $after: String) {
@@ -116,15 +117,20 @@ function onHand(v) {
 }
 async function openOrders(key) {
   // names and addresses are "protected customer data" in Shopify: if the app hasn't been allowed them yet, the orders come without
-  let withPeople = true, out = [], after = null;
+  // names and addresses are "protected customer data": if Shopify refuses them, the orders come without (and its reason is kept)
+  let people = "all", peopleErr = "", out = [], after = null;
   for (let page = 0; page < 5; page++) {
-    let d = await graphql(key, ORDERS(withPeople), { n: 100, after });
-    if (d.errors && withPeople && JSON.stringify(d.errors).match(/ACCESS_DENIED|customer|shippingAddress|protected/i)) { withPeople = false; d = await graphql(key, ORDERS(false), { n: 100, after }); }
+    let d = await graphql(key, ORDERS(people), { n: 100, after });
+    while (d.errors && people !== "none") {
+      if (!peopleErr) { peopleErr = d.errors.map(e => e.message).join("; ").slice(0, 300); console.error("orders with people refused:", JSON.stringify(d.errors).slice(0, 1000)); }
+      people = people === "all" ? "address" : "none";
+      d = await graphql(key, ORDERS(people), { n: 100, after });
+    }
     if (d.errors) throw new Problem(502, "Shopify: " + (d.errors[0] && d.errors[0].message || "error"));
     const c = d.data.orders; out = out.concat(c.nodes.map(o => toPackOrder(o, key.shop)));
     if (!c.pageInfo.hasNextPage) break; after = c.pageInfo.endCursor;
   }
-  return { orders: out.filter(o => o.items.length), people: withPeople };
+  return { orders: out.filter(o => o.items.length), people, peopleErr };
 }
 
 async function route(req, res) {
