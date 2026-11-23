@@ -104,7 +104,8 @@ const server = app.listen(8766);
   // Orders → From Shopify: filter by area, tick, add to the list; items without a bin go to "Please look"
   await a.evaluate(() => { try { closePack(); } catch (e) {} closeFind(); closePacking(); });
   ok("Orders: a From Shopify button", await a.isVisible("#shopifyAddBtn"));
-  await a.click("#shopifyAddBtn"); await a.waitForFunction(() => shop.orders && !shop.busy && document.querySelectorAll("#addOrders .aorow").length === 2, null, { timeout: 8000 }).catch(() => {});
+  await a.evaluate(() => { shop.orders = null; }); await a.click("#shopifyAddBtn"); await a.waitForFunction(() => !shop.busy, null, { timeout: 8000 }).catch(() => {}); await a.waitForTimeout(300);
+  ok("Add orders: the store's orders show by themselves once they arrive", (await a.$$("#addOrders .aorow")).length === 2 && !/Getting the orders/.test(await a.innerText("#addOrders")));
   await a.selectOption('#addOrders select[aria-label="Area"]', "Brooklyn");
   const rows = await a.$$eval("#addOrders .aorow", r => r.map(x => x.innerText.replace(/\s+/g, " ")));
   ok("filtered by area: only the Brooklyn order", rows.length === 1 && /#1001.*Rivka Klein.*Brooklyn.*2× Fleece blanket \(Blue\)/.test(rows[0]), rows.join(" // "));

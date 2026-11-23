@@ -3111,6 +3111,7 @@ async function refreshShopify(force) {
   shop.busy = false;
   if ($("packPanel")) drawPacking();
   if ($("packFind")) drawFind();
+  if (ao) drawAddOrders();
   if (view === "settings" && setPage === "more") renderSettings();
 }
 /** Under Packing: where the orders come from. */
@@ -3190,7 +3191,7 @@ function drawAddOrders() {
   const n = ao.chosen.size;
   el.replaceChildren(h("div", { class: "detailbox" },
     h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, "Add orders"), h("button", { class: "btn small", type: "button", onclick: closeAddOrders }, "Back")),
-    h("p", { class: "small muted", style: "margin-top:0" }, shop.orders ? `Open orders in ${shop.status.shop.replace(/\.myshopify\.com$/, "")}${shop.busy ? " (updating…)" : ""}` : shop.busy ? "Getting the orders…" : "Practice orders (no Shopify store connected: Settings → More)"),
+    h("p", { class: "small muted", style: "margin-top:0" }, shop.orders ? `Open orders in ${shop.status.shop.replace(/\.myshopify\.com$/, "")}${shop.busy ? " (updating…)" : ""}` : shop.busy ? "Getting the orders…" : shop.err ? `Couldn't get the Shopify orders: ${shop.err}. Showing practice orders.` : "Practice orders (no Shopify store connected: Settings → More)"),
     search,
     h("div", { class: "binctls" },
       sel("Sort", "sort", [["created", "Newest first"], ["oldest", "Oldest first"], ["number", "Order number"], ["delivery", "Delivery date"], ["place", "Area"], ["items", "Most items"]]),
