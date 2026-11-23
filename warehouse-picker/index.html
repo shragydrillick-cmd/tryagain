@@ -3139,6 +3139,12 @@ function shopifySection() {
   if (st && st.connected) return h("div", null,
     h("p", null, h("b", null, st.shop), h("br"), h("span", { class: "small muted" }, `Connected ${new Date(st.at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}. Packing uses its open orders; Pack tags them in Shopify.`)),
     !shop.people ? h("p", { class: "small" }, "Shopify isn't sharing customer names and addresses with Pick & Sort yet (Shopify Dev Dashboard: the app → API access → Protected customer data).") : null,
+    isAdmin ? h("div", { class: "row", style: "margin-bottom:8px" }, h("button", { class: "btn small", type: "button", onclick: async e => {
+      const b = e.currentTarget; b.disabled = true; b.textContent = "Making orders…";
+      try { const d = await shopifyApi("testorders", { count: 5 }); toast(`Made ${d.made.length} practice order${d.made.length === 1 ? "" : "s"} in Shopify: ${d.made.join(", ")}`); shop.at = 0; refreshShopify(true); }
+      catch (err) { toast(err.message); }
+      b.disabled = false; b.textContent = "Make 5 practice orders";
+    } }, "Make 5 practice orders"), h("span", { class: "small muted", style: "align-self:center" }, "test stores only")) : null,
     isAdmin ? h("div", { class: "row" }, h("button", { class: "btn small secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Disconnect the Shopify store?", async () => {
       try { await shopifyApi("disconnect", {}); shop.status = null; shop.orders = null; shop.at = 0; toast("Disconnected."); refreshShopify(true); } catch (err) { toast(err.message); }
     }) }, "Disconnect")) : null);

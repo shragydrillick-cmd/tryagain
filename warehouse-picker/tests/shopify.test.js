@@ -41,6 +41,9 @@ app.post("/fake/:shop/admin/oauth/access_token", (req, res) => {
 app.post("/fake/:shop/admin/api/:v/graphql.json", (req, res) => {
   if (req.get("x-shopify-access-token") !== "shpat_" + req.params.shop) return res.status(401).end();
   if (/tagsAdd/.test(req.body.query)) { fake.tags.push(req.body.variables); return res.json({ data: { tagsAdd: { userErrors: [] } } }); }
+  if (/partnerDevelopment/.test(req.body.query)) return res.json({ data: { shop: { currencyCode: "USD", plan: { partnerDevelopment: fake.dev !== false } },
+    products: { nodes: [{ title: "Fleece blanket", variants: { nodes: [{ id: "gid://shopify/ProductVariant/1", title: "Blue" }, { id: "gid://shopify/ProductVariant/2", title: "Gray" }] } }] } } });
+  if (/orderCreate/.test(req.body.query)) { fake.created = (fake.created || []).concat(req.body.variables.order); return res.json({ data: { orderCreate: { order: { name: "#" + (1100 + fake.created.length) }, userErrors: [] } } }); }
   res.json({ data: { orders: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: ORDERS } } });
 });
 app.all(/^\/shopify(\/.*)?$/, (req, res) => handle(req, res));
@@ -150,6 +153,17 @@ const server = app.listen(8766);
   const wx = await fetch(SRV + "/shopify/exchange", { method: "POST", headers: { Authorization: "Bearer " + wtok2, "Content-Type": "application/json" }, body: JSON.stringify({ idToken: sess() }) });
   const fx = await fetch(SRV + "/shopify/exchange", { method: "POST", headers: { Authorization: "Bearer " + await e.evaluate(() => fb.auth.currentUser.getIdToken()), "Content-Type": "application/json" }, body: JSON.stringify({ idToken: jwt({ dest: "https://practice-store.myshopify.com", aud: "55a9bba1b5e7545f3227a01633c9693e", exp: now() + 60 }, "wrong") }) });
   ok("exchange: a worker, or a made-up session token, is refused", wx.status === 403 && fx.status === 400, wx.status + " " + fx.status);
+  // Make 5 practice orders (test stores only): paid, with a customer, an address and Local Delivery / UPS
+  await e.evaluate(() => closeAddOrders()); await e.click("#navBtn"); await e.evaluate(() => go("more"));
+  await e.waitForSelector('button:text-is("Make 5 practice orders")'); await e.click('button:text-is("Make 5 practice orders")');
+  await e.waitForFunction(() => /Made 5 practice orders/.test(document.body.innerText), null, { timeout: 8000 }).catch(() => {});
+  const c = fake.created || [];
+  ok("Make 5 practice orders: 5 paid orders made in the store", c.length === 5 && c.every(o => o.financialStatus === "PAID" && o.lineItems.length && o.shippingAddress.city && /Local Delivery|UPS/.test(o.shippingLines[0].title)), JSON.stringify(c[0] || {}).slice(0, 150));
+  fake.dev = false;
+  const real = await fetch(SRV + "/shopify/testorders", { method: "POST", headers: { Authorization: "Bearer " + await e.evaluate(() => fb.auth.currentUser.getIdToken()), "Content-Type": "application/json" }, body: "{}" });
+  ok("…and never in a real store", real.status === 403 && (fake.created || []).length === 5);
+  const wt = await fetch(SRV + "/shopify/testorders", { method: "POST", headers: { Authorization: "Bearer " + wtok2, "Content-Type": "application/json" }, body: "{}" });
+  ok("…and not by a worker", wt.status === 403);
   ok("no page errors", !errs.length, errs.join(" / "));
   console.log(bad ? `${bad} FAILED` : "all ok"); await b.close(); server.close(); process.exit(bad ? 1 : 0);
 })();

@@ -195,6 +195,33 @@ async function route(req, res) {
     if (err) throw new Problem(502, "Shopify: " + err);
     return res.json({ ok: true });
   }
+  // practice orders in a development (test) store only: real orders made straight in the store, paid, no checkout or tax
+  if (path === "/testorders") {
+    const who = await caller(req, true); await dailyGuard("shopifyTestOrders", 100);
+    const key = await storeKey(who.company), n = Math.max(1, Math.min(10, Number(body.count) || 5));
+    const info = await graphql(key, `{ shop { currencyCode plan { partnerDevelopment } } products(first: 50, query: "status:active") { nodes { title variants(first: 20) { nodes { id title } } } } }`);
+    if (info.errors) throw new Problem(502, "Shopify: " + info.errors[0].message);
+    if (!info.data.shop.plan.partnerDevelopment) throw new Problem(403, "Practice orders are only made in a development (test) store.");
+    const variants = info.data.products.nodes.flatMap(p => p.variants.nodes.map(v => v.id));
+    if (!variants.length) throw new Problem(409, "The store has no products yet: add a product or two in Shopify first.");
+    const people = [["Rivka", "Klein"], ["Sara", "Weiss"], ["Chaya", "Gross"], ["Leah", "Stern"], ["Miriam", "Friedman"], ["Esther", "Katz"], ["Dina", "Roth"], ["Malky", "Adler"]];
+    const places = [["1200 50th St", "Brooklyn", "11219", "Local Delivery"], ["1650 Ocean Pkwy", "Brooklyn", "11230", "Local Delivery"], ["5 Maple Ave", "Monsey", "10952", "UPS Ground"],
+      ["220 Lee Ave", "Brooklyn", "11211", "Local Delivery"], ["710 Main St", "Lakewood", "08701", "UPS Ground"], ["70-15 Main St", "Queens", "11367", "UPS Ground"]];
+    const pick = a => a[crypto.randomInt(a.length)], made = [], problems = [];
+    for (let i = 0; i < n; i++) {
+      const [first, last] = pick(people), [address1, city, zip, ship] = pick(places), lines = new Map();
+      for (let k = 1 + crypto.randomInt(3); k > 0; k--) { const v = pick(variants); lines.set(v, (lines.get(v) || 0) + 1 + (crypto.randomInt(4) === 0 ? 1 : 0)); }
+      const order = { email: `${first}.${last}@example.com`.toLowerCase(), financialStatus: "PAID", test: true,
+        lineItems: [...lines].map(([variantId, quantity]) => ({ variantId, quantity })),
+        shippingAddress: { firstName: first, lastName: last, address1, city, zip, provinceCode: zip.startsWith("08") ? "NJ" : "NY", countryCode: "US" },
+        shippingLines: [{ title: ship, priceSet: { shopMoney: { amount: "0.00", currencyCode: info.data.shop.currencyCode } } }] };
+      const d = await graphql(key, `mutation($order: OrderCreateOrderInput!) { orderCreate(order: $order, options: { inventoryBehaviour: BYPASS, sendReceipt: false, sendFulfillmentReceipt: false }) { order { name } userErrors { field message } } }`, { order });
+      const err = d.errors ? d.errors[0].message : d.data.orderCreate.userErrors.length ? d.data.orderCreate.userErrors.map(e => e.message).join("; ") : "";
+      if (err) problems.push(err); else made.push(d.data.orderCreate.order.name);
+    }
+    if (!made.length) throw new Problem(502, "Shopify: " + (problems[0] || "no orders made"));
+    return res.json({ made, problems });
+  }
   if (path === "/disconnect") {
     const who = await caller(req, true);
     await getDb().doc(`shopifyTokens/${who.company}`).delete();
