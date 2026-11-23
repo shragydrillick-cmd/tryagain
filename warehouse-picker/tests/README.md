@@ -115,7 +115,8 @@ Settings → More (a worker can't); the store's key can't be read from the app; 
 Shopify is refused; Packing and Find use the store's open orders; Pack puts the "Packed ..." tag on the order in
 Shopify; Orders → From Shopify lists the open orders, filtered by area, sorted, ticked and added to the list (items
 without a bin go to Please look); Disconnect forgets the key. Inside the store's Shopify admin (a pretend App
-Bridge): an admin opening it there connects by itself with Shopify's session token; a worker or a made-up token is refused.
+Bridge): an admin opening it there connects by itself with Shopify's session token; a worker or a made-up token is refused. Bins → Inventory brings in the store's products (sizes, SKUs, barcodes, how many);
+changing a name, barcode or how many here goes to the store (and Undo too); sizes and deleting are left to Shopify.
 
 `stock.test.js`: Bins with amounts. Inventory lists every item with how many (and how many still to put away);
 Scan to count in (a known barcode adds how many came in, a new barcode starts a new item with it); a new item's page sets

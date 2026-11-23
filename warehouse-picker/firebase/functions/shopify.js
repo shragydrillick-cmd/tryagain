@@ -19,7 +19,7 @@ const { getAuth } = require("firebase-admin/auth");
 const { dailyGuard } = require("./guard");
 
 const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || "55a9bba1b5e7545f3227a01633c9693e";
-const SCOPES = "read_orders,write_orders,read_products,write_products,read_fulfillments";
+const SCOPES = "read_orders,write_orders,read_products,write_products,read_fulfillments,read_inventory,write_inventory,read_locations";
 const API_VERSION = process.env.SHOPIFY_API_VERSION || "2026-07";
 const HOME = "https://pick-and-sort.web.app";
 // where the app opens from Shopify (and comes back to after connecting): the test address while Shopify is only there
@@ -178,7 +178,7 @@ async function route(req, res) {
   if (path === "/status") {
     const who = await caller(req, false);
     const t = await getDb().doc(`shopifyTokens/${who.company}`).get();
-    return res.json(t.exists ? { connected: true, shop: t.data().shop, at: t.data().at } : { connected: false });
+    return res.json(t.exists ? { connected: true, shop: t.data().shop, at: t.data().at, scope: t.data().scope || "", need: SCOPES } : { connected: false, need: SCOPES });
   }
   if (path === "/orders") {
     const who = await caller(req, false); await dailyGuard("shopifyOrders");
@@ -221,6 +221,54 @@ async function route(req, res) {
     }
     if (!made.length) throw new Problem(502, "Shopify: " + (problems[0] || "no orders made"));
     return res.json({ made, problems });
+  }
+  // the store's inventory: every product with its sizes / colours, barcodes, SKUs and how many
+  if (path === "/products") {
+    const who = await caller(req, false); await dailyGuard("shopifyProducts");
+    const key = await storeKey(who.company);
+    let out = [], after = null;
+    for (let page = 0; page < 20; page++) {
+      const d = await graphql(key, `query($after: String) { products(first: 100, after: $after, query: "status:active OR status:draft") { pageInfo { hasNextPage endCursor }
+        nodes { id title vendor status variants(first: 100) { nodes { id title sku barcode inventoryQuantity selectedOptions { name value } inventoryItem { id } } } } } }`, { after });
+      if (d.errors) throw new Problem(502, "Shopify: " + d.errors[0].message);
+      out = out.concat(d.data.products.nodes.map(p => ({ id: p.id, title: p.title, vendor: p.vendor || "", status: p.status,
+        variants: p.variants.nodes.map(v => ({ id: v.id, title: v.title, sku: v.sku || "", barcode: v.barcode || "", stock: v.inventoryQuantity, item: v.inventoryItem && v.inventoryItem.id,
+          options: (v.selectedOptions || []).filter(o => !(o.name === "Title" && o.value === "Default Title")) })) })));
+      if (!d.data.products.pageInfo.hasNextPage) break; after = d.data.products.pageInfo.endCursor;
+    }
+    return res.json({ products: out, at: Date.now() });
+  }
+  // changes made in Pick & Sort, written to the store: a product's name / company, a variant's barcode / SKU, how many
+  if (path === "/edit") {
+    const who = await caller(req, false); await dailyGuard("shopifyEdit");
+    const key = await storeKey(who.company), e = body || {}, gid = (x, kind) => new RegExp(`^gid://shopify/${kind}/\\d+$`).test(String(x || ""));
+    const fail = d => { const err = d.errors ? d.errors[0].message : Object.values(d.data || {}).map(x => x && x.userErrors || []).flat().map(x => x.message).join("; "); if (err) throw new Problem(502, "Shopify: " + err); };
+    if (e.kind === "product") {
+      if (!gid(e.id, "Product")) throw new Problem(400, "Which product?");
+      const input = { id: e.id }; if (e.title != null) input.title = String(e.title).slice(0, 255); if (e.vendor != null) input.vendor = String(e.vendor).slice(0, 255);
+      fail(await graphql(key, `mutation($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`, { input }));
+    } else if (e.kind === "variant") {
+      if (!gid(e.product, "Product") || !gid(e.id, "ProductVariant")) throw new Problem(400, "Which variant?");
+      const v = { id: e.id }; if (e.barcode != null) v.barcode = String(e.barcode).slice(0, 255); if (e.sku != null) v.inventoryItem = { sku: String(e.sku).slice(0, 255) };
+      fail(await graphql(key, `mutation($p: ID!, $v: [ProductVariantsBulkInput!]!) { productVariantsBulkUpdate(productId: $p, variants: $v) { userErrors { message } } }`, { p: e.product, v: [v] }));
+    } else if (e.kind === "stock") {
+      if (!gid(e.item, "InventoryItem") || !gid(e.id, "ProductVariant")) throw new Problem(400, "Which variant?");
+      const want = Math.max(0, Math.floor(Number(e.quantity) || 0));
+      // the change goes on the store's first location; the difference from what Shopify has now in all
+      const now = await graphql(key, `query($v: ID!) { productVariant(id: $v) { inventoryQuantity } locations(first: 1) { nodes { id } } }`, { v: e.id });
+      fail(now);
+      const loc = now.data.locations.nodes[0]; if (!loc) throw new Problem(409, "The store has no location for inventory.");
+      const delta = want - (now.data.productVariant.inventoryQuantity || 0);
+      if (delta) {
+        const change = { delta, inventoryItemId: e.item, locationId: loc.id };
+        const m = `mutation($input: InventoryAdjustQuantitiesInput!) { inventoryAdjustQuantities(input: $input) { userErrors { message } } }`;
+        let d = await graphql(key, m, { input: { reason: "correction", name: "available", changes: [{ ...change, changeFromQuantity: null }] } });
+        if (d.errors && /changeFromQuantity/.test(JSON.stringify(d.errors))) d = await graphql(key, m, { input: { reason: "correction", name: "available", changes: [change] } }); // older API versions
+        fail(d);
+      }
+      return res.json({ ok: true, quantity: want });
+    } else throw new Problem(400, "What to change?");
+    return res.json({ ok: true });
   }
   if (path === "/disconnect") {
     const who = await caller(req, true);

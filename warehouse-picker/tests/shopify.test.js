@@ -43,6 +43,15 @@ app.post("/fake/:shop/admin/api/:v/graphql.json", (req, res) => {
   if (/tagsAdd/.test(req.body.query)) { fake.tags.push(req.body.variables); return res.json({ data: { tagsAdd: { userErrors: [] } } }); }
   if (/partnerDevelopment/.test(req.body.query)) return res.json({ data: { shop: { currencyCode: "USD", plan: { partnerDevelopment: fake.dev !== false } },
     products: { nodes: [{ title: "Fleece blanket", variants: { nodes: [{ id: "gid://shopify/ProductVariant/1", title: "Blue" }, { id: "gid://shopify/ProductVariant/2", title: "Gray" }] } }] } } });
+  // the store's inventory: products, and the changes Pick & Sort sends back
+  if (/inventoryQuantity selectedOptions/.test(req.body.query)) return res.json({ data: { products: { pageInfo: { hasNextPage: false }, nodes: [
+    { id: "gid://shopify/Product/9", title: "Fleece blanket", vendor: "Cozy Co", status: "ACTIVE", variants: { nodes: [
+      { id: "gid://shopify/ProductVariant/91", title: "Blue / One", sku: "FB-BLU", barcode: "5012345000015", inventoryQuantity: fake.qty91 ?? 4, selectedOptions: [{ name: "Color", value: "Blue" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/191" } },
+      { id: "gid://shopify/ProductVariant/92", title: "Gray / One", sku: "FB-GRY", barcode: "", inventoryQuantity: 0, selectedOptions: [{ name: "Color", value: "Gray" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/192" } }] } }] } } });
+  if (/productUpdate/.test(req.body.query)) { (fake.edits = fake.edits || []).push(["product", req.body.variables.input]); return res.json({ data: { productUpdate: { userErrors: [] } } }); }
+  if (/productVariantsBulkUpdate/.test(req.body.query)) { (fake.edits = fake.edits || []).push(["variant", req.body.variables.v[0]]); return res.json({ data: { productVariantsBulkUpdate: { userErrors: [] } } }); }
+  if (/locations\(first: 1\)/.test(req.body.query)) return res.json({ data: { productVariant: { inventoryQuantity: fake.qty91 ?? 4 }, locations: { nodes: [{ id: "gid://shopify/Location/1" }] } } });
+  if (/inventoryAdjustQuantities/.test(req.body.query)) { const c = req.body.variables.input.changes[0]; (fake.edits = fake.edits || []).push(["stock", c]); fake.qty91 = (fake.qty91 ?? 4) + c.delta; return res.json({ data: { inventoryAdjustQuantities: { userErrors: [] } } }); }
   if (/orderCreate/.test(req.body.query)) { fake.created = (fake.created || []).concat(req.body.variables.order); return res.json({ data: { orderCreate: { order: { name: "#" + (1100 + fake.created.length) }, userErrors: [] } } }); }
   res.json({ data: { orders: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: ORDERS } } });
 });
@@ -164,6 +173,28 @@ const server = app.listen(8766);
   ok("…and never in a real store", real.status === 403 && (fake.created || []).length === 5);
   const wt = await fetch(SRV + "/shopify/testorders", { method: "POST", headers: { Authorization: "Bearer " + wtok2, "Content-Type": "application/json" }, body: "{}" });
   ok("…and not by a worker", wt.status === 403);
+  // Bins → Inventory: the store's products come in (the practice items go); changes go back to the store
+  await e.evaluate(() => { bins = practiceBins(); bins.settings = { inventoryEdits: true }; saveBins(); go("binsInventory"); });
+  await e.waitForFunction(() => bins.shopifyAt && !shopInv.busy, null, { timeout: 10000 }).catch(() => {});
+  const invRows = await e.$$eval("#settingsView .invrow", r => r.map(x => x.innerText.replace(/\s+/g, " ")));
+  ok("Inventory: the store's products, with how many (the practice items gone)", invRows.length === 1 && /Fleece blanket.*Cozy Co.*2 variants.*4/.test(invRows[0]) && /From Shopify: practice-store · 1 item/.test(await e.innerText("#settingsView")), invRows.join(" // "));
+  const vs = await e.evaluate(() => bins.products[0].variants.map(v => `${optText(v)}|${v.sku}|${v.barcode}|${v.stock}`).join(", "));
+  ok("…each size with its colour, size, SKU, barcode and how many", vs === "Blue / One|FB-BLU|5012345000015|4, Gray / One|FB-GRY||0", vs);
+  await e.click("#settingsView .invrow");
+  await e.fill('input[aria-label="Barcode of Gray / One"]', "5012345000022"); await e.press('input[aria-label="Barcode of Gray / One"]', "Tab");
+  await e.click('button[aria-label="How many Blue / One: one more"]'); await e.click('button[aria-label="How many Blue / One: one more"]');
+  await e.waitForFunction(() => (window.__x = 1), null); await e.waitForTimeout(2500);
+  const ed = fake.edits || [];
+  ok("barcode changed here: it went to the store", ed.some(([k, x]) => k === "variant" && x.id === "gid://shopify/ProductVariant/92" && x.barcode === "5012345000022"), JSON.stringify(ed).slice(0, 300));
+  ok("how many changed here (4 → 6): the store's inventory went up by 2", fake.qty91 === 6 && ed.filter(([k]) => k === "stock").length === 2, String(fake.qty91));
+  await e.click('#settingsView button:text-is("Details")');
+  await e.fill('#binSheet input[aria-label="Item name"]', "Fleece blanket XL"); await e.press('#binSheet input[aria-label="Item name"]', "Tab"); await e.waitForTimeout(1200);
+  ok("renamed here: the store's product renamed", (fake.edits || []).some(([k, x]) => k === "product" && x.title === "Fleece blanket XL"));
+  ok("from Shopify: no adding sizes or deleting here (that's done in Shopify)", !(await e.$('#binSheet button:has-text("Delete this item")')) && !(await e.$('#binSheet input[aria-label="New colour"]')));
+  await e.click('#binsUndo button:text-is("Undo")'); await e.waitForTimeout(1200);
+  ok("Undo: the old name goes back to the store too", (fake.edits || []).filter(([k]) => k === "product").pop()[1].title === "Fleece blanket");
+  await e.evaluate(() => { bins.settings.inventoryEdits = false; saveBins(); closeSheet(); renderSettings(); });
+  ok("with Allow inventory changes off: how many can't be changed for store items", !(await e.$('button[aria-label="How many Blue / One: one more"]')));
   ok("no page errors", !errs.length, errs.join(" / "));
   console.log(bad ? `${bad} FAILED` : "all ok"); await b.close(); server.close(); process.exit(bad ? 1 : 0);
 })();
