@@ -2575,7 +2575,9 @@ function drawPacking() {
    below. Scan the order sheet's barcode (top right), then each item; each turns green. When all are green the camera
    goes off and Pack & Print / Pack shows at the bottom. Until Shopify is connected, "every order" is a practice store
    of Shopify-style orders kept on this device. */
-const TEST_FEATURES = /--test-/.test(location.hostname) || (() => { try { return localStorage.getItem("pick-and-sort-test-features") === "1"; } catch (e) { return false; } })();
+// opened inside the store's Shopify admin (shopify.html, with Shopify's App Bridge)
+const IN_SHOPIFY = /\/shopify\.html$/.test(location.pathname) || !!(window.shopify && window.shopify.idToken);
+const TEST_FEATURES = /--test-/.test(location.hostname) || IN_SHOPIFY || (() => { try { return localStorage.getItem("pick-and-sort-test-features") === "1"; } catch (e) { return false; } })();
 const STORE_PRACTICE_KEY = "pick-and-sort-practice-store-v1";
 let practiceStoreCache = null;
 /** About 40 practice orders shaped like Shopify's: number, time ordered, customer, area, local delivery or UPS, items. */
@@ -3104,6 +3106,12 @@ async function refreshShopify(force) {
   shop.busy = true; shop.err = "";
   try {
     shop.status = await shopifyApi("status");
+    // inside Shopify, an admin whose company has no store yet: connect this one straight away (no redirect)
+    if (!shop.status.connected && IN_SHOPIFY && !shop.tried && (acct.role === "owner" || acct.role === "admin")) {
+      shop.tried = true;
+      shop.status = await shopifyApi("exchange", { idToken: await window.shopify.idToken() });
+      toast(`Connected to ${shop.status.shop}.`);
+    }
     if (shop.status.connected) { const d = await shopifyApi("orders"); shop.orders = d.orders; shop.people = d.people !== false; }
     else shop.orders = null;
     shop.at = Date.now();
@@ -3135,6 +3143,8 @@ function shopifySection() {
       try { await shopifyApi("disconnect", {}); shop.status = null; shop.orders = null; shop.at = 0; toast("Disconnected."); refreshShopify(true); } catch (err) { toast(err.message); }
     }) }, "Disconnect")) : null);
   if (!isAdmin) return h("p", { class: "small muted" }, st ? "No Shopify store connected. Your company's admin connects it here." : shop.err || "Checking…");
+  if (IN_SHOPIFY) return h("div", null, h("p", { class: "small muted" }, shop.busy ? "Connecting this store…" : "Connect this Shopify store so Packing and Orders use its real orders."),
+    h("button", { class: "btn small", type: "button", onclick: () => { shop.tried = false; refreshShopify(true); } }, "Connect this store"), h("p", { class: "small gateerr" }, shop.err || ""));
   const name = h("input", { type: "text", "aria-label": "Shopify store address", placeholder: "your-store.myshopify.com", value: shop.want, style: "flex:1;min-width:0", autocapitalize: "off", autocomplete: "off", spellcheck: "false" });
   const out = h("p", { class: "small gateerr" }, shop.err || "");
   return h("div", null,

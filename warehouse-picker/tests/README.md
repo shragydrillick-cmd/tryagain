@@ -114,7 +114,8 @@ label and the UPS order waits, then reaches the station when it's back.
 Settings → More (a worker can't); the store's key can't be read from the app; a callback used twice or not signed by
 Shopify is refused; Packing and Find use the store's open orders; Pack puts the "Packed ..." tag on the order in
 Shopify; Orders → From Shopify lists the open orders, filtered by area, sorted, ticked and added to the list (items
-without a bin go to Please look); Disconnect forgets the key.
+without a bin go to Please look); Disconnect forgets the key. Inside the store's Shopify admin (a pretend App
+Bridge): an admin opening it there connects by itself with Shopify's session token; a worker or a made-up token is refused.
 
 `inventory-edit.test.js`: adding and editing the inventory in Bins (with Allow inventory changes on): a new item from
 its name, company, colours and sizes; scanning its barcodes in order (a duplicate is refused); adding a colour;

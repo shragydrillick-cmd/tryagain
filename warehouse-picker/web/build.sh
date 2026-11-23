@@ -33,4 +33,10 @@ if grep -q "cdnjs\|jsdelivr" dist/index.html; then echo "index.html still points
 if command -v node >/dev/null; then
   node -e 'const s=require("fs").readFileSync("dist/index.html","utf8"),re=/<script>([\s\S]*?)<\/script>/g;let m,n=0;while((m=re.exec(s))){try{new Function(m[1]);n++}catch(e){console.error("The built page has broken code: "+e.message);process.exit(1)}}if(n<2){console.error("The built page is missing its code");process.exit(1)}'
 fi
+# Inside Shopify: the same app, with Shopify's App Bridge first in the page (Shopify asks for it to be the first script),
+# so it opens in the store's admin instead of a new window. Only Shopify loads this page.
+awk '{ print } !done && /<meta charset/ { done = 1
+  print "<meta name=\"shopify-api-key\" content=\"55a9bba1b5e7545f3227a01633c9693e\">"
+  print "<script src=\"https://cdn.shopify.com/shopifycloud/app-bridge.js\"></script>" }' dist/index.html > dist/shopify.html
+grep -q "app-bridge.js" dist/shopify.html || { echo "shopify.html is missing App Bridge" >&2; exit 1; }
 echo "Website built in $(pwd)/dist (version $VERSION)"

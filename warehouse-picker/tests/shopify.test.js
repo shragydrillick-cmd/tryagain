@@ -10,7 +10,12 @@ const express = require(FN + "node_modules/express"), crypto = require("crypto")
 const { chromium } = require("playwright");
 const BASE = process.argv[2] || "http://localhost:8765/index.html", EMU = "http://127.0.0.1:9099", P = "pick-and-sort", SRV = "http://localhost:8766";
 process.env.SHOPIFY_TEST_BASE = SRV + "/fake";
-const { handle, signedByShopify, cleanShop, toPackOrder } = require(FN + "shopify.js");
+const { handle, signedByShopify, cleanShop, toPackOrder, shopFromSessionToken } = require(FN + "shopify.js");
+// Shopify's session token, as App Bridge gives it inside the store's admin
+const b64 = o => Buffer.from(JSON.stringify(o)).toString("base64url");
+const jwt = (p, key = "test-secret") => { const hp = b64({ alg: "HS256", typ: "JWT" }) + "." + b64(p); return hp + "." + crypto.createHmac("sha256", key).update(hp).digest("base64url"); };
+const now = () => Math.floor(Date.now() / 1000);
+const sess = (o = {}) => jwt({ iss: "https://practice-store.myshopify.com/admin", dest: "https://practice-store.myshopify.com", aud: "55a9bba1b5e7545f3227a01633c9693e", sub: "42", exp: now() + 60, nbf: now() - 5, iat: now() - 5, ...o });
 let bad = 0; const ok = (l, c, x = "") => { if (!c) bad++; console.log(`${c ? "ok  " : "FAIL"} ${l}${x ? "  (" + x + ")" : ""}`); };
 const sign = q => { const m = Object.keys(q).sort().map(k => `${k}=${q[k]}`).join("&"); return { ...q, hmac: crypto.createHmac("sha256", "test-secret").update(m).digest("hex") }; };
 
@@ -26,6 +31,10 @@ const app = express();
 app.use((req, res, next) => { res.set("Access-Control-Allow-Origin", "*"); res.set("Access-Control-Allow-Headers", "Authorization, Content-Type"); next(); });
 app.use(express.json());
 app.post("/fake/:shop/admin/oauth/access_token", (req, res) => {
+  if (req.body.grant_type === "urn:ietf:params:oauth:grant-type:token-exchange") { // inside the admin: session token for the store's key
+    fake.exchanged = (fake.exchanged || 0) + 1;
+    return req.body.client_secret === "test-secret" && shopFromSessionToken(req.body.subject_token) === req.params.shop ? res.json({ access_token: "shpat_" + req.params.shop, scope: "read_orders" }) : res.status(400).json({ error: "invalid" });
+  }
   if (req.body.client_secret !== "test-secret" || !fake.codes.has(req.body.code)) return res.status(400).json({ error: "invalid" });
   fake.codes.delete(req.body.code); res.json({ access_token: "shpat_" + req.params.shop, scope: "read_orders" });
 });
@@ -44,9 +53,12 @@ const server = app.listen(8766);
   const o2 = toPackOrder(ORDERS[1], "practice-store.myshopify.com");
   ok("a Shopify order becomes a pack order (UPS = shipping, fulfilled lines left out, no 'Default Title')", o2.number === "1002" && o2.delivery.type === "shipping" && o2.items.length === 1 && o2.items[0].details === "" && o2.items[0].barcode === "5012345000039" && /admin\.shopify\.com\/store\/practice-store\/orders\/5502/.test(o2.shopifyUrl));
 
+  ok("session token: genuine one gives the store; changed, other app, out of date: nothing", shopFromSessionToken(sess()) === "practice-store.myshopify.com"
+    && shopFromSessionToken(sess().slice(0, -2) + "xx") === "" && shopFromSessionToken(sess({ aud: "other" })) === "" && shopFromSessionToken(sess({ exp: now() - 100 })) === ""
+    && shopFromSessionToken(jwt({ dest: "https://practice-store.myshopify.com", aud: "55a9bba1b5e7545f3227a01633c9693e", exp: now() + 60 }, "wrong")) === "" && shopFromSessionToken(sess({ dest: "https://evil.com" })) === "");
+  await fetch(`${EMU}/emulator/v1/projects/${P}/accounts`, { method: "DELETE" }); await fetch(`http://127.0.0.1:8080/emulator/v1/projects/${P}/databases/(default)/documents`, { method: "DELETE" });
   const launch = await fetch(SRV + "/shopify/app?" + new URLSearchParams(sign({ shop: "practice-store.myshopify.com", timestamp: "1" })), { redirect: "manual" });
   ok("opened from the store's Apps: goes to the test address, ready to connect", launch.status === 302 && launch.headers.get("location") === "https://pick-and-sort--test-6xyzdn76.web.app/?shopify=connect&shop=practice-store.myshopify.com", launch.headers.get("location"));
-  await fetch(`${EMU}/emulator/v1/projects/${P}/accounts`, { method: "DELETE" }); await fetch(`http://127.0.0.1:8080/emulator/v1/projects/${P}/databases/(default)/documents`, { method: "DELETE" });
   const b = await chromium.launch(); const errs = [];
   const open = async (c, n) => { const p = await c.newPage(); p.on("pageerror", e => errs.push(n + ": " + e.message));
     await p.addInitScript(srv => { try { if (!sessionStorage.getItem("x")) { if (!localStorage.getItem("keep")) localStorage.clear(); sessionStorage.setItem("x", "1"); } localStorage.setItem("keep", "1");
@@ -124,6 +136,20 @@ const server = app.listen(8766);
   await a.evaluate(() => { document.getElementById("navBtn").click(); go("more"); }); await a.waitForTimeout(800);
   await a.click('button:text-is("Disconnect")'); await a.waitForTimeout(300); await a.click('#settingsView button:has-text("Disconnect")').catch(() => {}); await a.waitForTimeout(1500);
   ok("Disconnect: the key is gone, Connect is back", !!(await a.$('input[aria-label="Shopify store address"]')) && /No Shopify store/.test((await (await fetch(SRV + "/shopify/orders", { headers: { Authorization: "Bearer " + wtok } })).json()).error));
+  // inside the store's Shopify admin: the admin opens Pick & Sort there and it connects by itself, no redirect
+  const cs = await b.newContext({ viewport: { width: 1000, height: 700 } });
+  await cs.addInitScript(t => { window.shopify = { idToken: async () => t, config: { shop: "practice-store.myshopify.com" } }; }, sess({ exp: now() + 3600 }));
+  const e = await open(cs, "in shopify"); await signIn(e, "o1", "owner@test.com");
+  ok("inside Shopify: the test features are on", await e.evaluate(() => IN_SHOPIFY && TEST_FEATURES) && await e.isVisible("#shopifyAddBtn"));
+  await e.click("#navBtn"); await e.evaluate(() => go("more"));
+  await e.waitForFunction(() => shop.status && shop.status.connected && !shop.busy, null, { timeout: 10000 }).catch(() => {}); await e.waitForTimeout(300);
+  ok("inside Shopify: connected by itself with Shopify's session token", fake.exchanged === 1 && /practice-store\.myshopify\.com[\s\S]*Connected/.test(await e.innerText("#settingsView")), String(fake.exchanged));
+  for (let k = 0; k < 4 && await e.evaluate(() => view === "settings"); k++) await e.click("#navBtn"); await e.click("#shopifyAddBtn"); await e.waitForFunction(() => !shop.busy && document.querySelectorAll("#addOrders .aorow").length, null, { timeout: 8000 }).catch(() => {});
+  ok("inside Shopify: From Shopify lists the store's orders", (await e.$$("#addOrders .aorow")).length === 2);
+  const wtok2 = await w.evaluate(() => fb.auth.currentUser.getIdToken());
+  const wx = await fetch(SRV + "/shopify/exchange", { method: "POST", headers: { Authorization: "Bearer " + wtok2, "Content-Type": "application/json" }, body: JSON.stringify({ idToken: sess() }) });
+  const fx = await fetch(SRV + "/shopify/exchange", { method: "POST", headers: { Authorization: "Bearer " + await e.evaluate(() => fb.auth.currentUser.getIdToken()), "Content-Type": "application/json" }, body: JSON.stringify({ idToken: jwt({ dest: "https://practice-store.myshopify.com", aud: "55a9bba1b5e7545f3227a01633c9693e", exp: now() + 60 }, "wrong") }) });
+  ok("exchange: a worker, or a made-up session token, is refused", wx.status === 403 && fx.status === 400, wx.status + " " + fx.status);
   ok("no page errors", !errs.length, errs.join(" / "));
   console.log(bad ? `${bad} FAILED` : "all ok"); await b.close(); server.close(); process.exit(bad ? 1 : 0);
 })();

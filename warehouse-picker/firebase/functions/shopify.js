@@ -6,6 +6,7 @@
 //   /shopify/callback  Shopify comes back here once they've said yes; the store's key is kept for the company.
 //   /shopify/orders    (signed-in, in the company) the store's open orders that aren't sent out yet, for packing.
 //   /shopify/packed    (signed-in, in the company) puts the "Packed ..." tag on an order.
+//   /shopify/exchange  (company admin, inside the store's admin) connect with Shopify's session token, no redirect.
 //   /shopify/status    (signed-in, in the company) whether a store is connected, and which.
 //   /shopify/disconnect (company admin) forgets the store's key.
 //
@@ -44,6 +45,17 @@ function signedByShopify(query) {
     .map(k => `${k}=${Array.isArray(query[k]) ? query[k].join(",") : query[k]}`).join("&");
   const want = crypto.createHmac("sha256", secret()).update(msg).digest("hex");
   return given.length === want.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(want));
+}
+/** Shopify's session token (a JWT signed with the client secret): the store it's for, or "" if it isn't genuine or is out of date. */
+function shopFromSessionToken(tok) {
+  const parts = tok.split("."); if (parts.length !== 3 || !secret()) return "";
+  const want = crypto.createHmac("sha256", secret()).update(parts[0] + "." + parts[1]).digest("base64url");
+  if (parts[2].length !== want.length || !crypto.timingSafeEqual(Buffer.from(parts[2]), Buffer.from(want))) return "";
+  let h, p; try { h = JSON.parse(Buffer.from(parts[0], "base64url")); p = JSON.parse(Buffer.from(parts[1], "base64url")); } catch (e) { return ""; }
+  const now = Date.now() / 1000;
+  if (h.alg !== "HS256" || p.aud !== CLIENT_ID || !(p.exp > now - 10) || (p.nbf && p.nbf > now + 10)) return "";
+  let shop = ""; try { shop = cleanShop(new URL(p.dest).hostname); } catch (e) {}
+  return shop;
 }
 const cleanShop = s => { s = String(s || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""); if (s && !s.includes(".")) s += ".myshopify.com"; return SHOP_OK.test(s) ? s : ""; };
 
@@ -147,6 +159,22 @@ async function route(req, res) {
     const url = `https://${shop}/admin/oauth/authorize?` + new URLSearchParams({ client_id: CLIENT_ID, scope: SCOPES, redirect_uri: HOME + "/shopify/callback", state });
     return res.json({ url });
   }
+  // inside the store's admin: Shopify's own proof of which store this is (its session token), swapped for the store's key.
+  // No redirect, and only someone signed in to that store's admin can get one.
+  if (path === "/exchange") {
+    const who = await caller(req, true), shop = shopFromSessionToken(String(body.idToken || ""));
+    if (!shop) throw new Problem(400, "Shopify didn't confirm the store. Close Pick & Sort in Shopify and open it again.");
+    await dailyGuard("shopifyStart", 200);
+    const r = await fetch(`${shopBase(shop)}/admin/oauth/access_token`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ client_id: CLIENT_ID, client_secret: secret(), grant_type: "urn:ietf:params:oauth:grant-type:token-exchange", subject_token: String(body.idToken),
+        subject_token_type: "urn:ietf:params:oauth:token-type:id_token", requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token" }) });
+    const t = r.ok ? await r.json() : null;
+    if (!t || !t.access_token) { console.error("token exchange", r.status, await r.text().catch(() => "")); throw new Problem(502, "Shopify didn't give the key. Check the app is installed on this store, then try again."); }
+    const at = Date.now();
+    await getDb().doc(`shopifyTokens/${who.company}`).set({ shop, token: t.access_token, scope: t.scope || "", at, by: who.uid });
+    await getDb().doc(`companies/${who.company}/settings/shopify`).set({ shop, at, byEmail: who.email });
+    return res.json({ connected: true, shop, at });
+  }
   if (path === "/status") {
     const who = await caller(req, false);
     const t = await getDb().doc(`shopifyTokens/${who.company}`).get();
@@ -187,4 +215,4 @@ async function handle(req, res) {
     res.status(status).json({ error: msg });
   }
 }
-module.exports = { handle, signedByShopify, cleanShop, toPackOrder };
+module.exports = { handle, signedByShopify, cleanShop, toPackOrder, shopFromSessionToken };
