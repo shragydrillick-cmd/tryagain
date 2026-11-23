@@ -59,6 +59,8 @@ app.post("/fake/:shop/admin/api/:v/graphql.json", (req, res) => {
   if (/locations\(first: 1\)/.test(req.body.query)) return res.json({ data: { productVariant: { inventoryQuantity: fake.qty91 ?? 4 }, locations: { nodes: [{ id: "gid://shopify/Location/1" }] } } });
   if (/inventoryAdjustQuantities/.test(req.body.query)) { const c = req.body.variables.input.changes[0]; (fake.edits = fake.edits || []).push(["stock", c]); fake.qty91 = (fake.qty91 ?? 4) + c.delta; return res.json({ data: { inventoryAdjustQuantities: { userErrors: [] } } }); }
   if (/orderCreate/.test(req.body.query)) { fake.created = (fake.created || []).concat(req.body.variables.order); return res.json({ data: { orderCreate: { order: { name: "#" + (1100 + fake.created.length) }, userErrors: [] } } }); }
+  // like the real store without read_customers: the customer record is refused (the name on the delivery address is fine)
+  if (/customer \{/.test(req.body.query)) return res.json({ errors: [{ message: "Access denied for customer field. Required access: `read_customers` access scope." }] });
   res.json({ data: { orders: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: ORDERS } } });
 });
 app.all(/^\/shopify(\/.*)?$/, (req, res) => handle(req, res));
@@ -130,7 +132,7 @@ const server = app.listen(8766);
   ok("…and the order shows as packed here", await a.evaluate(() => !!findPackOrder("1001").packedAt));
   // the worker's device sees the same store
   const ord = await (await fetch(SRV + "/shopify/orders", { headers: { Authorization: "Bearer " + wtok } })).json();
-  ok("worker: gets the store's orders, with names and areas", ord.orders.length === 2 && ord.orders[0].customer === "Rivka Klein" && ord.orders[0].city === "Brooklyn");
+  ok("worker: gets the store's orders, with names (from the delivery address) and areas", ord.orders.length === 2 && ord.orders[0].customer === "Rivka Klein" && ord.orders[0].city === "Brooklyn");
   // Orders → From Shopify: filter by area, tick, add to the list; items without a bin go to "Please look"
   await a.evaluate(() => { try { closePack(); } catch (e) {} closeFind(); closePacking(); });
   ok("Orders: a From Shopify button", await a.isVisible("#shopifyAddBtn"));

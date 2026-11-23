@@ -84,9 +84,10 @@ async function graphql(key, query, variables) {
   return r.json();
 }
 
-// people: "all" (name and address), "address" (address only), "none"
+// people: "all" (the delivery address, with the name on it), "none". The customer's own record needs read_customers,
+// which the app doesn't ask for: the name on the delivery address is the one on the label anyway.
 const ORDER_FIELDS = (people) => `id name createdAt tags displayFulfillmentStatus
-  ${people === "all" ? "customer { displayName } " : ""}${people !== "none" ? "shippingAddress { name address1 address2 city zip }" : ""}
+  ${people !== "none" ? "shippingAddress { name firstName lastName address1 address2 city zip }" : ""}
   shippingLine { title }
   lineItems(first: 100) { nodes { name title variantTitle quantity currentQuantity unfulfilledQuantity sku variant { barcode sku } } }`;
 const ORDERS = withPeople => `query($n: Int!, $after: String) {
@@ -99,7 +100,7 @@ function toPackOrder(o, shop) {
   const idNum = String(o.id).split("/").pop();
   return {
     number: String(o.name || "").replace(/^#/, ""), id: o.id, created: Date.parse(o.createdAt) || null,
-    customer: (o.customer && o.customer.displayName) || a.name || "", address: [a.address1, a.address2].filter(Boolean).join(", "), city: a.city || "", zip: a.zip || "",
+    customer: a.name || [a.firstName, a.lastName].filter(Boolean).join(" ") || (o.customer && o.customer.displayName) || "", address: [a.address1, a.address2].filter(Boolean).join(", "), city: a.city || "", zip: a.zip || "",
     delivery: { type: local || !title ? "local" : "shipping", title, date: null },
     tags: o.tags || [], packed: (o.tags || []).some(t => /^packed\b/i.test(t)),
     shopifyUrl: `https://admin.shopify.com/store/${shop.replace(/\.myshopify\.com$/, "")}/orders/${idNum}`,
@@ -123,7 +124,7 @@ async function openOrders(key) {
     let d = await graphql(key, ORDERS(people), { n: 100, after });
     while (d.errors && people !== "none") {
       if (!peopleErr) { peopleErr = d.errors.map(e => e.message).join("; ").slice(0, 300); console.error("orders with people refused:", JSON.stringify(d.errors).slice(0, 1000)); }
-      people = people === "all" ? "address" : "none";
+      people = "none";
       d = await graphql(key, ORDERS(people), { n: 100, after });
     }
     if (d.errors) throw new Problem(502, "Shopify: " + (d.errors[0] && d.errors[0].message || "error"));
