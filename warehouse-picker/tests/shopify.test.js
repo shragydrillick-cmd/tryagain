@@ -45,9 +45,15 @@ app.post("/fake/:shop/admin/api/:v/graphql.json", (req, res) => {
     products: { nodes: [{ title: "Fleece blanket", variants: { nodes: [{ id: "gid://shopify/ProductVariant/1", title: "Blue" }, { id: "gid://shopify/ProductVariant/2", title: "Gray" }] } }] } } });
   // the store's inventory: products, and the changes Pick & Sort sends back
   if (/inventoryQuantity selectedOptions/.test(req.body.query)) return res.json({ data: { products: { pageInfo: { hasNextPage: false }, nodes: [
-    { id: "gid://shopify/Product/9", title: "Fleece blanket", vendor: "Cozy Co", status: "ACTIVE", variants: { nodes: [
+    { id: "gid://shopify/Product/9", title: "Fleece blanket", vendor: "Cozy Co", status: "ACTIVE", options: [{ name: "Color" }, { name: "Size" }], variants: { nodes: [
       { id: "gid://shopify/ProductVariant/91", title: "Blue / One", sku: "FB-BLU", barcode: "5012345000015", inventoryQuantity: fake.qty91 ?? 4, selectedOptions: [{ name: "Color", value: "Blue" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/191" } },
       { id: "gid://shopify/ProductVariant/92", title: "Gray / One", sku: "FB-GRY", barcode: "", inventoryQuantity: 0, selectedOptions: [{ name: "Color", value: "Gray" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/192" } }] } }] } } });
+  if (/productSet/.test(req.body.query)) { // the whole product: give each size an id (new ones get new ids)
+    const inp = req.body.variables.input; (fake.sets = fake.sets || []).push(inp); let n = 500 + fake.sets.length * 10;
+    return res.json({ data: { productSet: { userErrors: [], product: { id: inp.id || "gid://shopify/Product/77", variants: { nodes: inp.variants.map(v => ({ id: v.id || "gid://shopify/ProductVariant/" + (++n),
+      inventoryItem: { id: "gid://shopify/InventoryItem/" + n }, selectedOptions: v.optionValues.map(o => ({ name: o.optionName, value: o.name })) })) } } } } });
+  }
+  if (/productDelete/.test(req.body.query)) { (fake.deleted = fake.deleted || []).push(req.body.variables.id); return res.json({ data: { productDelete: { deletedProductId: req.body.variables.id, userErrors: [] } } }); }
   if (/productUpdate/.test(req.body.query)) { (fake.edits = fake.edits || []).push(["product", req.body.variables.input]); return res.json({ data: { productUpdate: { userErrors: [] } } }); }
   if (/productVariantsBulkUpdate/.test(req.body.query)) { (fake.edits = fake.edits || []).push(["variant", req.body.variables.v[0]]); return res.json({ data: { productVariantsBulkUpdate: { userErrors: [] } } }); }
   if (/locations\(first: 1\)/.test(req.body.query)) return res.json({ data: { productVariant: { inventoryQuantity: fake.qty91 ?? 4 }, locations: { nodes: [{ id: "gid://shopify/Location/1" }] } } });
@@ -190,9 +196,27 @@ const server = app.listen(8766);
   await e.click('#settingsView button:text-is("Details")');
   await e.fill('#binSheet input[aria-label="Item name"]', "Fleece blanket XL"); await e.press('#binSheet input[aria-label="Item name"]', "Tab"); await e.waitForTimeout(1200);
   ok("renamed here: the store's product renamed", (fake.edits || []).some(([k, x]) => k === "product" && x.title === "Fleece blanket XL"));
-  ok("from Shopify: no adding sizes or deleting here (that's done in Shopify)", !(await e.$('#binSheet button:has-text("Delete this item")')) && !(await e.$('#binSheet input[aria-label="New colour"]')));
   await e.click('#binsUndo button:text-is("Undo")'); await e.waitForTimeout(1200);
   ok("Undo: the old name goes back to the store too", (fake.edits || []).filter(([k]) => k === "product").pop()[1].title === "Fleece blanket");
+  // sizes and colours: add a colour, remove a size: the whole product goes to the store
+  await e.fill('#binSheet input[aria-label="New colour"]', "Pink"); await e.click('#binSheet button:text-is("Add")'); await e.waitForTimeout(1500);
+  const set1 = (fake.sets || [])[0];
+  ok("added a colour here: the store's product gets it (the others keep their ids)", set1 && set1.id === "gid://shopify/Product/9" && set1.variants.length === 3 && set1.variants.filter(v => v.id).length === 2
+    && set1.productOptions[0].name === "Color" && set1.productOptions[0].values.map(x => x.name).join() === "Blue,Gray,Pink", JSON.stringify(set1 || {}).slice(0, 300));
+  ok("…and the new size has the store's id here now", await e.evaluate(() => bins.products[0].variants.find(v => v.colour === "Pink").sid === "gid://shopify/ProductVariant/511"));
+  await e.click('#binSheet .chip:has-text("One") >> nth=1'); await e.click('#binSheet button:has-text("Remove this size")'); await e.click('#binSheet button:has-text("Tap again")'); await e.waitForTimeout(1500);
+  const set2 = (fake.sets || [])[1];
+  ok("removed a size here: it's left out of the store's product", set2 && set2.variants.length === 2 && !set2.variants.some(v => v.id === "gid://shopify/ProductVariant/92"), JSON.stringify(set2 || {}).slice(0, 200));
+  // a brand-new item here: made in the store as a draft, with its sizes, barcodes and how many
+  await e.evaluate(() => { closeSheet(); B.newItem = { title: "Wool Hat", vendor: "Cozy Co", colours: "Red", sizes: "S, M", sku: "WH", barcode: "0099" }; B.newFrom = "binsInventory"; go("binsNewItem"); });
+  await e.click('button:has-text("Add the item (2 variants)")'); await e.waitForTimeout(1500);
+  const set3 = (fake.sets || [])[2];
+  ok("new item: made in the store as a draft, with its two sizes", set3 && !set3.id && set3.status === "DRAFT" && set3.title === "Wool Hat" && set3.variants.length === 2 && set3.variants[0].barcode === "0099", JSON.stringify(set3 || {}).slice(0, 250));
+  await e.fill('input[aria-label="How many Red / S"]', "7"); await e.press('input[aria-label="How many Red / S"]', "Tab"); await e.waitForTimeout(1500);
+  ok("…and its amount goes to the store", (fake.edits || []).some(([k, x]) => k === "stock" && /InventoryItem\/53/.test(x.inventoryItemId)), JSON.stringify((fake.edits || []).slice(-2)));
+  // delete an item here: deleted in the store
+  await e.click('#settingsView button:text-is("Details")'); await e.click('#binSheet button:has-text("Delete this item")'); await e.click('#binSheet button:has-text("Tap again")'); await e.waitForTimeout(1500);
+  ok("deleted here: deleted in the store", (fake.deleted || []).includes("gid://shopify/Product/77"), JSON.stringify(fake.deleted || []));
   await e.evaluate(() => { bins.settings.inventoryEdits = false; saveBins(); closeSheet(); renderSettings(); });
   ok("with Allow inventory changes off: how many can't be changed for store items", !(await e.$('button[aria-label="How many Blue / One: one more"]')));
   ok("no page errors", !errs.length, errs.join(" / "));

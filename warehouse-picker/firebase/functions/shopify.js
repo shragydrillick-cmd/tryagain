@@ -108,6 +108,12 @@ function toPackOrder(o, shop) {
       qty: l.unfulfilledQuantity != null ? l.unfulfilledQuantity : l.currentQuantity != null ? l.currentQuantity : l.quantity })).filter(x => x.qty > 0),
   };
 }
+/** How many are in the building (on hand, at every location); what Shopify calls available leaves out what's ordered. */
+function onHand(v) {
+  const lv = v.inventoryItem && v.inventoryItem.inventoryLevels && v.inventoryItem.inventoryLevels.nodes;
+  if (lv && lv.length) return lv.reduce((a, l) => a + (Number((((l.quantities || [])[0]) || {}).quantity) || 0), 0);
+  return v.inventoryQuantity;
+}
 async function openOrders(key) {
   // names and addresses are "protected customer data" in Shopify: if the app hasn't been allowed them yet, the orders come without
   let withPeople = true, out = [], after = null;
@@ -229,10 +235,11 @@ async function route(req, res) {
     let out = [], after = null;
     for (let page = 0; page < 20; page++) {
       const d = await graphql(key, `query($after: String) { products(first: 100, after: $after, query: "status:active OR status:draft") { pageInfo { hasNextPage endCursor }
-        nodes { id title vendor status variants(first: 100) { nodes { id title sku barcode inventoryQuantity selectedOptions { name value } inventoryItem { id } } } } } }`, { after });
+        nodes { id title vendor status options { name } variants(first: 100) { nodes { id title sku barcode price inventoryQuantity selectedOptions { name value }
+          inventoryItem { id tracked inventoryLevels(first: 10) { nodes { quantities(names: ["on_hand"]) { quantity } } } } } } } } }`, { after });
       if (d.errors) throw new Problem(502, "Shopify: " + d.errors[0].message);
-      out = out.concat(d.data.products.nodes.map(p => ({ id: p.id, title: p.title, vendor: p.vendor || "", status: p.status,
-        variants: p.variants.nodes.map(v => ({ id: v.id, title: v.title, sku: v.sku || "", barcode: v.barcode || "", stock: v.inventoryQuantity, item: v.inventoryItem && v.inventoryItem.id,
+      out = out.concat(d.data.products.nodes.map(p => ({ id: p.id, title: p.title, vendor: p.vendor || "", status: p.status, optionNames: (p.options || []).map(o => o.name),
+        variants: p.variants.nodes.map(v => ({ id: v.id, title: v.title, sku: v.sku || "", barcode: v.barcode || "", price: v.price, stock: onHand(v), item: v.inventoryItem && v.inventoryItem.id,
           options: (v.selectedOptions || []).filter(o => !(o.name === "Title" && o.value === "Default Title")) })) })));
       if (!d.data.products.pageInfo.hasNextPage) break; after = d.data.products.pageInfo.endCursor;
     }
@@ -255,10 +262,10 @@ async function route(req, res) {
       if (!gid(e.item, "InventoryItem") || !gid(e.id, "ProductVariant")) throw new Problem(400, "Which variant?");
       const want = Math.max(0, Math.floor(Number(e.quantity) || 0));
       // the change goes on the store's first location; the difference from what Shopify has now in all
-      const now = await graphql(key, `query($v: ID!) { productVariant(id: $v) { inventoryQuantity } locations(first: 1) { nodes { id } } }`, { v: e.id });
+      const now = await graphql(key, `query($v: ID!) { productVariant(id: $v) { inventoryQuantity inventoryItem { inventoryLevels(first: 10) { nodes { quantities(names: ["on_hand"]) { quantity } } } } } locations(first: 1) { nodes { id } } }`, { v: e.id });
       fail(now);
       const loc = now.data.locations.nodes[0]; if (!loc) throw new Problem(409, "The store has no location for inventory.");
-      const delta = want - (now.data.productVariant.inventoryQuantity || 0);
+      const delta = want - (onHand(now.data.productVariant) || 0); // on hand = in the building, ordered or not (shipping takes it off)
       if (delta) {
         const change = { delta, inventoryItemId: e.item, locationId: loc.id };
         const m = `mutation($input: InventoryAdjustQuantitiesInput!) { inventoryAdjustQuantities(input: $input) { userErrors { message } } }`;
@@ -268,6 +275,42 @@ async function route(req, res) {
       }
       return res.json({ ok: true, quantity: want });
     } else throw new Problem(400, "What to change?");
+    return res.json({ ok: true });
+  }
+  // a whole product as it is in Pick & Sort (new, or sizes / colours added, removed or renamed): Shopify is made the same.
+  // Sizes that aren't listed any more are removed; new ones get the price of the others; a new product starts as a draft.
+  if (path === "/productset") {
+    const who = await caller(req, false); await dailyGuard("shopifyEdit");
+    const key = await storeKey(who.company), q = body.product || {};
+    if (q.id && !/^gid:\/\/shopify\/Product\/\d+$/.test(q.id)) throw new Problem(400, "Which product?");
+    const vs = (q.variants || []).slice(0, 100);
+    if (!String(q.title || "").trim() || !vs.length) throw new Problem(400, "A product needs a name and at least one size / colour.");
+    const [n1, n2] = [(q.optionNames || [])[0] || "Color", (q.optionNames || [])[1] || "Size"];
+    const hasC = vs.some(v => v.colour), hasS = vs.some(v => v.size), uniq = a => [...new Set(a)];
+    const opts = [];
+    if (hasC) opts.push({ name: n1, values: uniq(vs.map(v => v.colour || "Default")).map(name => ({ name })) });
+    if (hasS) opts.push({ name: hasC ? n2 : (q.optionNames || []).find(n => /size/i.test(n)) || "Size", values: uniq(vs.map(v => v.size || "One size")).map(name => ({ name })) });
+    if (!opts.length) opts.push({ name: "Title", values: [{ name: "Default Title" }] });
+    const price = (vs.find(v => v.price) || {}).price || "0.00";
+    const input = { title: String(q.title).slice(0, 255), vendor: String(q.vendor || "").slice(0, 255), productOptions: opts,
+      variants: vs.map(v => ({ ...(v.id && /^gid:\/\/shopify\/ProductVariant\/\d+$/.test(v.id) ? { id: v.id } : { price: v.price || price, inventoryItem: { tracked: true, sku: v.sku || "" } }),
+        ...(v.id ? { inventoryItem: { sku: v.sku || "" } } : {}), barcode: v.barcode || "",
+        optionValues: opts[0].name === "Title" ? [{ optionName: "Title", name: "Default Title" }]
+          : [hasC ? { optionName: opts[0].name, name: v.colour || "Default" } : null, hasS ? { optionName: opts[hasC ? 1 : 0].name, name: v.size || "One size" } : null].filter(Boolean) })) };
+    if (q.id) input.id = q.id; else input.status = "DRAFT";
+    const d = await graphql(key, `mutation($input: ProductSetInput!) { productSet(input: $input, synchronous: true) { product { id variants(first: 100) { nodes { id selectedOptions { name value } inventoryItem { id } } } } userErrors { field message } } }`, { input });
+    const err = d.errors ? d.errors[0].message : d.data.productSet.userErrors.map(x => x.message).join("; ");
+    if (err) throw new Problem(502, "Shopify: " + err);
+    const pr = d.data.productSet.product;
+    return res.json({ id: pr.id, variants: pr.variants.nodes.map(v => ({ id: v.id, item: v.inventoryItem && v.inventoryItem.id, options: v.selectedOptions })) });
+  }
+  if (path === "/productdelete") {
+    const who = await caller(req, false); await dailyGuard("shopifyEdit");
+    const key = await storeKey(who.company);
+    if (!/^gid:\/\/shopify\/Product\/\d+$/.test(String(body.id || ""))) throw new Problem(400, "Which product?");
+    const d = await graphql(key, `mutation($id: ID!) { productDelete(input: { id: $id }) { deletedProductId userErrors { message } } }`, { id: body.id });
+    const err = d.errors ? d.errors[0].message : d.data.productDelete.userErrors.map(x => x.message).join("; ");
+    if (err) throw new Problem(502, "Shopify: " + err);
     return res.json({ ok: true });
   }
   if (path === "/disconnect") {

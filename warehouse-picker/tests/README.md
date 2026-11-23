@@ -116,7 +116,13 @@ Shopify is refused; Packing and Find use the store's open orders; Pack puts the 
 Shopify; Orders → From Shopify lists the open orders, filtered by area, sorted, ticked and added to the list (items
 without a bin go to Please look); Disconnect forgets the key. Inside the store's Shopify admin (a pretend App
 Bridge): an admin opening it there connects by itself with Shopify's session token; a worker or a made-up token is refused. Bins → Inventory brings in the store's products (sizes, SKUs, barcodes, how many);
-changing a name, barcode or how many here goes to the store (and Undo too); sizes and deleting are left to Shopify.
+changing a name, barcode or how many here goes to the store (and Undo too); adding a colour, removing a size, a
+brand-new item (a draft in the store, with its amounts) and deleting an item all reach the store.
+
+`statuses.test.js` (test address, Use bins for orders on): an order list made of items in Bins (matched by barcode or
+SKU): each item says how many are in its bin now, to pick, picked, sorted, packed; the bin's page shows how many are
+in it now; finishing the list takes what was picked out of its bin and what was packed out of the inventory; with the
+switch off nothing changes.
 
 `stock.test.js`: Bins with amounts. Inventory lists every item with how many (and how many still to put away);
 Scan to count in (a known barcode adds how many came in, a new barcode starts a new item with it); a new item's page sets

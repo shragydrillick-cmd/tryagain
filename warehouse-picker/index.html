@@ -1277,6 +1277,7 @@ function saveList() {
 }
 const saveListSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveList, 400); };
 function clearList(quiet) {
+  try { commitListToBins(); } catch (e) {}
   if (!$("stepper").classList.contains("hidden")) { $("stepper").classList.add("hidden"); document.body.style.overflow = ""; }
   current = null; plan = null; pickedDone = new Set(); unpackDone = new Set(); placed = new Map(); packed = new Map(); placeHistory.length = 0; savedList = null; builtFor = null;
   try { localStorage.removeItem(LIST_KEY); } catch (e) {}
@@ -2070,6 +2071,7 @@ function takeIncoming(inc, how) {
   const n = new Set(inc.current.lines.map(l => l.order)).size;
   const replace = () => {
     if (!$("stepper").classList.contains("hidden")) closeSteps();
+    try { if (plan) commitListToBins(); } catch (e) {}
     current = inc.current; showResults();
     if (inc.ticks) applyTickKeys(inc.ticks);
     toast(`${plural(n, "order")} loaded.`);
@@ -3843,14 +3845,65 @@ function binContents() {
 }
 const productOf = id => bins.products.find(p => p.id === id);
 /** Every change goes through here: saved, written in History, and undoable for a few seconds. */
-function binsChange(text, fn) {
+function binsChange(text, fn, opts = {}) {
   const before = JSON.stringify(bins);
   fn();
   bins.log.unshift({ at: Date.now(), text, who: acct && acct.email ? acct.email : "" });
   bins.log.length = Math.min(bins.log.length, 300);
   saveBins();
   showBinsUndo(text, before);
-  pushShopifyChanges(before);
+  if (!opts.noPush) pushShopifyChanges(before);
+}
+/* ---------- where each one is: in its bin, picked, sorted (on its order's pile), packed ----------
+   Worked out from the current list: an order line's item is matched by barcode or SKU. Picked ones aren't in the bin
+   any more (the bin shows how many are in it now); when the list is finished they leave the bin for good. */
+const useBinsForOrders = () => TEST_FEATURES && binsSettings().useForOrders !== false;
+const variantOfLine = u => (u.barcode && findCode(u.barcode)) || (u.sku && findCode(u.sku)) || null;
+function binFor(v, u) {
+  const want = [u.box, ...String(u.also || "").split(/[,\s/]+/)].map(b => normBox(b)).filter(Boolean);
+  const hit = v.bins.find(b => want.includes(b.bin));
+  return hit ? hit.bin : (v.bins.find(b => b.qty) || v.bins[0] || {}).bin || null;
+}
+/** For each item on the current list: ordered, waiting to be picked, picked, sorted, packed, and how many came out of which bin. */
+function listFlow() {
+  const m = new Map(); if (!plan || !bins || !useBinsForOrders()) return m;
+  plan.unpack.forEach(u => {
+    const x = variantOfLine(u); if (!x) return;
+    const o = plan.orders.find(y => y.label === u.label), isPacked = !!(o && packed.has(o.raw));
+    const placedN = unpackDone.has(u.step) ? u.qty : Math.min(u.qty, placed.get(u.step) || 0);
+    const pk0 = pickOf(u), pickedAll = !!(pk0 && pickedDone.has(pk0.step));
+    const out = isPacked ? u.qty : Math.max(pickedAll ? u.qty : 0, placedN);
+    const f = m.get(x.v.id) || { ordered: 0, waiting: 0, picked: 0, sorted: 0, packed: 0, from: new Map() };
+    f.ordered += u.qty; f.waiting += u.qty - out;
+    if (isPacked) f.packed += u.qty; else { f.sorted += placedN; f.picked += out - placedN; }
+    if (out) { const bin = binFor(x.v, u); if (bin) f.from.set(bin, (f.from.get(bin) || 0) + out); }
+    m.set(x.v.id, f);
+  });
+  return m;
+}
+/** How many are in a bin right now: what was counted in, less what's been picked out of it on this list. */
+const inBinNow = (v, bin, flow) => { const q = binQty(v, bin); if (q == null) return null; const f = flow && flow.get(v.id); return Math.max(0, q - (f ? f.from.get(bin) || 0 : 0)); };
+/** One item's statuses in words: "In C7: 5 · Picked 1 · Sorted 2 · Packed 1 · Waiting to be picked 3". */
+function statusText(v, flow) {
+  const f = flow && flow.get(v.id), parts = [];
+  v.bins.forEach(b => { const n = inBinNow(v, b.bin, flow); parts.push(n == null ? `Bin ${b.bin}` : `In ${b.bin}: ${n}`); });
+  if (!v.bins.length) parts.push("No bin yet");
+  if (unplacedQty(v)) parts.push(`Not in a bin: ${unplacedQty(v)}`);
+  if (f) { if (f.waiting) parts.push(`To pick: ${f.waiting}`); if (f.picked) parts.push(`Picked: ${f.picked}`); if (f.sorted) parts.push(`Sorted: ${f.sorted}`); if (f.packed) parts.push(`Packed: ${f.packed}`); }
+  return parts.join(" · ");
+}
+/** The list is finished (cleared, or replaced by new orders): what was picked leaves its bin for good, and what was
+    packed leaves the inventory (from Shopify: the store's own count is brought in again with Update). */
+function commitListToBins() {
+  if (!useBinsForOrders() || !plan || !bins) return;
+  const flow = listFlow(); if (![...flow.values()].some(f => f.from.size || f.packed)) return;
+  binsChange("List finished: picked items taken out of their bins, packed ones out of the inventory", () => {
+    allVariants().forEach(({ v }) => {
+      const f = flow.get(v.id); if (!f) return;
+      f.from.forEach((n, bin) => { const b = v.bins.find(x => x.bin === bin); if (b && b.qty != null) b.qty = Math.max(0, b.qty - n); });
+      if (f.packed) v.stock = Math.max(0, stockOf(v) - f.packed);
+    });
+  }, { noPush: true });
 }
 /* ---------- the store's inventory in Shopify: its products come into Inventory; changes here go back to the store ---------- */
 const shopConnected = () => !!(TEST_FEATURES && shop.status && shop.status.connected);
@@ -3862,13 +3915,18 @@ function fromShopify(list) {
   const num = g => String(g).split("/").pop();
   const prods = list.map(sp => {
     const prev = oldP.get(sp.id);
+    const names = (sp.optionNames || []).filter(n => n !== "Title");
+    const cName = names.find(n => /colou?r|style|pattern|print/i.test(n)), sName = names.find(n => /size/i.test(n));
+    // more than a colour and a size (or options with other names): shown, but its sizes / colours are changed in Shopify
+    const complex = names.length > 2 || names.some(n => n !== cName && n !== sName);
     return { id: prev ? prev.id : "s" + num(sp.id), sid: sp.id, title: sp.title, vendor: sp.vendor || "—", draft: sp.status === "DRAFT",
+      optNames: [cName || "Color", sName || "Size"], complex,
       variants: sp.variants.map(sv => {
         const pv = oldV.get(sv.id), opt = re => (sv.options.find(o => re.test(o.name)) || {}).value || "";
         let colour = opt(/colou?r|style|pattern|print/i), size = opt(/size/i);
         const rest = sv.options.filter(o => !/colou?r|style|pattern|print|size/i.test(o.name)).map(o => o.value);
         if (!colour && !size) { colour = rest[0] || ""; size = rest[1] || ""; } else if (rest.length) colour = [colour, ...rest].filter(Boolean).join(" ");
-        return { id: pv ? pv.id : "s" + num(sv.id), sid: sv.id, item: sv.item, colour, size, opts: [colour, size].filter(Boolean), sku: sv.sku, barcode: sv.barcode,
+        return { id: pv ? pv.id : "s" + num(sv.id), sid: sv.id, item: sv.item, colour, size, opts: [colour, size].filter(Boolean), sku: sv.sku, barcode: sv.barcode, price: sv.price,
           stock: sv.stock == null ? (pv ? pv.stock : 0) : Math.max(0, sv.stock), bins: pv ? pv.bins : [] };
       }) };
   });
@@ -3894,8 +3952,16 @@ function pushShopifyChanges(beforeStr) {
   let was; try { was = JSON.parse(beforeStr); } catch (e) { return; }
   if (!was || !was.products) return;
   const wp = new Map(was.products.filter(p => p.sid).map(p => [p.sid, p])), jobs = [];
+  const shape = q => q.variants.map(v => `${v.sid || v.id}|${v.colour}|${v.size}`).sort().join(";");
+  // deleted here: deleted in the store
+  const nowIds = new Set(bins.products.filter(p => p.sid).map(p => p.sid));
+  was.products.filter(o => o.sid && !nowIds.has(o.sid)).forEach(o => jobs.push({ del: o.sid, title: o.title }));
+  // new here (once the store is connected): made in the store, as a draft
+  bins.products.filter(p => p.toShop && !p.sid && !p.sending).forEach(p => { p.sending = true; jobs.push({ set: p }); });
   bins.products.filter(p => p.sid).forEach(p => {
     const o = wp.get(p.sid); if (!o) return;
+    // sizes / colours added, removed or renamed: the whole product is sent (it includes names, barcodes and SKUs)
+    if (shape(o) !== shape(p) && !p.complex) { jobs.push({ set: p, was: o }); return; }
     if (o.title !== p.title || o.vendor !== p.vendor) jobs.push({ kind: "product", id: p.sid, title: p.title, vendor: p.vendor });
     const ov = new Map(o.variants.map(v => [v.sid, v]));
     p.variants.filter(v => v.sid).forEach(v => {
@@ -3904,7 +3970,26 @@ function pushShopifyChanges(beforeStr) {
       if (stockOf(x) !== stockOf(v) && v.item) jobs.push({ kind: "stock", id: v.sid, item: v.item, quantity: stockOf(v) });
     });
   });
-  jobs.forEach(j => { shopQueue = shopQueue.then(() => shopifyApi("edit", j)).then(() => { shopInv.sent = (shopInv.sent || 0) + 1; }, e => toast(`Shopify didn't take the change: ${e.message}`)); });
+  jobs.forEach(j => { shopQueue = shopQueue.then(() => j.del ? shopifyApi("productdelete", { id: j.del }) : j.set ? sendProduct(j.set, j.was) : shopifyApi("edit", j))
+    .then(() => { shopInv.sent = (shopInv.sent || 0) + 1; }, e => { if (j.set) j.set.sending = false; toast(`Shopify didn't take the change: ${e.message}`); }); });
+}
+/** The whole product to the store; the store's ids come back onto each size / colour; amounts follow for new ones. */
+async function sendProduct(p, was) {
+  const d = await shopifyApi("productset", { product: { id: p.sid || null, title: p.title, vendor: p.vendor === "—" ? "" : p.vendor, optionNames: p.optNames || ["Color", "Size"],
+    variants: p.variants.map(v => ({ id: v.sid || null, colour: v.colour || "", size: v.size || "", sku: v.sku || "", barcode: v.barcode || "", price: v.price || (p.variants.find(x => x.price) || {}).price || null })) } });
+  const val = (o, re) => (o.find(x => re.test(x.name)) || {}).value || "";
+  const fresh = [];
+  d.variants.forEach(sv => {
+    const c = val(sv.options, /colou?r|style|pattern|print/i), z = val(sv.options, /size/i);
+    const v = p.variants.find(x => x.sid === sv.id) || p.variants.find(x => !x.sid && (x.colour || "") === (c === "Default" ? "" : c) && (x.size || "") === (z === "One size" ? "" : z))
+      || (p.variants.length === 1 && !p.variants[0].sid ? p.variants[0] : null);
+    if (v && !v.sid) { v.sid = sv.id; v.item = sv.item; fresh.push(v); }
+  });
+  p.sid = d.id; p.sending = false; delete p.toShop; if (!p.optNames) p.optNames = ["Color", "Size"];
+  saveBins();
+  // how many of each new size: set in the store's inventory
+  for (const v of fresh) if (stockOf(v) && v.item) await shopifyApi("edit", { kind: "stock", id: v.sid, item: v.item, quantity: stockOf(v) });
+  refreshBins();
 }
 /** Items from Shopify: changing how many needs Allow inventory changes (it changes the store's inventory). */
 const canCount = p => !p.sid || binsSettings().inventoryEdits;
@@ -4068,10 +4153,12 @@ function itemEditBox(p) {
       h("label", { class: "fixf wide" }, h("span", { class: "fixlab" }, "Company"), h("input", { type: "text", value: p.vendor, "aria-label": "Company", onchange: e => binsChange(`${p.title}: company changed`, () => { p.vendor = e.target.value.trim() || p.vendor; }) }))),
     h("button", { class: "btn", type: "button", style: "width:100%;margin-top:10px", onclick: () => scanBarcodesInOrder(p) },
       missing ? `Scan barcodes in order (${missing} without one)` : "Scan barcodes in order (to replace them)"),
-    p.sid ? h("p", { class: "small muted", style: "margin-top:10px" }, "From Shopify: the name, company, barcodes and SKUs change in the store too. Add or remove sizes and colours, or delete the item, in Shopify; then tap Update in Inventory.") : null,
-    p.sid ? null : h("h3", null, "Add a colour or size"),
-    p.sid ? null : h("div", { class: "fixgrid" }, h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Colour / style"), col), h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Size"), size)),
-    p.sid ? null : h("button", { class: "btn small secondary", type: "button", style: "margin-top:8px", onclick: () => {
+    p.sid ? h("p", { class: "small muted", style: "margin-top:10px" }, p.complex
+      ? "From Shopify: the name, company, barcodes and SKUs change in the store too. This item has more options than a colour and a size, so its sizes and colours are changed in Shopify (then tap Update in Inventory)."
+      : "From Shopify: everything changed here (name, company, sizes, colours, barcodes, SKUs, how many, deleting it) changes in the store too.") : null,
+    p.complex ? null : h("h3", null, "Add a colour or size"),
+    p.complex ? null : h("div", { class: "fixgrid" }, h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Colour / style"), col), h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Size"), size)),
+    p.complex ? null : h("button", { class: "btn small secondary", type: "button", style: "margin-top:8px", onclick: () => {
       const c = col.value.trim(), z = size.value.trim();
       if (!c && !z) return toast("Type a colour, a size, or both.");
       const sizes = z ? [z] : [...new Set(p.variants.map(x => x.size))], colours = c ? [c] : [...new Set(p.variants.map(x => x.colour))];
@@ -4079,7 +4166,7 @@ function itemEditBox(p) {
       if (!add.length) return toast("That one's already there.");
       binsChange(`${p.title}: added ${add.map(optText).join(", ")}`, () => p.variants.push(...add));
     } }, "Add"),
-    p.sid ? null : h("button", { class: "btn small secondary danger", type: "button", style: "margin-top:14px;display:block", onclick: e => tapTwice(e.currentTarget, `Delete ${p.title} and all its sizes?`, () => {
+    h("button", { class: "btn small secondary danger", type: "button", style: "margin-top:14px;display:block", onclick: e => tapTwice(e.currentTarget, p.sid ? `Delete ${p.title} here and in Shopify?` : `Delete ${p.title} and all its sizes?`, () => {
       binsChange(`${p.title}: deleted`, () => { bins.products = bins.products.filter(x => x !== p); }); closeSheet(); }) }, "Delete this item"));
 }
 /** A new size / colour of an item, with a SKU made like its others (or from the item's SKU start). */
@@ -4125,7 +4212,7 @@ function renderNewItem(v) {
       (cols.length ? cols : [""]).flatMap(c => (sizes.length ? sizes : [""]).map(z => [c, z].filter(Boolean).join(" / ") || "One size")).slice(0, 30).join(", "), n > 30 ? "…" : ""),
     h("button", { class: "btn addbin", type: "button", disabled: !f.title.trim(), onclick: () => {
       if (!bins) bins = { practice: false, products: [], log: [], settings: { ...binsSettings() } };
-      const p = { id: "p" + Date.now().toString(36), title: f.title.trim(), vendor: f.vendor.trim() || "—", skuBase: f.sku.trim().toUpperCase(), variants: [] };
+      const p = { id: "p" + Date.now().toString(36), title: f.title.trim(), vendor: f.vendor.trim() || "—", skuBase: f.sku.trim().toUpperCase(), variants: [], ...(shopConnected() ? { toShop: true, optNames: ["Color", "Size"] } : {}) };
       (cols.length ? cols : [""]).forEach(c => (sizes.length ? sizes : [""]).forEach(z => p.variants.push(newVariant(p, c, z))));
       if (f.barcode) p.variants[0].barcode = f.barcode;
       binsChange(`${p.title}: added (${plural(p.variants.length, "variant")})`, () => bins.products.push(p));
@@ -4136,7 +4223,7 @@ function renderNewItem(v) {
 function variantBox(p, v) {
   const inv = binsSettings().inventoryEdits;
   const field = (label, key) => h("label", { class: "fixf" }, h("span", { class: "fixlab" }, label),
-    inv && !(v.sid && (key === "colour" || key === "size")) ? h("input", { type: "text", value: v[key] || "", "aria-label": label, onchange: e => binsChange(`${p.title} ${optText(v)}: ${label} changed`, () => { v[key] = e.target.value.trim(); v.opts = [v.colour, v.size].filter(Boolean); }) })
+    inv && !(p.complex && (key === "colour" || key === "size")) ? h("input", { type: "text", value: v[key] || "", "aria-label": label, onchange: e => binsChange(`${p.title} ${optText(v)}: ${label} changed`, () => { v[key] = e.target.value.trim(); v.opts = [v.colour, v.size].filter(Boolean); }) })
       : h("div", { class: "fixval" }, v[key] || "—"));
   return h("div", null,
     h("p", { class: "small muted", style: "margin-top:0" }, `${p.title} · ${p.vendor}`),
@@ -4146,12 +4233,12 @@ function variantBox(p, v) {
     h("h3", null, "How many"),
     h("div", { class: "row", style: "align-items:center;gap:8px" }, h("span", null, "In the inventory:"),
       canCount(p) ? qtyInput(stockOf(v), `How many ${optText(v)}`, n => binsChange(`${p.title} ${optText(v)}: ${n} in the inventory`, () => { v.stock = n; })) : h("b", null, String(stockOf(v)))),
-    h("p", { class: "small muted", style: "margin:4px 0 0" }, v.bins.length ? `In bins: ${binAmounts(v)} · not in a bin yet: ${unplacedQty(v)}` : `Not in a bin yet: ${unplacedQty(v)}`),
+    h("p", { class: "small muted statusline", style: "margin:4px 0 0" }, statusText(v, listFlow())),
     h("h3", null, "Bin"),
     v.bins.length ? h("div", { class: "binnow" }, binAmounts(v), v.bins.length > 1 ? h("span", { class: "small muted" }, " (either one)") : null) : h("p", { class: "muted" }, "Not in a bin yet."),
     unplacedQty(v) ? h("button", { class: "btn small", type: "button", style: "margin-bottom:8px", onclick: () => { closeSheet(); putAway({ p, v }); } }, `Put away ${unplacedQty(v)}`) : null,
     binActions([v], `${p.title} ${optText(v)}`, sheet && sheet.bin && setOf(v, sheet.bin) ? sheet.bin : null),
-    inv && !v.sid ? h("button", { class: "btn small secondary danger", type: "button", style: "margin-top:12px", onclick: e => tapTwice(e.currentTarget, `Remove ${optText(v)} from ${p.title}?`, () => {
+    inv && !p.complex ? h("button", { class: "btn small secondary danger", type: "button", style: "margin-top:12px", onclick: e => tapTwice(e.currentTarget, `Remove ${optText(v)} from ${p.title}?`, () => {
       binsChange(`${p.title}: ${optText(v)} removed`, () => { p.variants = p.variants.filter(x => x !== v); }); sheet.vid = null; sheet.direct = false; drawSheet(); }) }, "Remove this size / colour") : null);
 }
 /** What can be done with one size, a few, or everything in a bin: move to another bin, also put in another bin
@@ -4190,7 +4277,7 @@ function openBinEdit(bin, list, all) {
 
 /* one bin: every exact item in it, grouped by item. Each has Edit; tick some for Edit selected; or Edit all. */
 function renderBinPage(v) {
-  const bin = B.bin, list = binContents().get(bin) || [];
+  const bin = B.bin, list = binContents().get(bin) || [], binFlow = listFlow();
   if (B.selBin !== bin) { B.sel = new Set(); B.selBin = bin; }
   B.sel = new Set([...B.sel].filter(id => list.some(x => x.v.id === id))); // only what's still in the bin
   const groups = [...new Map(list.map(x => [x.p.id, x.p])).values()];
@@ -4213,7 +4300,8 @@ function renderBinPage(v) {
             h("div", { class: "row", style: "align-items:center;gap:6px;margin-top:4px" }, h("span", { class: "small" }, "In this bin:"),
               qtyInput(binQty(x, bin) ?? 0, `How many ${optText(x)} in ${bin}`, n => binsChange(`${p.title} ${optText(x)}: ${n} in ${bin}`, () => {
                 const b = x.bins.find(y => y.bin === bin); if (b) { b.qty = n; if (placedQty(x) > stockOf(x)) x.stock = placedQty(x); } })),
-              binQty(x, bin) == null ? h("span", { class: "small muted" }, "not counted") : null)),
+              binQty(x, bin) == null ? h("span", { class: "small muted" }, "not counted")
+                : (() => { const now = inBinNow(x, bin, binFlow); return now !== binQty(x, bin) ? h("span", { class: "small" }, `${now} now (${binQty(x, bin) - now} picked)`) : null; })())),
           h("button", { class: "btn small secondary", type: "button", onclick: () => openProduct(p.id, bin, x.id) }, "Edit")))));
     }),
     picked.length ? h("div", { class: "selbar" }, h("span", null, `${picked.length} selected`),
@@ -4451,10 +4539,11 @@ const needInv = () => { if (binsSettings().inventoryEdits) return true; toast("A
 function newItemFromInventory(barcode) { if (!needInv()) return; B.newItem = { title: "", vendor: "", colours: "", sizes: "", sku: "", barcode: barcode || "" }; B.newFrom = "binsInventory"; go("binsNewItem"); }
 function openStock(pid, from) { B.stockPid = pid; B.stockFrom = from || "binsInventory"; go("binsStock"); }
 function renderInventoryList(v) {
-  const q = (B.qi || "").trim().toLowerCase(), qk = scanKey(B.qi || "");
+  const q = (B.qi || "").trim().toLowerCase(), qk = scanKey(B.qi || ""), flow = listFlow();
   const rows = bins.products.filter(p => !q || p.title.toLowerCase().includes(q) || p.vendor.toLowerCase().includes(q)
       || p.variants.some(x => (x.sku || "").toLowerCase().includes(q) || (qk && scanKey(x.barcode) === qk) || optText(x).toLowerCase().includes(q)))
-    .map(p => ({ p, st: p.variants.reduce((a, x) => a + stockOf(x), 0), inb: p.variants.reduce((a, x) => a + placedQty(x), 0), un: p.variants.reduce((a, x) => a + unplacedQty(x), 0) }))
+    .map(p => ({ p, st: p.variants.reduce((a, x) => a + stockOf(x), 0), inb: p.variants.reduce((a, x) => a + placedQty(x), 0), un: p.variants.reduce((a, x) => a + unplacedQty(x), 0),
+      fl: ["picked", "sorted", "packed"].map(k => [k, p.variants.reduce((a, x) => a + ((flow.get(x.id) || {})[k] || 0), 0)]).filter(([, n]) => n) }))
     .filter(r => B.showi !== "un" || r.un).sort((a, b) => natural(a.p.title, b.p.title));
   const search = h("input", { type: "search", class: "binsearch", placeholder: "Search: name, company, barcode, SKU", value: B.qi || "", "aria-label": "Search the inventory",
     oninput: e => { B.qi = e.target.value; clearTimeout(search.t); search.t = setTimeout(() => { renderSettings(); const s = document.querySelector('input[aria-label="Search the inventory"]'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }, 250); } });
@@ -4476,13 +4565,15 @@ function renderInventoryList(v) {
     h("div", { class: "binctls" }, h("label", { class: "binctl" }, h("span", { class: "fixlab" }, "Show"), h("select", { "aria-label": "Show", onchange: e => { B.showi = e.target.value; renderSettings(); } },
       [["all", "Everything"], ["un", "Not all in a bin yet"]].map(([x, t]) => h("option", { value: x, selected: (B.showi || "all") === x }, t))))),
     rows.length ? h("div", { class: "dlist" }, rows.map(r => h("button", { class: "drow invrow", type: "button", onclick: () => openStock(r.p.id) },
-      h("div", { style: "flex:1;min-width:0;text-align:left" }, h("b", null, r.p.title), h("div", { class: "small muted" }, `${r.p.vendor} · ${plural(r.p.variants.length, "variant")}`)),
+      h("div", { style: "flex:1;min-width:0;text-align:left" }, h("b", null, r.p.title), h("div", { class: "small muted" }, `${r.p.vendor} · ${plural(r.p.variants.length, "variant")}`),
+        r.fl.length ? h("div", { class: "small" }, r.fl.map(([k, n]) => `${k[0].toUpperCase() + k.slice(1)}: ${n}`).join(" · ")) : null),
       h("div", { class: "invnums" }, h("b", null, String(r.st)), h("span", { class: "small" }, r.un ? `${r.un} to put away` : r.st ? "all in bins" : "none")))))
       : h("p", { class: "muted" }, bins.products.length ? "Nothing matches." : "Nothing in the inventory yet. Add a new item, or scan one to count it in.")));
 }
 /** One item: each size / colour with its barcode, how many there are, and how many are in which bin. */
 function renderStock(v) {
   const p = productOf(B.stockPid); if (!p) { go("binsInventory"); return; }
+  const flow = listFlow();
   const inv = binsSettings().inventoryEdits, missing = p.variants.filter(x => !x.barcode).length;
   const total = p.variants.reduce((a, x) => a + stockOf(x), 0), un = p.variants.reduce((a, x) => a + unplacedQty(x), 0);
   v.replaceChildren(h("section", { class: "card" }, backRow(B.stockFrom === "bins" ? "Bins" : "Inventory", B.stockFrom || "binsInventory"),
@@ -4499,11 +4590,11 @@ function renderStock(v) {
           if (other) { toast(`That barcode is already on ${other.p.title} · ${optText(other.v)}.`); e.target.value = x.barcode || ""; return; }
           binsChange(`${p.title} ${optText(x)}: barcode ${code || "removed"}`, () => { x.barcode = code; }); } })
           : h("div", { class: "icode" }, x.barcode || "no barcode"),
-        h("div", { class: "small muted" }, x.bins.length ? `In ${binAmounts(x)}` : "No bin yet", unplacedQty(x) ? ` · ${unplacedQty(x)} not in a bin` : "")),
+        h("div", { class: "small muted statusline" }, statusText(x, flow))),
       h("div", { class: "stockqty" }, h("span", { class: "fixlab" }, "How many"),
         canCount(p) ? qtyInput(stockOf(x), `How many ${optText(x)}`, n => binsChange(`${p.title} ${optText(x)}: ${n} in the inventory`, () => { x.stock = n; }))
           : h("b", { class: "stocknum" }, String(stockOf(x))))))),
-    p.sid ? h("p", { class: "small muted" }, `From Shopify${p.draft ? " (draft)" : ""}: names, barcodes, SKUs and how many change in the store too. Sizes and colours are added or removed in Shopify.`) : null,
+    p.sid ? h("p", { class: "small muted" }, `From Shopify${p.draft ? " (draft)" : ""}: every change here changes the store too.`) : p.toShop ? h("p", { class: "small muted" }, "Being added to Shopify (as a draft)…") : null,
     h("p", { class: "small muted" }, "How many = everything you have of it. When you load a bin you say how many went in; the rest show as not in a bin yet.")));
 }
 /** Scan to count in: an item's barcode, then how many came in (added to the inventory). A new barcode starts a new item. */
@@ -4588,8 +4679,13 @@ function binsSettingsSection() {
   const s = binsSettings();
   return h("div", null,
     h("div", { class: "row", style: "justify-content:space-between;align-items:center" },
-      h("span", null, h("b", null, "Use bins for orders: "), "Off"), h("button", { class: "btn small secondary", type: "button", disabled: true }, "Turn on")),
-    h("p", { class: "small muted" }, "Practice. Picking, sorting and packing never look at Bins; they keep using the slips. This can be switched on once Bins is finished."),
+      h("span", null, h("b", null, "Use bins for orders: "), useBinsForOrders() ? "On" : "Off"),
+      h("button", { class: "btn small" + (useBinsForOrders() ? " secondary" : ""), type: "button", disabled: !TEST_FEATURES, onclick: () => {
+        if (!bins) bins = { practice: false, products: [], log: [], settings: s };
+        bins.settings = { ...binsSettings(), useForOrders: !useBinsForOrders() }; saveBins(); renderSettings(); } }, useBinsForOrders() ? "Turn off" : "Turn on")),
+    h("p", { class: "small muted" }, TEST_FEATURES
+      ? "On: each item shows how many are in its bin now, picked, sorted and packed (from the current list, matched by barcode or SKU). When a list is finished, what was picked leaves its bin and what was packed leaves the inventory. Picking still goes by the bins on the slips."
+      : "Practice. Picking, sorting and packing never look at Bins; they keep using the slips. This can be switched on once Bins is finished."),
     h("div", { class: "row", style: "justify-content:space-between;align-items:center" },
       h("span", null, h("b", null, "Allow inventory changes: "), s.inventoryEdits ? "On" : "Off"),
       h("button", { class: "btn small" + (s.inventoryEdits ? " secondary" : ""), type: "button", onclick: () => {
