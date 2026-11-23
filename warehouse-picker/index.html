@@ -2393,6 +2393,8 @@ async function openBarcodeScanner() {
   document.body.append(scan.el); document.body.style.overflow = "hidden";
   showProgress();
   try { beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); beepCtx.resume(); } catch (e) {} // sound has to start from a tap on iPhone
+  // a computer: the barcode scanner, not a camera (it types into the box)
+  if (TEST_FEATURES && !phoneLike()) { scanByScanner(scan.el, msg, typed, "Scan each item with the barcode scanner."); return; }
   let read;
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
@@ -2743,6 +2745,56 @@ function startPack(o, paperDone) {
   pk = { o, paper: !!paperDone, got: new Map(), cam: phoneLike(), msg: paperDone ? { kind: "ok", text: `Order #${o.number}: the sheet is confirmed. Scan each item.` } : null };
   drawPack(); if (pk.cam) startPackCamera();
 }
+/* A barcode scanner (on a computer, instead of the phone's camera) types the code very fast and presses Enter.
+   Not while typing in a box. Where it goes:
+   - a scanner screen open (separating, Bins, counting in...): into it, as if the camera read it;
+   - an order being packed: to that order;
+   - an order's barcode: that order opens for packing, already confirmed;
+   - an item on the current list, on the main page: separating starts and it goes onto its order;
+   - an item in Bins: its page (how many, which bins); a bin's sticker: that bin. */
+/** A scanner screen on a computer: no camera; the box takes the scanner's codes (and keeps them coming to it). */
+function scanByScanner(el, msg, typed, text) {
+  const view = el.querySelector(".scanview"); if (view) view.remove();
+  el.classList.add("byscanner");
+  msg.textContent = text; typed.placeholder = "Scan here (or type the code and press Enter)";
+  typed.removeAttribute("inputmode");
+  setTimeout(() => typed.focus(), 30);
+}
+function scannedAnywhere(code) {
+  const box = document.querySelector('.scanner input[aria-label="Barcode or SKU"]');
+  if (scan.el && box) { box.value = code; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return true; }
+  if (pk) { packScan(code); return true; }
+  const o = findPackOrder(code);
+  if (o) {
+    [["scanOrderBox", null], ["packFind", closeFind], ["addOrders", closeAddOrders]].forEach(([id, fn]) => { if ($(id)) fn ? fn() : $(id).remove(); });
+    startPack(o, true); beep(true); return true;
+  }
+  if (view === "home" && plan && matchLines(code).length) { $("scanUnpackBtn").click(); setTimeout(() => scannedAnywhere(code), 50); return true; }
+  const r = bins ? readBinCode(code) : {};
+  if (r.item) { if (view !== "settings") $("navBtn").click(); openStock(r.item.p.id, "bins"); return true; }
+  if (r.bin && (binContents().has(r.bin) || buildLocator(settings).locate(r.bin))) { if (view !== "settings") $("navBtn").click(); B.bin = r.bin; B.binFrom = "binsList"; go("binsBin"); return true; }
+  toast(`${code}: no order, item or bin with that code.`); beep(false);
+  return false;
+}
+(() => {
+  let buf = "", last = 0, fast = 0;
+  document.addEventListener("keydown", e => {
+    if (!TEST_FEATURES) return;
+    const t = e.target, typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+    if (typing || e.ctrlKey || e.metaKey || e.altKey) { buf = ""; fast = 0; return; }
+    const now = Date.now(), gap = now - last; last = now;
+    if (e.key === "Enter") {
+      const code = buf.trim(), byScanner = code.length >= 2 && fast >= code.length - 1 && gap < 120;
+      buf = ""; fast = 0;
+      if (!byScanner) return;
+      e.preventDefault(); scannedAnywhere(code);
+      return;
+    }
+    if (e.key.length !== 1) return;
+    if (gap > 60) { buf = ""; fast = 0; } else fast++;
+    buf += e.key;
+  }, true);
+})();
 function closePack() { if (pk && pk.stop) pk.stop(); pk = null; const el = $("packScreen"); if (el) el.remove(); if (!$("packPanel") && !$("packFind")) document.body.style.overflow = ""; drawPacking(); }
 const packDone = () => pk && pk.paper && pk.o.items.every((it, i) => (pk.got.get(i) || 0) >= it.qty);
 function packScan(code) {
@@ -4564,6 +4616,7 @@ async function binScan(onCode, opts = {}) {
   scan.el.style.zIndex = 70; // above the bin chooser
   document.body.append(scan.el); document.body.style.overflow = "hidden";
   try { beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); beepCtx.resume(); } catch (e) {}
+  if (TEST_FEATURES && !phoneLike()) { scanByScanner(scan.el, msg, typed, "Scan with the barcode scanner (or type the code and press Enter)."); return; }
   let read;
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
