@@ -117,6 +117,12 @@ Shopify; Orders → From Shopify lists the open orders, filtered by area, sorted
 without a bin go to Please look); Disconnect forgets the key. Inside the store's Shopify admin (a pretend App
 Bridge): an admin opening it there connects by itself with Shopify's session token; a worker or a made-up token is refused.
 
+`stock.test.js`: Bins with amounts. Inventory lists every item with how many (and how many still to put away);
+Scan to count in (a known barcode adds how many came in, a new barcode starts a new item with it); a new item's page sets
+each size's barcode and how many; Put away: scan an item, it says which bin and suggests everything not in a bin yet,
+other sizes of the same item go with it, the bin's sticker confirms and the wrong bin warns; loading a bin suggests the
+amount and it can be changed; a bin's page shows and changes how many are in it.
+
 `inventory-edit.test.js`: adding and editing the inventory in Bins (with Allow inventory changes on): a new item from
 its name, company, colours and sizes; scanning its barcodes in order (a duplicate is refused); adding a colour;
 removing a size; renaming; deleting; Undo.

@@ -308,6 +308,16 @@ header.top #title { white-space: nowrap; }
 
 /* Bins */
 .binhome { display: grid; gap: 10px; }
+.qtybox { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.qtybox .btn { min-width: 34px; padding: 6px 0; }
+.qtyin { width: 56px; text-align: center; padding: 6px 4px; font-size: 16px; }
+.invrow { align-items: center; }
+.invnums { display: flex; flex-direction: column; align-items: flex-end; text-align: right; flex: none; }
+.invnums b { font-size: 20px; }
+.stockrow { align-items: center; flex-wrap: wrap; gap: 8px; }
+.stockqty { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.stockbc { width: 100%; max-width: 260px; margin: 4px 0; font-family: ui-monospace, monospace; }
+.putothers { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
 .binbig { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
 .binbig .btn { padding: 18px 10px; font-size: 18px; }
 .binctls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
@@ -3808,6 +3818,8 @@ function practiceBins() {
     if (pi === 9) products[8].variants.forEach(v => v.bins.push({ bin: b, at: now - 10 * 36e5 })); // two items share a box
   });
   products[8].variants.forEach(v => { if (v.bins.length > 1) v.bins = v.bins.slice(1); });
+  // how many: 2-6 of each; in its (first) bin all of them, except a few still waiting to be put away
+  products.forEach(p => p.variants.forEach(v => { v.stock = 2 + rnd(5); if (v.bins.length) v.bins[0].qty = Math.max(0, v.stock - (rnd(4) === 0 ? 1 + rnd(2) : 0)); }));
   return { practice: true, products, log: [{ at: now, text: "Practice items loaded." }], settings: binsSettings() };
 }
 /** Every box on the shelf map, in walking order. */
@@ -3851,6 +3863,28 @@ function refreshBins() { if ($("binSheet")) drawSheet(); if (view === "settings"
 const setOf = (v, bin) => v.bins.some(b => b.bin === bin);
 function putIn(v, bin) { if (!setOf(v, bin)) v.bins.push({ bin, at: Date.now() }); }
 function takeOut(v, bin) { v.bins = v.bins.filter(b => b.bin !== bin); }
+/* amounts: v.stock is how many are in the inventory; each bin can say how many are in it (b.qty, counted when loaded).
+   A bin with no amount is just where the item goes. In the inventory but not in a bin yet = stock - what's in bins. */
+const stockOf = v => Number(v.stock) || 0;
+const binQty = (v, bin) => { const b = v.bins.find(x => x.bin === bin); return b && b.qty != null ? Number(b.qty) : null; };
+const placedQty = v => v.bins.reduce((a, b) => a + (Number(b.qty) || 0), 0);
+const unplacedQty = v => Math.max(0, stockOf(v) - placedQty(v));
+/** n more of an item into a bin (more found than the inventory said: the inventory goes up to match). */
+function addToBin(v, bin, n) {
+  putIn(v, bin); const b = v.bins.find(x => x.bin === bin);
+  b.qty = Math.max(0, (Number(b.qty) || 0) + n); b.at = Date.now();
+  if (placedQty(v) > stockOf(v)) v.stock = placedQty(v);
+}
+const binAmounts = v => v.bins.map(b => b.qty != null ? `${b.bin} (${b.qty})` : b.bin).join(" / ");
+/** − [n] + : an amount to type or step. */
+function qtyInput(value, label, onSet, opts = {}) {
+  const inp = h("input", { type: "number", min: "0", inputmode: "numeric", value: String(value), "aria-label": label, class: "qtyin", onchange: e => onSet(Math.max(0, parseInt(e.target.value, 10) || 0)) });
+  const step = d => () => { inp.value = String(Math.max(0, (parseInt(inp.value, 10) || 0) + d)); if (!opts.live) onSet(parseInt(inp.value, 10)); };
+  const box = h("span", { class: "qtybox" }, h("button", { class: "btn small secondary", type: "button", "aria-label": `${label}: one less`, onclick: step(-1) }, "−"), inp,
+    h("button", { class: "btn small secondary", type: "button", "aria-label": `${label}: one more`, onclick: step(1) }, "+"));
+  box.value = () => Math.max(0, parseInt(inp.value, 10) || 0);
+  return box;
+}
 const plural = (n, w, many) => (many ? `${n} ${n === 1 ? w : many}` : `${n} ${w}${n === 1 ? "" : "s"}`);
 
 /* the Bins pages */
@@ -3868,8 +3902,12 @@ function renderBinsHome(v) {
         : h("p", { class: "small muted", style: "margin:0" }, "Loads example items in several sizes and colours, with most of them already in bins, so you can try everything."),
       h("div", { class: "binbig" },
         h("button", { class: "btn", type: "button", disabled: !bins, onclick: () => go("binsList") }, "List"),
-        h("button", { class: "btn", type: "button", disabled: !bins, onclick: () => { B.pick = null; go("binsAdd"); } }, "Add / Edit")),
-      h("button", { class: "btn secondary", type: "button", onclick: () => { if (!binsSettings().inventoryEdits) return toast("Adding items changes the inventory: turn on Settings → More → Bins → Allow inventory changes first."); go("binsNewItem"); } }, "Add a new item")),
+        h("button", { class: "btn", type: "button", disabled: !bins, onclick: () => { B.pick = null; go("binsAdd"); } }, "Add / Edit"),
+        h("button", { class: "btn", type: "button", onclick: () => { if (!bins) { bins = { practice: false, products: [], log: [], settings: { ...binsSettings() } }; saveBins(); } go("binsInventory"); } }, "Inventory"),
+        h("button", { class: "btn", type: "button", disabled: !bins, onclick: () => putAway(null) }, "Put away")),
+      bins ? h("p", { class: "small muted", style: "margin:0" }, (() => { const all = allVariants().map(x => x.v), st = all.reduce((a, v) => a + stockOf(v), 0), un = all.reduce((a, v) => a + unplacedQty(v), 0);
+        return `In the inventory: ${st} · not in a bin yet: ${un}. Put away: scan an item, it says which bin; scan the bin to confirm.`; })()) : null,
+      h("button", { class: "btn secondary", type: "button", onclick: () => { if (!binsSettings().inventoryEdits) return toast("Adding items changes the inventory: turn on Settings → More → Bins → Allow inventory changes first."); B.newFrom = "bins"; go("binsNewItem"); } }, "Add a new item")),
     bins ? h("button", { class: "link small", type: "button", style: "margin-top:12px", onclick: () => go("binsHistory") }, "History") : null));
 }
 function loadPractice() { bins = practiceBins(); saveBins(); renderSettings(); toast("Practice items loaded."); }
@@ -4010,12 +4048,13 @@ function scanBarcodesInOrder(p) {
 /** Add a new item: its name, company, colours and sizes (every combination is made), and a SKU start. */
 function renderNewItem(v) {
   const vendors = bins ? [...new Set(bins.products.map(p => p.vendor))].sort(natural) : [];
-  const f = B.newItem = B.newItem || { title: "", vendor: "", colours: "", sizes: "", sku: "" };
+  const f = B.newItem = B.newItem || { title: "", vendor: "", colours: "", sizes: "", sku: "", barcode: "" };
   const list = t => t.split(",").map(x => x.trim()).filter(Boolean);
   const cols = list(f.colours), sizes = list(f.sizes), n = Math.max(1, cols.length) * Math.max(1, sizes.length);
   const inp = (key, label, ph, extra = {}) => h("label", { class: "fixf wide" }, h("span", { class: "fixlab" }, label),
     h("input", { type: "text", value: f[key], placeholder: ph, "aria-label": label, ...extra, oninput: e => { f[key] = e.target.value; clearTimeout(inp.t); inp.t = setTimeout(() => { renderSettings(); const el = document.querySelector(`#settingsView input[aria-label="${label}"]`); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 400); } }));
-  v.replaceChildren(h("section", { class: "card" }, backRow("Bins", "bins"), h("h2", null, "Add a new item"),
+  v.replaceChildren(h("section", { class: "card" }, B.newFrom === "binsInventory" ? backRow("Inventory", "binsInventory") : backRow("Bins", "bins"), h("h2", null, "Add a new item"),
+    f.barcode ? h("div", { class: "notice good" }, `Barcode ${f.barcode}: it goes on the first size (${(cols[0] || "") + (cols[0] && sizes[0] ? " / " : "") + (sizes[0] || "") || "One size"}). Change it on the next page if needed.`) : null,
     h("div", { class: "fixgrid" },
       inp("title", "Item name", "e.g. Velour Crest Lounge Set"),
       inp("vendor", "Company", "e.g. Lil Legs", { list: "vendorList" }), h("datalist", { id: "vendorList" }, vendors.map(x => h("option", { value: x }))),
@@ -4028,10 +4067,11 @@ function renderNewItem(v) {
       if (!bins) bins = { practice: false, products: [], log: [], settings: { ...binsSettings() } };
       const p = { id: "p" + Date.now().toString(36), title: f.title.trim(), vendor: f.vendor.trim() || "—", skuBase: f.sku.trim().toUpperCase(), variants: [] };
       (cols.length ? cols : [""]).forEach(c => (sizes.length ? sizes : [""]).forEach(z => p.variants.push(newVariant(p, c, z))));
+      if (f.barcode) p.variants[0].barcode = f.barcode;
       binsChange(`${p.title}: added (${plural(p.variants.length, "variant")})`, () => bins.products.push(p));
-      B.newItem = null; go("binsList"); openProduct(p.id, null);
+      B.newItem = null; B.stockPid = p.id; B.stockFrom = "binsInventory"; go("binsStock");
     } }, `Add the item (${plural(n, "variant")})`),
-    h("p", { class: "small muted" }, "Then scan each size's barcode in order from the item's box, or type them in one by one.")));
+    h("p", { class: "small muted" }, "Next: each size's barcode (scan them in order, or type) and how many of each you have.")));
 }
 function variantBox(p, v) {
   const inv = binsSettings().inventoryEdits;
@@ -4043,8 +4083,13 @@ function variantBox(p, v) {
     h("div", { class: "fixgrid" }, field("Colour / style", "colour"), field("Size", "size"),
       h("div", { class: "wide" }, field("Barcode", "barcode")), h("div", { class: "wide" }, field("SKU", "sku"))),
     inv ? null : h("p", { class: "small muted" }, "Item details come from the store. To change them here, turn on Settings → More → Bins → Allow inventory changes."),
+    h("h3", null, "How many"),
+    h("div", { class: "row", style: "align-items:center;gap:8px" }, h("span", null, "In the inventory:"),
+      qtyInput(stockOf(v), `How many ${optText(v)}`, n => binsChange(`${p.title} ${optText(v)}: ${n} in the inventory`, () => { v.stock = n; }))),
+    h("p", { class: "small muted", style: "margin:4px 0 0" }, v.bins.length ? `In bins: ${binAmounts(v)} · not in a bin yet: ${unplacedQty(v)}` : `Not in a bin yet: ${unplacedQty(v)}`),
     h("h3", null, "Bin"),
-    v.bins.length ? h("div", { class: "binnow" }, v.bins.map(b => b.bin).join(" / "), v.bins.length > 1 ? h("span", { class: "small muted" }, " (either one)") : null) : h("p", { class: "muted" }, "Not in a bin yet."),
+    v.bins.length ? h("div", { class: "binnow" }, binAmounts(v), v.bins.length > 1 ? h("span", { class: "small muted" }, " (either one)") : null) : h("p", { class: "muted" }, "Not in a bin yet."),
+    unplacedQty(v) ? h("button", { class: "btn small", type: "button", style: "margin-bottom:8px", onclick: () => { closeSheet(); putAway({ p, v }); } }, `Put away ${unplacedQty(v)}`) : null,
     binActions([v], `${p.title} ${optText(v)}`, sheet && sheet.bin && setOf(v, sheet.bin) ? sheet.bin : null),
     inv ? h("button", { class: "btn small secondary danger", type: "button", style: "margin-top:12px", onclick: e => tapTwice(e.currentTarget, `Remove ${optText(v)} from ${p.title}?`, () => {
       binsChange(`${p.title}: ${optText(v)} removed`, () => { p.variants = p.variants.filter(x => x !== v); }); sheet.vid = null; sheet.direct = false; drawSheet(); }) }, "Remove this size / colour") : null);
@@ -4104,7 +4149,11 @@ function renderBinPage(v) {
         h("div", { class: "dlist" }, vs.map(x => h("div", { class: "drow static" + (B.sel.has(x.id) ? " picked" : "") },
           h("input", { type: "checkbox", checked: B.sel.has(x.id), "aria-label": `Select ${optText(x)}`, onchange: e => tick([x.id], e.target.checked) }),
           h("div", { style: "flex:1;min-width:0" }, h("b", null, optText(x)), h("div", { class: "icode" }, x.barcode), h("div", { class: "icode" }, `SKU ${x.sku}`),
-            x.bins.length > 1 ? h("div", { class: "small muted" }, `Also in ${x.bins.filter(b => b.bin !== bin).map(b => b.bin).join(" / ")}`) : null),
+            x.bins.length > 1 ? h("div", { class: "small muted" }, `Also in ${x.bins.filter(b => b.bin !== bin).map(b => b.bin).join(" / ")}`) : null,
+            h("div", { class: "row", style: "align-items:center;gap:6px;margin-top:4px" }, h("span", { class: "small" }, "In this bin:"),
+              qtyInput(binQty(x, bin) ?? 0, `How many ${optText(x)} in ${bin}`, n => binsChange(`${p.title} ${optText(x)}: ${n} in ${bin}`, () => {
+                const b = x.bins.find(y => y.bin === bin); if (b) { b.qty = n; if (placedQty(x) > stockOf(x)) x.stock = placedQty(x); } })),
+              binQty(x, bin) == null ? h("span", { class: "small muted" }, "not counted") : null)),
           h("button", { class: "btn small secondary", type: "button", onclick: () => openProduct(p.id, bin, x.id) }, "Edit")))));
     }),
     picked.length ? h("div", { class: "selbar" }, h("span", null, `${picked.length} selected`),
@@ -4286,13 +4335,15 @@ function scanIntoBin(bin) {
   let target = bin || null, pending = null, count = 0;
   const confirmBox = () => {
     const { p, v } = pending, others = v.bins.map(b => b.bin).filter(b => b !== target);
-    if (setOf(v, target) && !others.length) { pending = null; return { big: target, text: `Already in ${target}`, sub: `${p.title} · ${optText(v)}` }; }
     const inBin = (binContents().get(target) || []).filter(x => x.p !== p);
     const names = [...new Set(inBin.map(x => x.p.title))];
+    // how many: everything of it that isn't in a bin yet (and, when it moves here, what was in its old bin); change it if not
+    const amt = qtyInput(unplacedQty(v) + (others.length ? others.reduce((a, b) => a + (binQty(v, b) || 0), 0) : 0) || 1, "How many", () => {}, { live: true });
     const place = move => {
-      binsChange(`${p.title} ${optText(v)}: put in ${target}`, () => { if (move) v.bins = []; putIn(v, target); });
+      const n = amt.value();
+      binsChange(`${p.title} ${optText(v)}: ${n} put in ${target}`, () => { if (move) v.bins = v.bins.filter(b => b.bin === target); addToBin(v, target, n); });
       count++; pending = null; beep(true);
-      scan.show({ good: true, big: target, text: `Added: ${optText(v)}`, sub: `${p.title}${others.length ? (move ? ` · taken out of ${others.join(" / ")}` : ` · also still in ${others.join(" / ")}`) : ""} · ${count} added. Scan the next item.` });
+      scan.show({ good: true, big: target, text: `Added: ${n} × ${optText(v)}`, sub: `${p.title}${others.length ? (move ? ` · taken out of ${others.join(" / ")}` : ` · also still in ${others.join(" / ")}`) : ""} · ${binQty(v, target)} in ${target} now. Scan the next item.` });
     };
     const cancel = () => { pending = null; scan.show({ big: target, text: "Not added", sub: "Scan the next item." }); };
     const warn = others.length || names.length;
@@ -4300,6 +4351,8 @@ function scanIntoBin(bin) {
       h("div", { style: "flex:1;min-width:0" },
         h("div", { class: "scanverdict" }, `Add to ${target}?`),
         h("div", null, h("b", null, optText(v)), " · ", p.title),
+        h("div", { class: "row", style: "margin-top:6px;align-items:center;gap:6px" }, h("span", { class: "small" }, "How many:"), amt),
+        h("div", { class: "small muted" }, `${stockOf(v)} in the inventory${setOf(v, target) ? ` · ${binQty(v, target) ?? "?"} in ${target} already` : ""} · ${unplacedQty(v)} not in a bin yet`),
         others.length ? h("div", { class: "scanwarn" }, `It's in ${others.join(" / ")} now.`) : null,
         names.length ? h("div", { class: "scanwarn" }, `${target} already has: ${names.join(", ")}.`) : null,
         h("div", { class: "row", style: "margin-top:8px;gap:6px" },
@@ -4333,6 +4386,133 @@ function renderBinsHistory(v) {
       h("div", { class: "small muted" }, new Date(l.at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }), l.who ? " · " + l.who : "")))))));
 }
 /** Settings → More → Bins: whether the bins are used (not yet), and whether item details can be changed. */
+/* ---------- Inventory: every item with how many there are, how many are in bins, how many still to put away ---------- */
+const needInv = () => { if (binsSettings().inventoryEdits) return true; toast("Adding items changes the inventory: turn on Settings → More → Bins → Allow inventory changes first."); return false; };
+function newItemFromInventory(barcode) { if (!needInv()) return; B.newItem = { title: "", vendor: "", colours: "", sizes: "", sku: "", barcode: barcode || "" }; B.newFrom = "binsInventory"; go("binsNewItem"); }
+function openStock(pid, from) { B.stockPid = pid; B.stockFrom = from || "binsInventory"; go("binsStock"); }
+function renderInventoryList(v) {
+  const q = (B.qi || "").trim().toLowerCase(), qk = scanKey(B.qi || "");
+  const rows = bins.products.filter(p => !q || p.title.toLowerCase().includes(q) || p.vendor.toLowerCase().includes(q)
+      || p.variants.some(x => (x.sku || "").toLowerCase().includes(q) || (qk && scanKey(x.barcode) === qk) || optText(x).toLowerCase().includes(q)))
+    .map(p => ({ p, st: p.variants.reduce((a, x) => a + stockOf(x), 0), inb: p.variants.reduce((a, x) => a + placedQty(x), 0), un: p.variants.reduce((a, x) => a + unplacedQty(x), 0) }))
+    .filter(r => B.showi !== "un" || r.un).sort((a, b) => natural(a.p.title, b.p.title));
+  const search = h("input", { type: "search", class: "binsearch", placeholder: "Search: name, company, barcode, SKU", value: B.qi || "", "aria-label": "Search the inventory",
+    oninput: e => { B.qi = e.target.value; clearTimeout(search.t); search.t = setTimeout(() => { renderSettings(); const s = document.querySelector('input[aria-label="Search the inventory"]'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }, 250); } });
+  v.replaceChildren(h("section", { class: "card" }, backRow("Bins", "bins"),
+    h("h2", null, "Inventory"),
+    h("div", { class: "binbig" },
+      h("button", { class: "btn", type: "button", onclick: countIn }, "Scan to count in"),
+      h("button", { class: "btn secondary", type: "button", onclick: () => newItemFromInventory("") }, "Add a new item")),
+    h("p", { class: "small muted" }, "Scan to count in: scan an item's barcode and say how many came in. A barcode that isn't in the inventory yet starts a new item with it."),
+    search,
+    h("div", { class: "binctls" }, h("label", { class: "binctl" }, h("span", { class: "fixlab" }, "Show"), h("select", { "aria-label": "Show", onchange: e => { B.showi = e.target.value; renderSettings(); } },
+      [["all", "Everything"], ["un", "Not all in a bin yet"]].map(([x, t]) => h("option", { value: x, selected: (B.showi || "all") === x }, t))))),
+    rows.length ? h("div", { class: "dlist" }, rows.map(r => h("button", { class: "drow invrow", type: "button", onclick: () => openStock(r.p.id) },
+      h("div", { style: "flex:1;min-width:0;text-align:left" }, h("b", null, r.p.title), h("div", { class: "small muted" }, `${r.p.vendor} · ${plural(r.p.variants.length, "variant")}`)),
+      h("div", { class: "invnums" }, h("b", null, String(r.st)), h("span", { class: "small" }, r.un ? `${r.un} to put away` : r.st ? "all in bins" : "none")))))
+      : h("p", { class: "muted" }, bins.products.length ? "Nothing matches." : "Nothing in the inventory yet. Add a new item, or scan one to count it in.")));
+}
+/** One item: each size / colour with its barcode, how many there are, and how many are in which bin. */
+function renderStock(v) {
+  const p = productOf(B.stockPid); if (!p) { go("binsInventory"); return; }
+  const inv = binsSettings().inventoryEdits, missing = p.variants.filter(x => !x.barcode).length;
+  const total = p.variants.reduce((a, x) => a + stockOf(x), 0), un = p.variants.reduce((a, x) => a + unplacedQty(x), 0);
+  v.replaceChildren(h("section", { class: "card" }, backRow(B.stockFrom === "bins" ? "Bins" : "Inventory", B.stockFrom || "binsInventory"),
+    h("h2", { style: "margin-bottom:2px" }, p.title), h("p", { class: "small muted", style: "margin-top:0" }, `${p.vendor} · ${total} in the inventory · ${un ? un + " not in a bin yet" : "all in bins"}`),
+    h("div", { class: "row" },
+      inv ? h("button", { class: "btn small", type: "button", onclick: () => { scanBarcodesInOrder(p); scan.onClose = () => renderSettings(); } }, missing ? `Scan barcodes in order (${missing} missing)` : "Scan barcodes in order") : null,
+      un ? h("button", { class: "btn small", type: "button", onclick: () => putAway({ p, v: p.variants.find(x => unplacedQty(x)) }) }, `Put away (${un})`) : null,
+      h("button", { class: "btn small secondary", type: "button", onclick: () => openProduct(p.id, null) }, "Details")),
+    h("div", { class: "dlist", style: "margin-top:10px" }, p.variants.map(x => h("div", { class: "drow static stockrow" },
+      h("div", { style: "flex:1;min-width:0" },
+        h("b", null, optText(x)),
+        inv ? h("input", { type: "text", class: "stockbc", value: x.barcode || "", placeholder: "Barcode", "aria-label": `Barcode of ${optText(x)}`, onchange: e => {
+          const code = e.target.value.trim(), other = code && allVariants().find(y => y.v !== x && scanKey(y.v.barcode) === scanKey(code));
+          if (other) { toast(`That barcode is already on ${other.p.title} · ${optText(other.v)}.`); e.target.value = x.barcode || ""; return; }
+          binsChange(`${p.title} ${optText(x)}: barcode ${code || "removed"}`, () => { x.barcode = code; }); } })
+          : h("div", { class: "icode" }, x.barcode || "no barcode"),
+        h("div", { class: "small muted" }, x.bins.length ? `In ${binAmounts(x)}` : "No bin yet", unplacedQty(x) ? ` · ${unplacedQty(x)} not in a bin` : "")),
+      h("div", { class: "stockqty" }, h("span", { class: "fixlab" }, "How many"),
+        qtyInput(stockOf(x), `How many ${optText(x)}`, n => binsChange(`${p.title} ${optText(x)}: ${n} in the inventory`, () => { x.stock = n; })))))),
+    h("p", { class: "small muted" }, "How many = everything you have of it. When you load a bin you say how many went in; the rest show as not in a bin yet.")));
+}
+/** Scan to count in: an item's barcode, then how many came in (added to the inventory). A new barcode starts a new item. */
+function countIn() {
+  let cur = null;
+  binScan(code => {
+    const hit = findCode(code);
+    if (!hit) {
+      if (!binsSettings().inventoryEdits) return { bad: true, big: "?", text: "Not in the inventory", sub: `${code}. To add new items, turn on Allow inventory changes (Settings → More → Bins).` };
+      return { warn: true, el: h("div", { class: "scanmain" }, h("div", { class: "scanbig" }, "+"), h("div", { style: "flex:1;min-width:0" },
+        h("div", { class: "scanverdict" }, "New barcode"), h("div", { class: "small" }, `${code} isn't in the inventory.`),
+        h("button", { class: "btn small", type: "button", style: "margin-top:8px", onclick: () => { closeScanner(); newItemFromInventory(code); } }, "Add a new item with it"))) };
+    }
+    cur = hit; const amt = qtyInput(1, "How many came in", () => {}, { live: true });
+    return { el: h("div", { class: "scanmain", style: "align-items:flex-start" }, h("div", { class: "scanbig" }, String(stockOf(hit.v))), h("div", { style: "flex:1;min-width:0" },
+      h("div", { class: "scanverdict" }, `${optText(hit.v)}`), h("div", { class: "small" }, `${hit.p.title} · ${stockOf(hit.v)} in the inventory now`),
+      h("div", { class: "row", style: "margin-top:8px;align-items:center;gap:6px" }, h("span", { class: "small" }, "How many came in:"), amt),
+      h("button", { class: "btn small", type: "button", style: "margin-top:8px", onclick: () => {
+        const n = amt.value(); if (!n) return;
+        binsChange(`${hit.p.title} ${optText(hit.v)}: +${n} counted in`, () => { hit.v.stock = stockOf(hit.v) + n; });
+        scan.show({ good: true, big: `+${n}`, text: `${optText(hit.v)}: ${stockOf(hit.v)} now`, sub: `${hit.p.title} · ${unplacedQty(hit.v)} not in a bin yet. Scan the next item.` });
+      } }, "Add to the inventory"))) };
+  }, { keep: true, title: "Scan to count in", hint: "Scan an item's barcode, then say how many came in.", ok: code => !!findCode(code), onClose: () => { if (view === "settings") renderSettings(); } });
+}
+/** Put away: scan an item, it says which bin it goes in and how many (everything not in a bin yet; change it if not);
+    other sizes of the same item can be put away with it. Scan the bin's sticker to confirm. */
+function putAway(start) {
+  let pend = null; // { p, v, amt: {vid: box}, extra: Set }
+  const where = v => v.bins.map(b => b.bin);
+  const ask = x => {
+    const { p, v } = x, goes = where(v);
+    const others = p.variants.filter(y => y !== v && unplacedQty(y) > 0);
+    pend = { p, v, amt: new Map(), extra: new Set() };
+    pend.amt.set(v.id, qtyInput(unplacedQty(v) || 1, `How many ${optText(v)}`, () => {}, { live: true }));
+    others.forEach(y => pend.amt.set(y.id, qtyInput(unplacedQty(y), `How many ${optText(y)}`, () => {}, { live: true })));
+    const goTo = goes.length ? goes.join(" / ") : null;
+    const cbs = others.map(y => [y, h("input", { type: "checkbox", "aria-label": `Also put away ${optText(y)}`, onchange: e => e.target.checked ? pend.extra.add(y.id) : pend.extra.delete(y.id) })]);
+    return { title: goTo ? `Goes in ${goTo}` : "Scan its bin", el: h("div", { class: "scanmain", style: "align-items:flex-start" }, h("div", { class: "scanbig" }, goTo || "?"),
+      h("div", { style: "flex:1;min-width:0" },
+        h("div", { class: "scanverdict" }, goTo ? `Put in ${goTo}` : "No bin yet"),
+        h("div", null, h("b", null, optText(v)), " · ", p.title),
+        h("div", { class: "row", style: "margin-top:6px;align-items:center;gap:6px" }, h("span", { class: "small" }, "How many:"), pend.amt.get(v.id)),
+        h("div", { class: "small muted" }, `${stockOf(v)} in the inventory · ${unplacedQty(v)} not in a bin yet`),
+        others.length ? h("div", { class: "putothers" }, h("div", { class: "small" }, h("b", null, "Same item, other sizes not in a bin yet:")),
+          cbs.map(([y, cb]) => h("div", { class: "row", style: "align-items:center;gap:6px" },
+            h("label", { class: "checkrow", style: "flex:1;min-width:0" }, cb,
+              h("span", { class: "small" }, ` ${optText(y)}${where(y).length ? " → " + where(y).join(" / ") : ""}`)), pend.amt.get(y.id))),
+          h("button", { class: "link small", type: "button", onclick: () => cbs.forEach(([y, cb]) => { cb.checked = true; pend.extra.add(y.id); }) }, "Tick them all")) : null,
+        h("div", { class: "scanhint", style: "margin-top:8px" }, goTo ? `Scan the sticker on ${goTo} to confirm.` : "Scan the sticker on the bin you put it in."),
+        goTo ? h("button", { class: "btn small secondary", type: "button", style: "margin-top:6px", onclick: () => scan.show(place(goes[0], false)) }, `No sticker: confirm ${goes[0]}`) : null)) };
+  };
+  const place = (bin, anyway) => {
+    const { p, v } = pend, list = [v, ...p.variants.filter(y => pend.extra.has(y.id))];
+    const wrong = !anyway && where(v).length && !where(v).includes(bin);
+    if (wrong) return { warn: true, title: `That's ${bin}`, el: h("div", { class: "scanmain", style: "align-items:flex-start" }, h("div", { class: "scanbig" }, "!"), h("div", { style: "flex:1;min-width:0" },
+      h("div", { class: "scanverdict" }, `It goes in ${where(v).join(" / ")}, not ${bin}`),
+      h("div", { class: "row", style: "margin-top:8px;gap:6px" },
+        h("button", { class: "btn small", type: "button", onclick: () => scan.show(place(bin, "move")) }, `Move it to ${bin}`),
+        h("button", { class: "btn small secondary", type: "button", onclick: () => scan.show(place(bin, "both")) }, "Keep both bins"),
+        h("button", { class: "btn small secondary", type: "button", onclick: () => scan.show(ask({ p, v })) }, "Back")))) };
+    const counts = list.map(y => [y, pend.amt.get(y.id).value()]).filter(([, n]) => n > 0);
+    if (!counts.length) return { bad: true, big: "0", text: "How many?", sub: "Type how many you're putting away, then scan the bin again." };
+    binsChange(`${p.title}: ${counts.map(([y, n]) => `${n} × ${optText(y)}`).join(", ")} put in ${bin}`, () => counts.forEach(([y, n]) => {
+      if (anyway === "move") { const moved = placedQty(y); y.bins = []; addToBin(y, bin, n + moved); } else addToBin(y, bin, n);
+    }));
+    pend = null; beep(true);
+    const n = counts.reduce((a, [, k]) => a + k, 0);
+    return { good: true, big: bin, title: "Put away: scan the next item", text: `${n} put in ${bin}`, sub: `${p.title}: ${counts.map(([y, k]) => `${k} × ${optText(y)}`).join(", ")}. Scan the next item.` };
+  };
+  binScan(code => {
+    const r = readBinCode(code);
+    if (r.item) return ask(r.item);
+    if (r.bin) return pend ? place(r.bin, false) : { big: r.bin, text: "Scan an item first", sub: "Then this bin's sticker to confirm." };
+    return { bad: true, big: "?", text: "Not in the inventory", sub: `${code}. Add it in Bins → Inventory first.` };
+  }, { keep: true, title: "Put away: scan an item", hint: "Scan an item: it says which bin it goes in and how many. Then scan the bin's sticker to confirm.",
+    onClose: () => { if (view === "settings") renderSettings(); } });
+  if (start && start.v) setTimeout(() => scan.show(ask(start)), 0);
+}
+
 function binsSettingsSection() {
   const s = binsSettings();
   return h("div", null,
@@ -4859,6 +5039,8 @@ function renderSettingsPage() {
   if (setPage === "binsAdd") return renderBinsAdd(v);
   if (setPage === "binsHistory") return renderBinsHistory(v);
   if (setPage === "binsNewItem") return renderNewItem(v);
+  if (setPage === "binsInventory") return renderInventoryList(v);
+  if (setPage === "binsStock") return renderStock(v);
   if ((setPage === "admin" || setPage === "adminCompany") && acct && (acct.role === "owner" || acct.role === "admin")) return renderAdminPage(v);
   setPage = "home";
   const boxes = buildLocator(settings).size;
@@ -5516,7 +5698,7 @@ window.appBack = () => {
   if (view === "settings") {
     if (setPage === "binsAdd" && B.pick) { B.pick = null; renderSettings(); return true; } // an item found -> back to finding one
     if (setPage === "binsBin") { go(["binsList", "binsAdd"].includes(B.binFrom) ? B.binFrom : "binsList"); return true; }
-    const up = { map: "home", order: "home", more: "home", inventory: "home", admin: "home", adminCompany: "admin", bins: "home", binsList: "bins", binsBin: "binsList", binsAdd: "bins", binsHistory: "bins", binsNewItem: "bins", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
+    const up = { map: "home", order: "home", more: "home", inventory: "home", admin: "home", adminCompany: "admin", bins: "home", binsList: "bins", binsBin: "binsList", binsAdd: "bins", binsHistory: "bins", binsNewItem: B.newFrom || "bins", binsInventory: "bins", binsStock: B.stockFrom || "binsInventory", wizard: "map", orderAisle: "order", advanced: "more" }[setPage];
     if (setPage === "wizard" && wiz) { wizBack(); return true; }
     if (up) { go(up); return true; }
     $("navBtn").click(); return true;

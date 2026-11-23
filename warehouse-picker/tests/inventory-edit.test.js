@@ -19,6 +19,8 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await p.click('button:has-text("Add the item (6 variants)")');
   const item = await p.evaluate(() => { const q = bins.products.find(x => x.title === 'Cozy Knit Romper'); return { n: q.variants.length, skus: q.variants.map(v => v.sku).join(','), vendor: q.vendor }; });
   ok('the item is there with its sizes and SKUs', item.n === 6 && /BO7000-OAT-0-3M/.test(item.skus) && item.vendor === 'Bebe Organic', item.skus);
+  ok('it opens on its page: each size, with its barcode and how many', await p.evaluate(() => setPage === 'binsStock') && (await p.$$('#settingsView .stockrow')).length === 6);
+  await p.click('#settingsView button:text-is("Details")');
   ok('its box opens, with Change this item', /Cozy Knit Romper.*6 variants.*Change this item.*Scan barcodes in order \(6 without one\)/.test(await p.$eval('#binSheet', x => x.innerText.replace(/\n+/g, ' '))));
   // scan the barcodes in order (typed into the scanner's box)
   await p.click('#binSheet button:has-text("Scan barcodes in order")');
