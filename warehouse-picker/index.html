@@ -3903,9 +3903,9 @@ function renderBinsHome(v) {
       h("div", { class: "binbig" },
         h("button", { class: "btn", type: "button", disabled: !bins, onclick: () => go("binsList") }, "List"),
         h("button", { class: "btn", type: "button", disabled: !bins, onclick: () => { B.pick = null; go("binsAdd"); } }, "Add / Edit"),
-        h("button", { class: "btn", type: "button", onclick: () => { if (!bins) { bins = { practice: false, products: [], log: [], settings: { ...binsSettings() } }; saveBins(); } go("binsInventory"); } }, "Inventory"),
-        h("button", { class: "btn", type: "button", disabled: !bins, onclick: () => putAway(null) }, "Put away")),
-      bins ? h("p", { class: "small muted", style: "margin:0" }, (() => { const all = allVariants().map(x => x.v), st = all.reduce((a, v) => a + stockOf(v), 0), un = all.reduce((a, v) => a + unplacedQty(v), 0);
+        TEST_FEATURES ? h("button", { class: "btn", type: "button", onclick: () => { if (!bins) { bins = { practice: false, products: [], log: [], settings: { ...binsSettings() } }; saveBins(); } go("binsInventory"); } }, "Inventory") : null,
+        TEST_FEATURES ? h("button", { class: "btn", type: "button", disabled: !bins, onclick: () => putAway(null) }, "Put away") : null),
+      bins && TEST_FEATURES ? h("p", { class: "small muted", style: "margin:0" }, (() => { const all = allVariants().map(x => x.v), st = all.reduce((a, v) => a + stockOf(v), 0), un = all.reduce((a, v) => a + unplacedQty(v), 0);
         return `In the inventory: ${st} · not in a bin yet: ${un}. Put away: scan an item, it says which bin; scan the bin to confirm.`; })()) : null,
       h("button", { class: "btn secondary", type: "button", onclick: () => { if (!binsSettings().inventoryEdits) return toast("Adding items changes the inventory: turn on Settings → More → Bins → Allow inventory changes first."); B.newFrom = "bins"; go("binsNewItem"); } }, "Add a new item")),
     bins ? h("button", { class: "link small", type: "button", style: "margin-top:12px", onclick: () => go("binsHistory") }, "History") : null));

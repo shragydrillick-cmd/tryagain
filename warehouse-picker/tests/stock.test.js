@@ -9,7 +9,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
 (async () => {
   const b = await chromium.launch(); const p = await (await b.newContext({ viewport: { width: 390, height: 844 } })).newPage();
   const errs = []; p.on('pageerror', e => errs.push(e.message));
-  await p.goto(BASE); await p.evaluate(() => localStorage.clear()); await p.reload();
+  await p.goto(BASE); await p.evaluate(() => { localStorage.clear(); localStorage.setItem('pick-and-sort-test-features', '1'); }); await p.reload(); // the test address's features
   await p.click('#navBtn'); await p.click('.tile:has(b:text-is("Bins"))');
   const text = sel => p.$eval(sel, x => x.innerText.replace(/\s+/g, ' ')).catch(() => '');
   const scan = async c => { await p.fill('.scanner input[aria-label="Barcode or SKU"]', c); await p.click('.scanner button:text-is("OK")'); await p.waitForTimeout(150); };
