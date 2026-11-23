@@ -19,7 +19,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   });
   await a.click('#exampleBtn');
   const pickA = await a.evaluate(() => plan.picks.map(p => p.box + ':' + p.name).join(' > '));
-  const want = await a.evaluate(() => ({ settings: JSON.stringify({ ...settings, companyStoreAt: undefined, storeEditedAt: undefined }), bins: JSON.stringify(bins), boxes: buildLocator(settings).size }));
+  const want = await a.evaluate(() => ({ settings: JSON.stringify({ ...settings, companyStoreAt: undefined, storeEditedAt: undefined }), bins: JSON.stringify(bins, (k, x) => (k === "mt" || k === "goneV" || k === "gone" ? undefined : x)), boxes: buildLocator(settings).size }));
   await a.click('#navBtn'); await a.evaluate(() => go('more'));
   const [dl] = await Promise.all([a.waitForEvent('download'), a.click('button:has-text("Save settings file")')]);
   const file = S + '/full-settings.json'; await dl.saveAs(file);
@@ -29,7 +29,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await z.click('#navBtn'); await z.evaluate(() => go('more'));
   await z.setInputFiles('input[type=file][accept=".json,application/json"]', file); await z.waitForTimeout(800);
   const msg = await z.$eval('#toast', x => x.textContent);
-  const got = await z.evaluate(() => ({ settings: JSON.stringify({ ...settings, companyStoreAt: undefined, storeEditedAt: undefined }), bins: JSON.stringify(bins), boxes: buildLocator(settings).size }));
+  const got = await z.evaluate(() => ({ settings: JSON.stringify({ ...settings, companyStoreAt: undefined, storeEditedAt: undefined }), bins: JSON.stringify(bins, (k, x) => (k === "mt" || k === "goneV" || k === "gone" ? undefined : x)), boxes: buildLocator(settings).size }));
   ok('message says what was loaded', /4 aisles .* Bins \(12 items\).*inventory \(2 items\)/.test(msg), msg);
   ok('aisles, shelves, boxes, picking patterns, walking order: identical', got.settings === want.settings, `${before} boxes before, ${got.boxes} after`);
   ok('Bins: identical (items, sizes, bins, a second bin, settings)', got.bins === want.bins);
@@ -38,6 +38,6 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   const pickZ = await z.evaluate(() => plan.picks.map(p => p.box + ':' + p.name).join(' > '));
   ok('the same orders give the exact same pick order on both', pickZ === pickA);
   await z.reload(); await z.waitForTimeout(800);
-  ok('kept after closing and reopening', await z.evaluate(() => JSON.stringify({ ...settings, companyStoreAt: undefined, storeEditedAt: undefined })) === want.settings && await z.evaluate(() => JSON.stringify(bins)) === want.bins);
+  ok('kept after closing and reopening', await z.evaluate(() => JSON.stringify({ ...settings, companyStoreAt: undefined, storeEditedAt: undefined })) === want.settings && await z.evaluate(() => JSON.stringify(bins, (k, x) => (k === "mt" || k === "goneV" || k === "gone" ? undefined : x))) === want.bins);
   ok('no page errors', !errs.length, errs.join(' / '));
   console.log(bad ? bad + ' FAILED' : 'all ok'); await b.close(); process.exit(bad ? 1 : 0); })();

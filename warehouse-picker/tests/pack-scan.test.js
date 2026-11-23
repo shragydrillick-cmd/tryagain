@@ -38,7 +38,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('the packing slip PDF\'s order barcode scans', slip.read === slip.want, `${slip.read} / ${slip.want}`);
 
   // 2. a list of orders, all sorted onto their piles -> ready to pack
-  await p.click('#exampleBtn');
+  await p.evaluate(() => document.getElementById('exampleBtn').click()); // hidden on the test address (orders come from the store there)
   await p.evaluate(() => { plan.unpack.forEach(u => unpackDone.add(u.step)); saveList(); });
   await p.click('#packBtn');
   ok('Packing: ready orders with Pack, and Scan an order / Find an order at the bottom', /Ready to pack: 5.*Pack.*Scan an order.*Find an order/.test(await txt('#packPanel')));
@@ -97,7 +97,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   // a phone: the camera on top
   const ph = await (await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })).newPage();
   await ph.addInitScript(() => { try { localStorage.setItem('pick-and-sort-test-features', '1'); } catch (e) {} });
-  await ph.goto(BASE); await ph.click('#exampleBtn'); await ph.evaluate(() => startPack(findPackOrder('70001'), false));
+  await ph.goto(BASE); await ph.evaluate(() => document.getElementById('exampleBtn').click()); await ph.evaluate(() => startPack(findPackOrder('70001'), false));
   ok('on a phone: the camera on top, the order below', !!(await ph.$('#packScreen .packcam video')) && !!(await ph.$('#packScreen .packwrap')));
   // the choice by hand is remembered on the device
   await ph.click('#packScreen button:has-text("Use a scanner or typing instead")');
