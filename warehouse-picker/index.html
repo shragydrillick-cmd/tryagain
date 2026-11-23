@@ -4335,7 +4335,8 @@ function binsSettingsSection() {
     h("p", { class: "small muted" }, "Practice. Picking, sorting and packing never look at Bins; they keep using the slips. This can be switched on once Bins is finished."),
     h("div", { class: "row", style: "justify-content:space-between;align-items:center" },
       h("span", null, h("b", null, "Allow inventory changes: "), s.inventoryEdits ? "On" : "Off"),
-      h("button", { class: "btn small" + (s.inventoryEdits ? " secondary" : ""), type: "button", disabled: !bins, onclick: () => {
+      h("button", { class: "btn small" + (s.inventoryEdits ? " secondary" : ""), type: "button", onclick: () => {
+        if (!bins) bins = { practice: false, products: [], log: [], settings: s }; // nothing in Bins yet: start an empty one
         bins.settings = { ...s, inventoryEdits: !s.inventoryEdits }; saveBins(); renderSettings(); } }, s.inventoryEdits ? "Turn off" : "Turn on")),
     h("p", { class: "small muted" }, "On: item names, companies, sizes, colours, barcodes and SKUs can be changed in Bins (once it's connected to the store, that would change the store's products). Off: only which bin things are in."));
 }
