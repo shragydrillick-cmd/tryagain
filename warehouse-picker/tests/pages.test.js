@@ -63,6 +63,16 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   const before = await p.evaluate(() => plan.orders.length), first = await p.evaluate(() => String(plan.orders.slice().sort((a, b) => a.label - b.label)[0].raw));
   await p.click('#listPage .dlist .drow >> nth=0 >> button:text-is("Remove")'); await p.click('#listPage button:has-text("Tap again")');
   ok('Orders: one taken off the list', await p.evaluate(([n, f]) => plan.orders.length === n - 1 && !plan.orders.some(o => String(o.raw) === f), [before, first]));
+  // an order packed before it was on the list (from its own page): once added, the List counts it as packed, its items done
+  const pre = await p.evaluate(async () => {
+    const o = aoOrders().find(x => !onList(x.number) && orderStage(x).key === 'new');
+    startPack(findPackOrder(o.number), true); pk.o.items.forEach((it, i) => pk.got.set(i, it.qty)); await packAction('pack'); closePack();
+    stage.clear(); stage.set(o.number, o); return o.number;
+  });
+  await p.evaluate(() => runStage('pick')); await p.waitForTimeout(300); await p.click('#addOrders button:text-is("Add these to it")'); await p.waitForTimeout(400);
+  await p.evaluate(() => { listView = 'items'; showPage('list'); });
+  const counts = await p.evaluate(n => { const po = plan.orders.find(o => String(o.raw) === n); return { packedTile: plan.orders.filter(o => packed.has(o.raw)).length, itemsPacked: plan.unpack.filter(u => u.label === po.label).every(u => lineStage(u).text === 'Packed'), stage: orderStage({ number: n }).text }; }, pre);
+  ok('packed before it was on the list: the List counts it packed, its items Packed, same as its status', counts.packedTile >= 1 && counts.itemsPacked && counts.stage === 'Packed' && /\d+ packed/.test(await p.innerText('#listPage')), JSON.stringify(counts));
   // Pick: straight to it, no box of text around; Sort: straight into the scanner (a computer: the scanner's box)
   await p.evaluate(() => showPage('pick'));
   ok('Pick: the big Step by step, no "Your lists" box or file name', await p.isVisible('#pageCtl button:text-is("Step by step")') && !(await p.isVisible('#results > h2')) && !(await p.isVisible('#fileName')));

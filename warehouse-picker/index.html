@@ -2622,9 +2622,33 @@ function openPacking() {
   drawPacking();
 }
 function closePacking() { const el = $("packPanel"); if (el) el.remove(); packSeen = null; document.body.style.overflow = ""; }
-function setPacked(raw, on) { if (on) packed.set(raw, Date.now()); else packed.delete(raw); saveList(); drawPacking(); }
+function setPacked(raw, on) {
+  if (on) packed.set(raw, Date.now());
+  else { // undone: everywhere it was marked
+    packed.delete(raw); const n = String(raw); delete shop.packed[n]; keepShopPacked();
+    if (TEST_FEATURES) { const s = practiceStore().orders.find(x => x.number === n); if (s && s.packedAt) { s.packedAt = null; savePracticeStore(); } }
+  }
+  saveList(); drawPacking();
+}
+/** An order can be packed from its own page or Find (not from the list): the list counts it as packed too, so every
+    count (List, Packing, its items) agrees with the order's own status. */
+function packedElsewhere(raw) {
+  const n = String(raw);
+  if (shop.packed[n]) return shop.packed[n];
+  const so = shop.orders && shop.orders.find(x => String(x.number) === n); if (so && so.packed) return so.created || Date.now();
+  if (TEST_FEATURES) { const s = practiceStore().orders.find(x => x.number === n); if (s && s.packedAt) return s.packedAt; }
+  return null;
+}
+function syncPacked() {
+  if (!plan) return false;
+  let changed = false;
+  plan.orders.forEach(o => { if (!packed.has(o.raw)) { const t = packedElsewhere(o.raw); if (t) { packed.set(o.raw, t); changed = true; } } });
+  if (changed) saveListSoon();
+  return changed;
+}
 function drawPacking() {
   const el = $("packPanel"); if (!el) return;
+  syncPacked();
   const head = h("div", { class: "detailhead" }, h("h2", null, "Packing"), h("span", { style: "flex:1" }),
     h("button", { class: "btn small", type: "button", onclick: closePacking }, "✕ Close"));
   const findBar = TEST_FEATURES ? h("div", { class: "packfindbar" },
@@ -3783,6 +3807,7 @@ function takeOffList(match, what) {
   rebuild(); applyTickKeys(keep); saveListSoon(); toast(`${what} taken off the list.`); drawListPage();
 }
 function drawListPage() {
+  syncPacked();
   let el = $("listPage");
   if (!el) { el = h("section", { id: "listPage", class: "card" }); $("homeView").prepend(el); }
   if (!plan) {
