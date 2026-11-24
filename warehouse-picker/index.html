@@ -231,7 +231,15 @@ img.qr.big { width: min(420px, 100%); } /* big squares: easy to read off a scree
 .scanner.byscanner .scanmsg { order: 1; text-align: left; margin: 4px 0 8px; }
 .scanner.byscanner .scanrow { order: 2; margin-bottom: 10px; }
 .scanner.byscanner .scanrow input { font-size: 20px; padding: 14px; }
-.scanner.byscanner .scanresult { order: 3; flex: 0 1 auto; min-height: 120px; }
+.scanner.byscanner .scanresult { order: 3; flex: 0 1 auto; min-height: 0; background: var(--card); color: var(--text); border: 1px solid var(--line); }
+.scanner.byscanner .scanresult:has(> .scanhint:only-child) { display: none; } /* nothing scanned yet: no box */
+.scanner.byscanner .scanresult.good { background: #e3f6e9; border-color: #a9dcb9; }
+.scanner.byscanner .scanresult.bad { background: #fde6e4; border-color: #f0b3ad; }
+.scanner.byscanner .scanresult.warn { background: #fff1e0; border-color: #f0c79a; }
+.scanner.byscanner .scanresult .idet, .scanner.byscanner .scanresult .icode, .scanner.byscanner .scanresult .muted, .scanner.byscanner .scanresult .scanhint { color: var(--muted); opacity: 1; }
+.scanner.byscanner .scanresult .btn.secondary, .scanner.byscanner .scanresult .pickitems .btn { color: var(--accent); border-color: var(--accent); }
+.scanner.byscanner .scanresult .pickitems .btn span { color: var(--muted); }
+.scanner.byscanner .scanresult .lastnote { color: #1e7a46; }
 .scanner.byscanner .scanprog { order: 4; color: var(--muted); }
 .scanner.byscanner > :not(.scanhead):not(.scanmsg):not(.scanrow):not(.scanresult):not(.scanprog) { order: 5; }
 .pickitems { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-height: 30vh; overflow: auto; }
@@ -2859,7 +2867,7 @@ function startPack(o, paperDone) {
 function scanByScanner(el, msg, typed, text) {
   const view = el.querySelector(".scanview"); if (view) view.remove();
   el.classList.add("byscanner");
-  msg.textContent = text; typed.placeholder = "Scan here (or type the code and press Enter)";
+  msg.remove(); typed.placeholder = "Barcode"; // the title says what to scan; nothing else needed
   typed.removeAttribute("inputmode");
   setTimeout(() => typed.focus(), 30);
 }
