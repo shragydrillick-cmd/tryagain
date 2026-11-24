@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example barcodes</title>
+<style>
+  :root { --bg: #f4f5f7; --card: #fff; --text: #1b1f24; --muted: #5d6673; --accent: #1f5f8b; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; margin: 8px 0; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-top: 14px; }
+  .card { background: var(--card); border-radius: 12px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .card b { display: block; }
+  .card.extra { outline: 2px dashed #c58a00; }
+  svg { display: block; width: 100%; height: auto; margin-top: 8px; background: #fff; }
+  ol { padding-left: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Example barcodes for "Scan to unpack"</h1>
+  <p class="muted">Open this page on a computer. On the phone, in Pick &amp; Sort:</p>
+  <ol>
+    <li>Tap <b>Try an example</b> (5 example orders).</li>
+    <li>Tap <b>📷 Scan to unpack</b> and point the phone at the barcodes below, one at a time.</li>
+    <li>Each one shows which order it goes on. Scan the same barcode again to place the next one (move the phone away in between).</li>
+  </ol>
+  <div class="grid" id="grid"></div>
+</main>
+<script>
+// EAN-13 drawn as SVG bars: the same barcodes the example orders list
+const ITEMS = [
+  ["5012345000015", "Fleece blanket", "Blue, 50x60 in · SKU FB-BLU"],
+  ["5012345000022", "Fleece blanket", "Gray, 50x60 in · SKU FB-GRY"],
+  ["5012345000039", "Notebook", "Lined, A5 · SKU NB-A5"],
+  ["5012345000046", "Desk lamp", "White · SKU DL-WHT"],
+  ["5012345000053", "Phone stand", "Black · SKU PS-BLK"],
+  ["5012345000060", "Pen set", "Black ink · SKU PEN-BLK"],
+  ["5012345000077", "Cable ties", "Pack of 50 · SKU CT-50"],
+  ["5012345000084", "Sticky notes", "Yellow · SKU SN-YEL"],
+  ["5012345000091", "Water bottle", "750 ml · SKU WB-750"],
+  ["5012345000107", "A barcode that isn't on any slip", "Try it: the app asks which item it is, and remembers it from then on (pick the Water bottle)."],
+];
+const L = ["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
+const R = L.map(x => [...x].map(b => (b === "0" ? "1" : "0")).join("")), G = R.map(x => [...x].reverse().join(""));
+const P = ["LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG","LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL"];
+function ean13(code) {
+  const d = [...code].map(Number);
+  let bits = "101";
+  for (let i = 1; i <= 6; i++) bits += (P[d[0]][i - 1] === "L" ? L : G)[d[i]];
+  bits += "01010";
+  for (let i = 7; i <= 12; i++) bits += R[d[i]];
+  bits += "101";
+  const m = 3, q = 11 * m, w = bits.length * m + 2 * q, hgt = 110;
+  let rects = "";
+  [...bits].forEach((b, i) => { if (b === "1") rects += `<rect x="${q + i * m}" y="8" width="${m}" height="${hgt}"/>`; });
+  return `<svg viewBox="0 0 ${w} ${hgt + 34}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#fff"/><g fill="#000">${rects}</g>` +
+    `<text x="${w / 2}" y="${hgt + 28}" text-anchor="middle" font-family="monospace" font-size="20">${code}</text></svg>`;
+}
+const grid = document.getElementById("grid");
+ITEMS.forEach(([code, name, det], i) => {
+  const c = document.createElement("div"); c.className = "card" + (i === ITEMS.length - 1 ? " extra" : "");
+  c.innerHTML = `<b>${name}</b><span class="muted">${det}</span>${ean13(code)}`;
+  grid.append(c);
+});
+</script>
+</body>
+</html>
