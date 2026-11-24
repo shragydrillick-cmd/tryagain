@@ -2991,7 +2991,7 @@ async function startPackCamera() {
     video.srcObject = stream; await video.play();
     if (msg) msg.textContent = "";
   } catch (e) {
-    if (pk) { pk.cam = false; const c = document.querySelector("#packScreen .packcam"); if (c) c.remove(); pk.msg = { kind: "ok", text: "No camera here: scan with the barcode scanner, or type the code." }; drawPack(); }
+    if (pk) { pk.cam = false; const c = document.querySelector("#packScreen .packcam"); if (c) c.remove(); if (!pk.msg || pk.msg.kind === "ok" && /sheet is confirmed/.test(pk.msg.text)) pk.msg = { kind: "ok", text: "No camera here: scan with the barcode scanner, or type the code." }; drawPack(); }
     return;
   }
   const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });

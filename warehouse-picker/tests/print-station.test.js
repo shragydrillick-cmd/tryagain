@@ -61,7 +61,8 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await ph.evaluate(() => { window.__opened = 0; window.open = () => { window.__opened++; return { closed: false, close() {}, document: { body: {}, title: '' }, location: {} }; }; });
   const local2 = await ph.evaluate(() => practiceStore().orders.filter(o => o.delivery.type === 'local')[1].number);
   await pack(ph, local2, 'both');
-  ok('desk offline: the phone prints the label itself, and says so', await ph.evaluate(() => window.__opened) === 1 && /offline: printing here/.test(await ph.$eval('#packScreen .packmsg', x => x.innerText)));
+  ok('desk offline: the phone prints the label itself, and says so', await ph.evaluate(() => window.__opened) === 1 && /offline: printing here/.test(await ph.$eval('#packScreen .packmsg', x => x.innerText)),
+    await ph.evaluate(() => window.__opened) + ' / ' + await ph.$eval('#packScreen .packmsg', x => x.innerText).catch(e => 'no msg: ' + document.title));
   await ph.click('#packScreen button:text-is("Back")').catch(() => {});
   const ups2 = await ph.evaluate(() => practiceStore().orders.filter(o => o.delivery.type === 'shipping')[1].number);
   await pack(ph, ups2, 'pack');
