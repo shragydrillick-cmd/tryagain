@@ -114,7 +114,7 @@ function toPackOrder(o, shop) {
     number: String(o.name || "").replace(/^#/, ""), id: o.id, created: Date.parse(o.createdAt) || null,
     customer: (o.customer && o.customer.displayName) || a.name || [a.firstName, a.lastName].filter(Boolean).join(" ") || "", address: [a.address1, a.address2].filter(Boolean).join(", "), city: a.city || "", zip: a.zip || "",
     delivery: { type: local || !title ? "local" : "shipping", title, date: null },
-    tags: o.tags || [], packed: (o.tags || []).some(t => /^packed\b/i.test(t)),
+    tags: o.tags || [], packed: (o.tags || []).some(t => /^packed\b/i.test(t)), packedTag: (o.tags || []).find(t => /^packed\b/i.test(t)) || "",
     shopifyUrl: `https://admin.shopify.com/store/${shop.replace(/\.myshopify\.com$/, "")}/orders/${idNum}`,
     items: (o.lineItems && o.lineItems.nodes || []).map(l => ({
       name: l.title || l.name || "", details: l.variantTitle && l.variantTitle !== "Default Title" ? l.variantTitle : "",

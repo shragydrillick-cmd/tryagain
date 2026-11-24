@@ -396,7 +396,7 @@ header.top #title { white-space: nowrap; }
 .fcat, .fopt { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); color: inherit; font-size: 16px; padding: 13px 4px; cursor: pointer; }
 .fopt.on { font-weight: 700; }
 .orderacts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
-.orderacts .btn:first-child { grid-column: 1 / -1; padding: 14px; font-size: 17px; }
+.orderacts[hidden] { display: none; }
 .duealert { position: fixed; left: 12px; right: 12px; top: calc(var(--headh, 64px) + 8px); z-index: 95; background: #fff1e0; color: #5a3200; border: 2px solid #f0a24a; border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: 560px; margin: 0 auto; }
 .deadrule .fixgrid { margin-top: 6px; }
 .aobar { position: sticky; bottom: 0; padding: 10px 0 4px; background: var(--card); }
@@ -414,8 +414,13 @@ body.withmenu #homeView > section.card.no-print:first-of-type .ordershead, body.
 body.withmenu[data-page="orders"] #results, body.withmenu[data-page="create"] #results, body.withmenu[data-page="list"] #results { display: none !important; }
 body.withmenu:not([data-page="orders"]):not([data-page="create"]) #addOrders { display: none; }
 /* the old box at the top (only when it has something to say) */
-body.withmenu #homeView > section.card.no-print:first-of-type { display: none; }
-body.withmenu #homeView > section.card.no-print:first-of-type:has(#loadMsg > *) { display: block; }
+body.withmenu #ordersCard { display: none; }
+body.withmenu #ordersCard:has(#loadMsg > *) { display: block; }
+body.withmenu #ordersCard .ordershead, body.withmenu #ordersCard .addtiles { display: none; }
+body.withmenu #addOrders.card { background: none; border: 0; box-shadow: none; padding: 0; }
+body.withmenu #addOrders .dlist { gap: 0; }
+body.withmenu #addOrders .aorow { border-radius: 0; margin: 0; border-left: 0; border-right: 0; border-top: 0; background: var(--card); }
+body.withmenu #addOrders .aorow:first-child { border-top: 1px solid var(--line); }
 /* Pick and Sort: straight to the job; no "Your lists" box around it */
 body.withmenu #results > h2, body.withmenu #results > .row.no-print, body.withmenu #syncLine, body.withmenu #stats { display: none !important; }
 body.withmenu #results { background: none; border: 0; box-shadow: none; padding: 0; }
@@ -2643,7 +2648,7 @@ function setPacked(raw, on) {
 function packedElsewhere(raw) {
   const n = String(raw);
   if (shop.packed[n]) return shop.packed[n];
-  const so = shop.orders && shop.orders.find(x => String(x.number) === n); if (so && so.packed) return so.created || Date.now();
+  const so = shop.orders && shop.orders.find(x => String(x.number) === n); if (so && so.packed) return packedTagTime(so.packedTag) || so.created || Date.now();
   if (TEST_FEATURES) { const s = practiceStore().orders.find(x => x.number === n); if (s && s.packedAt) return s.packedAt; }
   return null;
 }
@@ -2756,6 +2761,17 @@ function packedTime(o) {
   if (o.source === "store") { const s = practiceStore().orders.find(x => x.number === o.number); return s && s.packedAt || null; }
   if (o.source === "shopify") return shop.packed[o.number] || (o.packed ? o.created || 1 : null);
   return null;
+}
+/** The Packed tag, one tag (Shopify splits tags at commas, so none in it): "Packed 11/24/2026 2:05 PM". */
+function packedTag(t) {
+  const d = new Date(t), p = x => String(x).padStart(2, "0"), hh = d.getHours();
+  return `Packed ${p(d.getMonth() + 1)}/${p(d.getDate())}/${d.getFullYear()} ${hh % 12 || 12}:${p(d.getMinutes())} ${hh >= 12 ? "PM" : "AM"}`;
+}
+/** When a Packed tag says it was packed (also the older two-part tags: the date only). */
+function packedTagTime(tag) {
+  const m = /^Packed (\d{1,2})\/(\d{1,2})\/(\d{4})(?:,? (\d{1,2}):(\d{2}) ?(AM|PM)?)?/i.exec(String(tag || "")); if (!m) return null;
+  let hh = Number(m[4] || 0); if (m[6]) hh = (hh % 12) + (/pm/i.test(m[6]) ? 12 : 0);
+  return new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2]), hh, Number(m[5] || 0)).getTime();
 }
 const orderKey = c => String(c || "").trim().replace(/^order\s*/i, "").replace(/^#/, "").replace(/\s+/g, "").toUpperCase();
 const findPackOrder = code => { const k = orderKey(code); return k ? allPackOrders().find(o => orderKey(o.number) === k) || null : null; };
@@ -3054,7 +3070,7 @@ async function packAction(what) {
   // on the tap, so the browser doesn't block it)
   const shopHere = what !== "print" && ship && !station.id && o.shopifyUrl ? window.open(o.shopifyUrl, "_blank") : null;
   if (what !== "print") {
-    const t = Date.now(), tag = `Packed ${new Date(t).toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" })}`;
+    const t = Date.now(), tag = packedTag(t);
     const lo = plan && plan.orders.find(x => String(x.raw) === o.number);
     if (lo) { packed.set(lo.raw, t); saveList(); }
     if (o.source === "shopify") {
@@ -3403,7 +3419,10 @@ else if (/[?&]shopify=/.test(location.search) && /^pick-and-sort\.(web\.app|fire
 /* "From Shopify" under Orders: the store's open orders, filtered and sorted; tick the ones to pick and add them to the list.
    They go through the same check as slips: an item without a bin (or SKU, barcode) shows in "Please look". */
 let ao = null; // { q, sort, kind, area, when, show, chosen: Set of numbers }
-const aoOrders = () => (shop.orders || (TEST_FEATURES ? practiceStore().orders : [])).map(o => ({ ...o, units: o.items.reduce((a, x) => a + x.qty, 0) }));
+/** Signed in to a company on the test address: the store's orders only. Until they come: none (it says it's getting them);
+    the practice orders only when there's no store connected. */
+const ordersLoading = () => !!(TEST_FEATURES && !shop.orders && acct && acct.company && !testNoAuth && !shop.err && !(shop.status && !shop.status.connected));
+const aoOrders = () => (shop.orders || (ordersLoading() ? [] : TEST_FEATURES ? practiceStore().orders : [])).map(o => ({ ...o, units: o.items.reduce((a, x) => a + x.qty, 0) }));
 const onList = n => !!(plan && plan.orders.some(x => String(x.raw) === String(n)));
 function openAddOrders(mode = "create") {
   ao = { mode, q: "", sort: "created", kind: "all", area: "", when: "all", show: mode === "browse" ? "open" : "new", due: "", chosen: new Set() };
@@ -3443,7 +3462,8 @@ function drawAddOrders() {
   el.replaceChildren(h("div", { class: "detailbox" },
     h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, !TEST_FEATURES ? "Add orders" : ao.mode === "browse" ? "Orders" : "Create list"), TEST_FEATURES ? null : h("button", { class: "btn small", type: "button", onclick: closeAddOrders }, "Back")),
     // a note only when it matters: the store couldn't be reached, or these are practice orders
-    !shop.orders && !shop.busy ? h("div", { class: "notice warn", style: "margin:0 0 8px" }, shop.err ? `Couldn't get the store's orders (${shop.err}): showing practice orders.` : "Practice orders: no Shopify store connected (Settings → More).") : null,
+    ordersLoading() ? h("p", { class: "muted", style: "margin:12px 0" }, "Getting the orders…") : null,
+    !shop.orders && !ordersLoading() ? h("div", { class: "notice warn", style: "margin:0 0 8px" }, shop.err ? `Couldn't get the store's orders (${shop.err}): showing practice orders.` : "Practice orders: no Shopify store connected (Settings → More).") : null,
     h("div", { class: "row", style: "gap:8px;align-items:center;flex-wrap:nowrap" }, search,
       h("button", { class: "btn secondary", type: "button", style: "flex:none", onclick: () => openOrderFilter() }, "Filter & sort")),
     filterChips(),
@@ -3582,7 +3602,8 @@ function orderStage(o) {
   if (so.delivered) return { key: "delivered", cls: "st-grey", text: "Delivered" };
   if (so.fulfilled) return { key: "fulfilled", cls: "st-grey", text: "Fulfilled" };
   const po = plan && plan.orders.find(x => String(x.raw) === n);
-  if ((po && packed.has(po.raw)) || shop.packed[n] || o.packed || (o.source === "store" && packedTime({ ...o, source: "store" }))) return { key: "packed", cls: "st-grey", text: "Packed" };
+  const pt = (po && packed.get(po.raw)) || shop.packed[n] || (o.source === "store" && packedTime({ ...o, source: "store" })) || packedTagTime(so.packedTag || o.packedTag) || ((so.packed || o.packed) ? -1 : 0);
+  if (pt) return { key: "packed", cls: "st-grey", text: pt > 0 ? `Packed ${fmtWhen(pt)}` : "Packed" };
   if (po) {
     const lines = plan.unpack.filter(u => u.label === po.label), units = lines.reduce((a, u) => a + u.qty, 0);
     const sorted = lines.reduce((a, u) => a + (unpackDone.has(u.step) ? u.qty : Math.min(u.qty, placed.get(u.step) || 0)), 0);
@@ -3689,18 +3710,18 @@ function openOrderPage(number) {
       h("div", { style: "flex:1;min-width:0" }, h("b", null, it.name), it.details ? h("span", { class: "small" }, ` · ${it.details}`) : null,
         h("div", { class: "icode" }, [it.sku && "SKU " + it.sku, it.barcode].filter(Boolean).join("  "))),
       h("span", { class: "binno" + (binOf(it) ? "" : " empty") }, binOf(it) || "no bin")))),
-    h("div", { class: "orderacts" },
-      act("Pack it now (scan)", () => { close(); startPack(findPackOrder(n) || full, false); }, "btn"),
-      act("Order sheet", () => printOrderSheets([full], stationOnline() ? null : openPrintWindow())),
-      act("Packing slip", () => packingSlipPdf(full)),
-      act("Driver label", async () => { if (stationOnline() && await sendToStation("label", full)) toast(`Label sent to ${station.doc.name}.`); else driverLabelPdf(full); }),
+    h("button", { class: "btn secondary", type: "button", style: "width:100%;margin-top:14px", onclick: e => { const m = el.querySelector(".orderacts"); m.hidden = !m.hidden; e.currentTarget.textContent = m.hidden ? "Actions ▾" : "Actions ▴"; } }, "Actions ▾"),
+    h("div", { class: "orderacts", hidden: true },
+      act("Pack it now", () => { close(); startPack(findPackOrder(n) || full, false); }),
+      act("Packing slip", () => printOrderSheets([full], stationOnline() ? null : openPrintWindow())),
+      o.delivery && o.delivery.type === "shipping" ? null : act("Driver label", async () => { if (stationOnline() && await sendToStation("label", full)) toast(`Label sent to ${station.doc.name}.`); else driverLabelPdf(full); }),
       onList(n) ? null : stage.has(n) ? act("Take out of your list", () => { stage.delete(n); keepStage(); openOrderPage(n); if (ao) drawAddOrders(); })
         : act("Add to your list", () => { stage.set(n, { ...o, units }); keepStage(); openOrderPage(n); if (ao) drawAddOrders(); toast(`#${n} added to your list.`); }),
       o.shopifyUrl ? act("Open in Shopify", () => window.open(o.shopifyUrl, "_blank")) : null)));
 }
 function sortNumbers(orders) {
   const m = new Map();
-  orders.forEach((o, i) => { const po = plan && plan.orders.find(x => String(x.raw) === String(o.number)); m.set(o.number, po ? String(po.label) : String(i + 1)); });
+  orders.forEach((o, i) => { const po = plan && plan.orders.find(x => String(x.raw) === String(o.number)); m.set(o.number, po ? String(po.label) : orders.length > 1 ? String(i + 1) : ""); });
   return m;
 }
 /** The order sheets: one page per order, in sorting order, to the print station if there is one (else here). */
@@ -3727,10 +3748,10 @@ async function orderSheetsPdf(sheets, sink, win) {
   const byBin = binSort();
   for (let i = 0; i < sheets.length; i++) {
     const o = sheets[i]; if (i) doc.addPage();
-    // the sorting number: big, top left
-    doc.setDrawColor(0); doc.setLineWidth(3); doc.roundedRect(40, 36, 120, 96, 10, 10);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(o.num.length > 2 ? 54 : 72); doc.text(o.num, 100, 108, { align: "center" });
-    doc.setFontSize(9); doc.text("SORT #", 100, 48, { align: "center" });
+    // the sorting number: big, top left (not when the order isn't on a list)
+    doc.setFont("helvetica", "bold");
+    if (o.num) { doc.setDrawColor(0); doc.setLineWidth(3); doc.roundedRect(40, 36, 120, 96, 10, 10);
+      doc.setFontSize(o.num.length > 2 ? 54 : 72); doc.text(o.num, 100, 108, { align: "center" }); doc.setFontSize(9); doc.text("SORT #", 100, 48, { align: "center" }); }
     doc.setFontSize(18); doc.text(`Order #${o.number}`, 180, 64);
     doc.setFillColor(0); await pdfBarcode(doc, o.number, 400, 40, 172, 44);
     doc.setFont("helvetica", "normal"); doc.setFontSize(11);
@@ -3915,6 +3936,7 @@ function setupSideMenu() {
 /* the test address: orders come only from the store. One button, Add orders: the store's open orders to choose from
    (no slips, files, typing or QR codes: nothing has to be printed). */
 if (TEST_FEATURES) {
+  $("fileInput").closest("section").id = "ordersCard"; // the old Orders box: not shown here
   setupSideMenu();
   $("packBtn").classList.add("hidden");
   $("stepClose").before(h("button", { class: "btn secondary small", type: "button", id: "stepList", style: "margin-right:6px",

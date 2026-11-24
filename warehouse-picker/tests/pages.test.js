@@ -11,6 +11,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   const p = await (await b.newContext({ viewport: { width: 1200, height: 850 } })).newPage(); p.on('pageerror', e => errs.push(e.message));
   await p.goto(BASE); await p.evaluate(() => { localStorage.clear(); localStorage.setItem('pick-and-sort-test-features', '1'); }); await p.reload(); await p.waitForTimeout(300);
   ok('opens on Create list (nothing on the list yet); no Packing button at the top', await p.evaluate(() => uiPage === 'create') && await p.isVisible('#addOrders') && !(await p.isVisible('#packBtn')));
+  ok('the old Orders box (with its ?) is not shown anywhere', !(await p.isVisible('#ordersCard')) && !(await p.isVisible('#ordersHelp')));
   ok('the page has nothing else under it (no pick list, step by step, tabs)', !(await p.isVisible('#results')) && !(await p.isVisible('#stepPickBtn')));
   const row = await p.$eval('#addOrders .aorow', x => x.innerText.replace(/\s+/g, ' '));
   const o0 = await p.evaluate(() => aoShown()[0]);
@@ -19,10 +20,13 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await p.click(`#addOrders button[aria-label="Open order ${o0.number}"]`);
   const pg = await p.innerText('#orderPage');
   ok("tapping the order opens its page: who, where, every item with its bin", pg.includes(`Order #${o0.number}`) && pg.includes(o0.customer) && o0.items.every(it => pg.includes(it.name)));
-  ok('…with what can be done: pack it, order sheet, packing slip, driver label, add to your list', /Pack it now[\s\S]*Order sheet[\s\S]*Packing slip[\s\S]*Driver label[\s\S]*Add to your list/.test(pg));
-  await p.click('#orderPage button:text-is("Add to your list")');
+  ok("the order's page: the order and its items; everything else under one Actions button", !(await p.isVisible('#orderPage .orderacts')) && await p.isVisible('#orderPage button:has-text("Actions")'));
+  await p.click('#orderPage button:has-text("Actions")');
+  const acts = await p.innerText('#orderPage .orderacts');
+  ok('Actions: pack it, packing slip (one, not also an order sheet), add to your list', /Pack it now[\s\S]*Packing slip[\s\S]*Add to your list/.test(acts) && !/Order sheet/.test(acts), acts.replace(/\s+/g, ' '));
+  await p.click('#orderPage button:text-is("Add to your list")'); await p.click('#orderPage button:has-text("Actions")');
   ok('Add to your list from its page: status In your list', await p.evaluate(n => stage.has(n) && orderStage({ number: n }).text === 'In your list', o0.number) && /In your list/.test(await p.innerText('#orderPage')));
-  await p.click('#orderPage button:text-is("Pack it now (scan)")'); await p.waitForTimeout(300);
+  await p.click('#orderPage button:text-is("Pack it now")'); await p.waitForTimeout(300);
   ok('Pack it now: the pack screen for that order', await p.evaluate(n => !!pk && pk.o.number === n, o0.number));
   await p.evaluate(() => closePack());
   // pick it: statuses as it goes
@@ -47,7 +51,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await p.evaluate(n => { const po = plan.orders.find(x => String(x.raw) === n); plan.unpack.filter(u => u.label === po.label).forEach(u => unpackDone.add(u.step)); }, o0.number);
   ok('status: all sorted → Ready to pack', await st() === 'Sorted, ready to pack');
   await p.evaluate(n => packed.set(plan.orders.find(x => String(x.raw) === n).raw, Date.now()), o0.number);
-  ok('status: packed → Packed', await st() === 'Packed');
+  ok('status: packed → Packed with its time', /^Packed \w{3} \d+, \d+:\d\d/.test(await st()), await st());
   // the List page: counts; its orders and items with where they're up to; take things off
   await p.evaluate(() => { stage.clear(); aoOrders().slice(0, 4).forEach(o => stage.set(o.number, o)); runStage('pick'); });
   await p.waitForTimeout(300); await p.click('.fsheet button:text-is("Cancel")').catch(() => {});
@@ -72,7 +76,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await p.evaluate(() => runStage('pick')); await p.waitForTimeout(300); await p.click('#addOrders button:text-is("Add these to it")'); await p.waitForTimeout(400);
   await p.evaluate(() => { listView = 'items'; showPage('list'); });
   const counts = await p.evaluate(n => { const po = plan.orders.find(o => String(o.raw) === n); return { packedTile: plan.orders.filter(o => packed.has(o.raw)).length, itemsPacked: plan.unpack.filter(u => u.label === po.label).every(u => lineStage(u).text === 'Packed'), stage: orderStage({ number: n }).text }; }, pre);
-  ok('packed before it was on the list: the List counts it packed, its items Packed, same as its status', counts.packedTile >= 1 && counts.itemsPacked && counts.stage === 'Packed' && /\d+ packed/.test(await p.innerText('#listPage')), JSON.stringify(counts));
+  ok('packed before it was on the list: the List counts it packed, its items Packed, same as its status', counts.packedTile >= 1 && counts.itemsPacked && /^Packed/.test(counts.stage) && /\d+ packed/.test(await p.innerText('#listPage')), JSON.stringify(counts));
   // Pick: straight to it, no box of text around; Sort: straight into the scanner (a computer: the scanner's box)
   await p.evaluate(() => showPage('pick'));
   ok('Pick: the big Step by step, no "Your lists" box or file name', await p.isVisible('#pageCtl button:text-is("Step by step")') && !(await p.isVisible('#results > h2')) && !(await p.isVisible('#fileName')));

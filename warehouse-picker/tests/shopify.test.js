@@ -135,7 +135,9 @@ const server = app.listen(8766);
   ok("Find an order: the Shopify orders (not the practice ones)", /1001/.test(found) && /1002/.test(found) && !/70001/.test(found));
   await a.evaluate(async () => { startPack(findPackOrder("1001"), true); pk.o.items.forEach((it, i) => pk.got.set(i, it.qty)); drawPack(); await packAction("pack"); });
   await a.waitForTimeout(1500);
-  ok("Pack: the Packed tag went on the order in Shopify", fake.tags.length === 1 && fake.tags[0].id === "gid://shopify/Order/5501" && /^Packed /.test(fake.tags[0].tags[0]), JSON.stringify(fake.tags));
+  ok("while the store's orders are on their way: none shown (no practice orders), it says it's getting them", await a.evaluate(() => { const keep = [shop.orders, shop.status, shop.busy]; shop.orders = null; shop.status = null; shop.err = "";
+    const r = ordersLoading() && aoOrders().length === 0; [shop.orders, shop.status, shop.busy] = keep; return r; }));
+  ok("Pack: the Packed tag went on the order in Shopify, one tag (no comma: Shopify splits tags at commas)", fake.tags.length === 1 && fake.tags[0].id === "gid://shopify/Order/5501" && /^Packed \d\d\/\d\d\/\d{4} \d{1,2}:\d\d (AM|PM)$/.test(fake.tags[0].tags[0]) && !fake.tags[0].tags[0].includes(","), JSON.stringify(fake.tags));
   ok("…and the order shows as packed here", await a.evaluate(() => !!findPackOrder("1001").packedAt));
   // a UPS order with no print station: its Shopify page opens here (to buy the label); no driver label
   await a.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(u || "(blank)"); return { closed: false, close() {}, document: { title: "", body: {} }, location: {} }; }; });
