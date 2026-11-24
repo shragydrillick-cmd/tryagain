@@ -40,7 +40,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   // 2. a list of orders, all sorted onto their piles -> ready to pack
   await p.evaluate(() => document.getElementById('exampleBtn').click()); // hidden on the test address (orders come from the store there)
   await p.evaluate(() => { plan.unpack.forEach(u => unpackDone.add(u.step)); saveList(); });
-  await p.click('#packBtn');
+  await p.evaluate(() => openPacking()); // Packing: in the menu on the test address
   ok('Packing: ready orders with Pack, and Scan an order / Find an order at the bottom', /Ready to pack: 5.*Pack.*Scan an order.*Find an order/.test(await txt('#packPanel')));
   const first = await p.evaluate(() => plan.orders.find(o => orderReady(o.label)).raw);
   await p.click('#packPanel .packcard >> nth=0 >> button:text-is("Pack")');
