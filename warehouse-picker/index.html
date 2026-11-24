@@ -366,6 +366,13 @@ header.top #title { white-space: nowrap; }
 .stationrow { margin-top: 4px; }
 .aorow { align-items: flex-start; cursor: pointer; }
 .aorow input[type=checkbox] { width: 22px; height: 22px; margin-top: 2px; flex: none; }
+.aorow { align-items: center; }
+.aomain { flex: 1; min-width: 0; text-align: left; margin-left: 8px; background: none; border: 0; color: inherit; font: inherit; padding: 4px 0; cursor: pointer; }
+.aobadges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.orderacts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.orderacts .btn:first-child { grid-column: 1 / -1; padding: 14px; font-size: 17px; }
+.duealert { position: fixed; left: 12px; right: 12px; top: calc(var(--headh, 64px) + 8px); z-index: 95; background: #fff1e0; color: #5a3200; border: 2px solid #f0a24a; border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: 560px; margin: 0 auto; }
+.deadrule .fixgrid { margin-top: 6px; }
 .aobar { position: sticky; bottom: 0; padding: 10px 0 4px; background: var(--card); }
 .addtiles.one { grid-template-columns: 1fr; }
 .menubtn { width: 42px; height: 42px; border-radius: 10px; border: 1px solid transparent; background: transparent; display: inline-flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px; padding: 0; margin-right: 8px; cursor: pointer; flex: none; }
@@ -375,7 +382,16 @@ header.top .menubtn { border-color: transparent; padding: 0; }
 /* with the menu: pages open under the top bar, so the menu is always there (the camera scanner stays full screen) */
 body.withmenu header.top { z-index: 60; }
 body.withmenu .detailpanel, body.withmenu .packscreen, body.withmenu #stepper { top: var(--headh, 64px); padding-top: 10px; }
-body.withmenu .scanner { z-index: 75; } /* the scanner screen: over everything, top bar too (it has its own Done) */
+body.withmenu .scanner { z-index: 75; }
+/* one page per job */
+body.withmenu #homeView > section.card.no-print:first-of-type .ordershead, body.withmenu #homeView .addtiles { display: none; }
+body.withmenu[data-page="orders"] #results { display: none !important; }
+body.withmenu:not([data-page="orders"]) #addOrders { display: none; }
+body.withmenu #results .actcols, body.withmenu #results .tabs, body.withmenu #tab-key { display: none !important; }
+body.withmenu:not([data-list="on"]) #tab-pick, body.withmenu:not([data-list="on"]) #tab-unpack { display: none !important; }
+.pagectl { margin: 10px 0; }
+.bigaction { width: 100%; padding: 20px; font-size: 20px; font-weight: 700; }
+#addOrders.inpage { position: static; inset: auto; padding: 0; background: none; overflow: visible; z-index: auto; } /* the scanner screen: over everything, top bar too (it has its own Done) */
 header.top .menubtn + h1 { flex: 1; }
 .menushade { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 89; opacity: 0; pointer-events: none; transition: opacity .15s; }
 .sidemenu { position: fixed; top: 0; left: 0; bottom: 0; width: min(280px, 82vw); background: var(--card); color: var(--text); z-index: 90; transform: translateX(-105%); transition: transform .18s ease; box-shadow: 4px 0 24px rgba(0,0,0,0.25); overflow-y: auto; padding: 10px 0 20px; }
@@ -2416,6 +2432,7 @@ async function openBarcodeScanner() {
     h("div", { class: "row scanrow" }, typed, okBtn, undoBtn));
   scan.onClose = () => { // back on the Unpack list, so the ticks from the scans are what you see
     renderUnpack(); saveList();
+    if (TEST_FEATURES) { showPage("sort"); return; } // the Sort page
     document.querySelector('.tabs button[data-tab="unpack"]').click();
     $("tab-unpack").scrollIntoView({ block: "start" });
   };
@@ -3331,7 +3348,10 @@ function aoShown() {
 function drawAddOrders() {
   if (!ao) return;
   let el = $("addOrders");
-  if (!el) { el = h("div", { id: "addOrders", class: "detailpanel", role: "dialog", "aria-label": "Add orders from Shopify", style: "z-index:55" }); document.body.append(el); document.body.style.overflow = "hidden"; }
+  if (!el) {
+    if (TEST_FEATURES) { el = h("section", { id: "addOrders", class: "card inpage", "aria-label": "Orders" }); $("homeView").prepend(el); } // the Orders page
+    else { el = h("div", { id: "addOrders", class: "detailpanel", role: "dialog", "aria-label": "Add orders from Shopify", style: "z-index:55" }); document.body.append(el); document.body.style.overflow = "hidden"; }
+  }
   const all = aoOrders(), list = aoShown(), areas = [...new Set(all.map(o => o.city).filter(Boolean))].sort(natural);
   [...ao.chosen].forEach(n => { if (!all.some(o => o.number === n)) ao.chosen.delete(n); });
   const sel = (label, key, opts) => h("label", { class: "binctl" }, h("span", { class: "fixlab" }, label), h("select", { "aria-label": label, onchange: e => { ao[key] = e.target.value; drawAddOrders(); } }, opts.map(([v, t]) => h("option", { value: v, selected: ao[key] === v }, t))));
@@ -3340,7 +3360,7 @@ function drawAddOrders() {
   const allShown = list.length && list.every(o => ao.chosen.has(o.number));
   const n = ao.chosen.size;
   el.replaceChildren(h("div", { class: "detailbox" },
-    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, "Add orders"), h("button", { class: "btn small", type: "button", onclick: closeAddOrders }, "Back")),
+    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, TEST_FEATURES ? "Orders" : "Add orders"), TEST_FEATURES ? null : h("button", { class: "btn small", type: "button", onclick: closeAddOrders }, "Back")),
     h("p", { class: "small muted", style: "margin-top:0" }, shop.orders ? `Open orders in ${shop.status.shop.replace(/\.myshopify\.com$/, "")}${shop.busy ? " (updating…)" : ""}` : shop.busy ? "Getting the orders…" : shop.err ? `Couldn't get the Shopify orders: ${shop.err}. Showing practice orders.` : "Practice orders (no Shopify store connected: Settings → More)"),
     search,
     h("div", { class: "binctls" },
@@ -3353,14 +3373,15 @@ function drawAddOrders() {
       h("label", { class: "checkrow", style: "flex:1" }, h("input", { type: "checkbox", "aria-label": "Select all shown", checked: !!allShown, onchange: e => { list.forEach(o => e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number)); drawAddOrders(); } }),
         h("span", null, ` ${list.length} order${list.length === 1 ? "" : "s"} shown`)),
       n ? h("button", { class: "link small", type: "button", onclick: () => { ao.chosen.clear(); drawAddOrders(); } }, "Clear") : null),
-    h("div", { class: "dlist" }, list.slice(0, 300).map(o => h("label", { class: "drow aorow" + (ao.chosen.has(o.number) ? " st-blue" : "") },
-      h("input", { type: "checkbox", "aria-label": `Order ${o.number}`, checked: ao.chosen.has(o.number), onchange: e => { e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number); drawAddOrders(); } }),
-      h("div", { style: "flex:1;min-width:0;text-align:left;margin-left:8px" }, h("b", null, `#${o.number}`), o.customer ? ` · ${o.customer}` : "",
-        h("div", { class: "small" }, [o.city, `${o.units} item${o.units === 1 ? "" : "s"}`, o.created ? "ordered " + fmtWhen(o.created) : "", o.delivery.date ? "deliver " + fmtDay(o.delivery.date) : ""].filter(Boolean).join(" · ")),
-        h("div", { class: "small muted" }, o.items.map(it => `${it.qty}× ${it.name}${it.details ? " (" + it.details + ")" : ""}`).join(", ")),
-        onList(o.number) ? h("div", { class: "small muted" }, "Already on the pick list") : null,
-        stage.has(o.number) ? h("div", { class: "small", style: "color:var(--accent,#2b7de9)" }, "In your list") : null),
-      h("span", { class: "small" }, o.delivery.type === "shipping" ? "UPS" : "Driver")))),
+    h("div", { class: "dlist" }, list.slice(0, 300).map(o => {
+      const st = orderStage(o), due = dueOf(o);
+      return h("div", { class: "drow aorow" + (ao.chosen.has(o.number) ? " st-blue" : "") },
+        h("input", { type: "checkbox", "aria-label": `Order ${o.number}`, checked: ao.chosen.has(o.number), onchange: e => { e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number); drawAddOrders(); } }),
+        h("button", { class: "aomain", type: "button", "aria-label": `Open order ${o.number}`, onclick: () => openOrderPage(o.number) },
+          h("b", null, `#${o.number}`), h("span", { class: "small" }, ` · ${[o.city, o.created ? fmtWhen(o.created) : ""].filter(Boolean).join(" · ")}`),
+          h("div", { class: "aobadges" }, h("span", { class: "stbadge " + st.cls }, st.text), due ? h("span", { class: "stbadge " + due.cls }, due.text) : null)),
+        h("span", { class: "small muted" }, o.delivery.type === "shipping" ? "UPS" : "Driver"));
+    })),
     list.length > 300 ? h("p", { class: "small muted" }, "Showing the first 300: narrow it down to see the rest.") : null,
     stageBar(n)));
 }
@@ -3418,7 +3439,7 @@ function runStage(mode) {
     }
     stage.clear(); keepStage(); closeAddOrders();
     if (print) printOrderSheets(chosen, w);
-    if (pick) goTab("pick");
+    if (pick) showPage("pick");
   };
   if (pick && current && plan) {
     const box = h("div", { class: "notice warn askmerge", style: "text-align:center;margin-top:10px" },
@@ -3433,7 +3454,126 @@ function runStage(mode) {
   }
   finish("new");
 }
-/** Each order's sorting number (on the pick list), else its place in the list. */
+/* ---------- where an order is: New, In your list, On pick list, Started picking, Picked, Started sorting,
+   Ready to pack (sorted), Packed. "Started picking" = at least one of its items picked. ---------- */
+function orderStage(o) {
+  const n = String(o.number);
+  const po = plan && plan.orders.find(x => String(x.raw) === n);
+  if ((po && packed.has(po.raw)) || shop.packed[n] || o.packed || (o.source === "store" && packedTime({ ...o, source: "store" }))) return { key: "packed", cls: "st-grey", text: "Packed" };
+  if (po) {
+    const lines = plan.unpack.filter(u => u.label === po.label), units = lines.reduce((a, u) => a + u.qty, 0);
+    const sorted = lines.reduce((a, u) => a + (unpackDone.has(u.step) ? u.qty : Math.min(u.qty, placed.get(u.step) || 0)), 0);
+    const picked = lines.reduce((a, u) => { const k = pickOf(u); return a + (k && pickedDone.has(k.step) ? u.qty : 0); }, 0);
+    if (sorted >= units) return { key: "ready", cls: "st-green", text: "Ready to pack" };
+    if (sorted > 0) return { key: "sorting", cls: "st-yellow", text: "Started sorting" };
+    if (picked >= units) return { key: "picked", cls: "st-blue", text: "Picked" };
+    if (picked > 0) return { key: "picking", cls: "st-blue", text: "Started picking" };
+    return { key: "listed", cls: "st-orange", text: "On pick list" };
+  }
+  if (stage.has(n)) return { key: "yourlist", cls: "st-orange", text: "In your list" };
+  return { key: "new", cls: "", text: "New" };
+}
+/* ---------- deadlines (Settings → More → Deadlines): when an order has to go out ----------
+   A rule: which orders (delivery type, area), the cut-off ("orders in by 12:00 go out the same day"), when the driver
+   comes, and how many minutes before that to remind about due orders that aren't ready yet. */
+const DEFAULT_DEADLINE = { on: true, kind: "local", area: "", cutoff: "12:00", driver: "16:00", remind: 15 };
+const deadlineRules = () => (settings.deadlines || [DEFAULT_DEADLINE]).filter(r => r.on);
+const atTime = (day, hm) => { const [hh, mm] = String(hm || "0:0").split(":").map(Number); const d = new Date(day); d.setHours(hh || 0, mm || 0, 0, 0); return d.getTime(); };
+const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+function ruleFor(o) {
+  return deadlineRules().find(r => (r.kind === "any" || (o.delivery && o.delivery.type) === r.kind) && (!r.area || String(o.city || "").toLowerCase().includes(r.area.toLowerCase()))) || null;
+}
+/** Due today / Late / Tomorrow (or a day) for an order that isn't packed yet; null if no rule fits. */
+function dueOf(o, now = Date.now()) {
+  const r = ruleFor(o); if (!r || !o.created) return null;
+  const st = orderStage(o); if (st.key === "packed") return null;
+  let day = startOfDay(o.created); if (o.created > atTime(day, r.cutoff)) day = startOfDay(day + 36e5 * 30); // in after the cut-off: the next day
+  const today = startOfDay(now), out = atTime(day, r.driver || "23:59");
+  if (day < today || now > out) return { key: "late", cls: "st-red", text: "Late", due: out, rule: r };
+  if (day === today) return { key: "today", cls: "st-orange", text: `Due today${r.driver ? " " + new Date(out).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : ""}`, due: out, rule: r };
+  return { key: "later", cls: "st-grey", text: day - today < 864e5 * 1.5 ? "Tomorrow" : fmtDay(day), due: out, rule: r };
+}
+/* the reminder: shortly before the driver comes, how many of today's orders aren't ready yet (once a day per rule) */
+const remindedKey = "pick-and-sort-reminded-v1";
+function checkDeadlines(now = Date.now()) {
+  if (!TEST_FEATURES) return;
+  let done = {}; try { done = JSON.parse(localStorage.getItem(remindedKey) || "{}"); } catch (e) {}
+  const day = new Date(now).toDateString();
+  deadlineRules().forEach((r, i) => {
+    if (!r.driver || !(r.remind > 0)) return;
+    const out = atTime(now, r.driver), id = `${day}|${i}|${r.driver}`;
+    if (now < out - r.remind * 6e4 || now >= out || done[id]) return;
+    const all = new Map([...aoOrders(), ...allPackOrders()].map(o => [String(o.number), o]));
+    const waiting = [...all.values()].filter(o => ruleFor(o) === r && (dueOf(o, now) || {}).key === "today" && !["ready", "packed"].includes(orderStage(o).key));
+    done[id] = now; try { localStorage.setItem(remindedKey, JSON.stringify(done)); } catch (e) {}
+    if (!waiting.length) return;
+    const text = `${plural(waiting.length, "order")} due by ${new Date(out).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} ${waiting.length === 1 ? "isn't" : "aren't"} ready yet.`;
+    showDueAlert(text, waiting);
+    try { if (window.Notification && Notification.permission === "granted") new Notification("Pick & Sort", { body: text }); } catch (e) {}
+  });
+}
+function showDueAlert(text, orders) {
+  const old = $("dueAlert"); if (old) old.remove();
+  beep(false);
+  document.body.append(h("div", { id: "dueAlert", class: "duealert", role: "alert" },
+    h("b", null, text), h("div", { class: "small" }, orders.slice(0, 8).map(o => `#${o.number} (${orderStage(o).text})`).join(", ") + (orders.length > 8 ? "…" : "")),
+    h("div", { class: "row", style: "gap:8px;margin-top:8px" },
+      h("button", { class: "btn small", type: "button", onclick: () => { $("dueAlert").remove(); closeOverlays(); showPage("orders"); if (ao) { ao.when = "all"; ao.show = "all"; drawAddOrders(); } } }, "Show"),
+      h("button", { class: "btn small secondary", type: "button", onclick: () => $("dueAlert").remove() }, "OK"))));
+}
+if (TEST_FEATURES) setInterval(() => { try { refreshShopify(false); checkDeadlines(); } catch (e) {} }, 30e3);
+/** Settings → More → Deadlines. */
+function deadlinesSection() {
+  if (!settings.deadlines) settings.deadlines = [{ ...DEFAULT_DEADLINE }];
+  const rs = settings.deadlines, save = () => { saveSettings(); renderSettings(); };
+  const inp = (r, key, attrs) => h("input", { ...attrs, value: r[key], "aria-label": attrs["aria-label"], onchange: e => { r[key] = attrs.type === "number" ? Math.max(0, parseInt(e.target.value, 10) || 0) : e.target.value.trim(); save(); } });
+  return h("div", null,
+    h("p", { class: "small muted", style: "margin-top:0" }, "When orders have to go out. Orders in before the cut-off go out the same day (Due today); later ones the next day. Shortly before the driver comes, a reminder says how many of today's orders aren't ready yet."),
+    ...rs.map((r, i) => h("div", { class: "bingroup deadrule" },
+      h("label", { class: "checkrow" }, h("input", { type: "checkbox", checked: r.on, "aria-label": `Rule ${i + 1} on`, onchange: e => { r.on = e.target.checked; save(); } }), h("b", null, ` Rule ${i + 1}`)),
+      h("div", { class: "fixgrid" },
+        h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Delivery"), h("select", { "aria-label": `Rule ${i + 1} delivery`, onchange: e => { r.kind = e.target.value; save(); } },
+          [["local", "Own driver"], ["shipping", "UPS / shipped"], ["any", "Any delivery"]].map(([v, t]) => h("option", { value: v, selected: r.kind === v }, t)))),
+        h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Area (optional)"), inp(r, "area", { type: "text", placeholder: "e.g. Brooklyn", "aria-label": `Rule ${i + 1} area` })),
+        h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Orders in by"), inp(r, "cutoff", { type: "time", "aria-label": `Rule ${i + 1} cut-off` })),
+        h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Driver comes at"), inp(r, "driver", { type: "time", "aria-label": `Rule ${i + 1} driver` })),
+        h("label", { class: "fixf" }, h("span", { class: "fixlab" }, "Remind (minutes before)"), inp(r, "remind", { type: "number", min: "0", "aria-label": `Rule ${i + 1} remind` }))),
+      h("button", { class: "link small", type: "button", onclick: () => { rs.splice(i, 1); save(); } }, "Remove this rule"))),
+    h("div", { class: "row", style: "gap:8px" },
+      h("button", { class: "btn small secondary", type: "button", onclick: () => { rs.push({ ...DEFAULT_DEADLINE, kind: "any" }); save(); } }, "Add a rule"),
+      window.Notification && Notification.permission === "default" ? h("button", { class: "btn small secondary", type: "button", onclick: () => Notification.requestPermission().then(() => renderSettings()) }, "Allow reminders as notifications") : null));
+}
+/* ---------- one order's own page: who and where, every item with its bin, and what can be done with it ---------- */
+function openOrderPage(number) {
+  const n = String(number);
+  const o = aoOrders().find(x => String(x.number) === n) || findPackOrder(n); if (!o) return toast(`#${n}: not found.`);
+  const units = o.items.reduce((a, x) => a + x.qty, 0), full = { ...o, units };
+  const st = orderStage(o), due = dueOf(o);
+  const binOf = it => { const x = (it.barcode && findCode(it.barcode)) || (it.sku && findCode(it.sku)); return x && x.v.bins.length ? x.v.bins.map(b => b.bin).join(" / ") : it.bin || ""; };
+  let el = $("orderPage");
+  if (!el) { el = h("div", { id: "orderPage", class: "detailpanel", role: "dialog", "aria-label": "Order", style: "z-index:57" }); document.body.append(el); }
+  document.body.style.overflow = "hidden";
+  const close = () => { el.remove(); if (!document.querySelector(".detailpanel")) document.body.style.overflow = ""; };
+  const act = (label, fn, cls = "btn secondary") => h("button", { class: cls, type: "button", onclick: fn }, label);
+  el.replaceChildren(h("div", { class: "detailbox" },
+    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, `Order #${n}`), h("button", { class: "btn small", type: "button", onclick: close }, "Back")),
+    h("div", { class: "aobadges" }, h("span", { class: "stbadge " + st.cls }, st.text), due ? h("span", { class: "stbadge " + due.cls }, due.text) : null),
+    h("p", null, h("b", null, o.customer || "—"), h("br"), [o.address, `${o.city || ""} ${o.zip || ""}`.trim()].filter(Boolean).join(", "),
+      h("br"), h("span", { class: "small muted" }, [o.delivery && o.delivery.title, o.created ? "ordered " + fmtWhen(o.created) : "", plural(units, "item")].filter(Boolean).join(" · "))),
+    h("div", { class: "dlist" }, o.items.map(it => h("div", { class: "drow static" },
+      h("b", { style: "min-width:36px" }, `${it.qty}×`),
+      h("div", { style: "flex:1;min-width:0" }, h("b", null, it.name), it.details ? h("span", { class: "small" }, ` · ${it.details}`) : null,
+        h("div", { class: "icode" }, [it.sku && "SKU " + it.sku, it.barcode].filter(Boolean).join("  "))),
+      h("span", { class: "binno" + (binOf(it) ? "" : " empty") }, binOf(it) || "no bin")))),
+    h("div", { class: "orderacts" },
+      act("Pack it now (scan)", () => { close(); startPack(findPackOrder(n) || full, false); }, "btn"),
+      act("Order sheet", () => printOrderSheets([full], stationOnline() ? null : openPrintWindow())),
+      act("Packing slip", () => packingSlipPdf(full)),
+      act("Driver label", async () => { if (stationOnline() && await sendToStation("label", full)) toast(`Label sent to ${station.doc.name}.`); else driverLabelPdf(full); }),
+      onList(n) ? null : stage.has(n) ? act("Take out of your list", () => { stage.delete(n); keepStage(); openOrderPage(n); if (ao) drawAddOrders(); })
+        : act("Add to your list", () => { stage.set(n, { ...o, units }); keepStage(); openOrderPage(n); if (ao) drawAddOrders(); toast(`#${n} added to your list.`); }),
+      o.shopifyUrl ? act("Open in Shopify", () => window.open(o.shopifyUrl, "_blank")) : null)));
+}
 function sortNumbers(orders) {
   const m = new Map();
   orders.forEach((o, i) => { const po = plan && plan.orders.find(x => String(x.raw) === String(o.number)); m.set(o.number, po ? String(po.label) : String(i + 1)); });
@@ -3494,6 +3634,7 @@ async function orderSheetsPdf(sheets, sink, win) {
    ☰ at the top left. Phone: tap it to open; tap it again, or anywhere outside, to close. Computer: hovering opens it,
    moving away closes it; a click keeps it open until a click elsewhere. Each place it goes closes what's open on top. */
 function closeOverlays() {
+  if ($("orderPage")) $("orderPage").remove();
   if (scan.el) closeScanner();
   if (pk) closePack();
   if ($("packFind")) closeFind();
@@ -3515,9 +3656,36 @@ function goTab(t) {
   if (!plan) { window.scrollTo(0, 0); toast("No orders on the pick list yet: Add orders first."); return; }
   $("results").scrollIntoView({ block: "start" });
 }
+/* the test address: one page for each job. Orders (choosing them), Pick (step by step; the list and its PDF if
+   wanted), Sort (straight into the scanner; the list of picked items to tick if wanted), Packing. */
+let uiPage = "orders";
+function showPage(p, opts = {}) {
+  toHome(); uiPage = p; document.body.dataset.page = p; delete document.body.dataset.list;
+  if (p === "orders") { if (!ao) openAddOrders(); } else if (ao) closeAddOrders();
+  if (p === "pick" || p === "sort") { const t = document.querySelector(`.tabs button[data-tab="${p === "pick" ? "pick" : "unpack"}"]`); if (t) t.click(); }
+  drawPageCtl(); window.scrollTo(0, 0);
+  if (p === "sort" && opts.scan && plan) setTimeout(() => $("scanUnpackBtn").click(), 50);
+}
+/** The top of the Pick and Sort pages: the one main thing, and the list if wanted. */
+function drawPageCtl() {
+  let el = $("pageCtl");
+  if (!el) { el = h("div", { id: "pageCtl", class: "pagectl no-print" }); $("results").insertBefore(el, $("warnings")); }
+  const listOn = document.body.dataset.list === "on", toggle = () => { if (listOn) delete document.body.dataset.list; else document.body.dataset.list = "on"; drawPageCtl(); };
+  if (uiPage === "pick") el.replaceChildren(
+    h("button", { class: "btn bigaction", type: "button", onclick: () => $("stepPickBtn").click() }, "Step by step"),
+    h("div", { class: "row", style: "gap:8px;margin-top:8px" },
+      h("button", { class: "btn secondary", type: "button", style: "flex:1", onclick: toggle }, listOn ? "Hide the pick list" : "Pick list (tick items)"),
+      h("button", { class: "btn secondary small", type: "button", onclick: () => $("pdfPick").click() }, "Print PDF")));
+  else if (uiPage === "sort") el.replaceChildren(
+    h("button", { class: "btn bigaction", type: "button", onclick: () => $("scanUnpackBtn").click() }, "Scan to sort"),
+    h("div", { class: "row", style: "gap:8px;margin-top:8px" },
+      h("button", { class: "btn secondary", type: "button", style: "flex:1", onclick: toggle }, listOn ? "Hide the list" : "Picked items (tick as sorted)"),
+      h("button", { class: "btn secondary small", type: "button", onclick: () => $("pdfUnpack").click() }, "Print PDF")));
+  else el.replaceChildren();
+}
 const MENU = [
-  ["Orders", [["Add orders", () => openAddOrders()], ["Find an order", () => { toHome(); openFind(); }]]],
-  ["Work", [["Pick list", () => goTab("pick")], ["Sort list", () => goTab("unpack")], ["Packing", () => { toHome(); openPacking(); }]]],
+  ["Orders", [["Orders", () => showPage("orders")], ["Find an order", () => { toHome(); openFind(); }]]],
+  ["Work", [["Pick", () => showPage("pick")], ["Sort", () => showPage("sort", { scan: true })], ["Packing", () => { toHome(); openPacking(); }]]],
   ["Items", [["Catalog", () => goSettingsPage(bins ? "binsInventory" : "bins")], ["Bins", () => goSettingsPage(bins ? "binsList" : "bins")], ["Put away", () => { if (bins) putAway(null); else goSettingsPage("bins"); }]]],
   [null, [["Settings", () => goSettingsPage("home")]]],
 ];
@@ -3535,7 +3703,7 @@ function setupSideMenu() {
     panel.replaceChildren(h("div", { class: "sidehead" }, "Pick & Sort"),
       ...MENU.map(([title, items]) => h("div", { class: "sidegroup" }, title ? h("div", { class: "sidetitle" }, title) : null,
         items.map(([label, fn]) => h("button", { class: "sideitem", type: "button", onclick: () => { close(); closeOverlays(); fn(); } }, label,
-          (label === "Pick list" || label === "Sort list") && n ? h("span", { class: "sidecount" }, String(n)) : null)))));
+          (label === "Pick" || label === "Sort") && n ? h("span", { class: "sidecount" }, String(n)) : null)))));
   };
   const show = pin => { if (!open) draw();
     const top = Math.max(0, document.querySelector("header.top").getBoundingClientRect().bottom) + "px"; // under the top bar: the button stays there to tap
@@ -3556,6 +3724,10 @@ function setupSideMenu() {
    (no slips, files, typing or QR codes: nothing has to be printed). */
 if (TEST_FEATURES) {
   setupSideMenu();
+  $("packBtn").classList.add("hidden");
+  $("stepClose").before(h("button", { class: "btn secondary small", type: "button", id: "stepList", style: "margin-right:6px",
+    onclick: () => { const pickMode = stepMode === "pick"; closeSteps(); showPage(pickMode ? "pick" : "sort"); document.body.dataset.list = "on"; drawPageCtl(); } }, "List"));
+  setTimeout(() => showPage(plan ? "pick" : "orders"), 0);
   const ut = document.querySelector('.tabs button[data-tab="unpack"]'); if (ut) ut.textContent = "Sort list";
   const b = $("shopifyAddBtn");
   if (b) { b.classList.remove("hidden"); b.onclick = openAddOrders; b.replaceChildren(h("b", null, "Add orders"), h("span", { class: "small muted" }, "from the store")); }
@@ -6239,6 +6411,7 @@ function renderMorePage(v) {
       h("h3", null, "Account"),
       accountSection(),
       TEST_FEATURES && acct && acct.company && fb.db ? h("div", null, h("h3", null, "Shopify store"), shopifySection()) : null,
+      TEST_FEATURES ? h("div", null, h("h3", null, "Deadlines"), deadlinesSection()) : null,
       h("h3", null, "This device"),
       deviceSection(),
       h("h3", null, "Bins"),

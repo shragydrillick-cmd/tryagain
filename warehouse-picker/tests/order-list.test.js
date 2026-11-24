@@ -15,7 +15,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   // the menu: a click keeps it open; a click outside closes it
   ok('the menu button at the top left', await p.isVisible('#menuBtn'));
   await p.click('#menuBtn');
-  ok('clicked: the menu is open, with every place', await p.evaluate(() => sideMenu.isOpen() && sideMenu.isPinned()) && /Add orders[\s\S]*Find an order[\s\S]*Pick list[\s\S]*Sort list[\s\S]*Packing[\s\S]*Catalog[\s\S]*Bins[\s\S]*Put away[\s\S]*Settings/.test(await p.innerText('#sideMenu')));
+  ok('clicked: the menu is open, with every place', await p.evaluate(() => sideMenu.isOpen() && sideMenu.isPinned()) && /Orders[\s\S]*Find an order[\s\S]*Pick[\s\S]*Sort[\s\S]*Packing[\s\S]*Catalog[\s\S]*Bins[\s\S]*Put away[\s\S]*Settings/.test(await p.innerText('#sideMenu')));
   await p.mouse.click(900, 500); await p.waitForTimeout(250);
   ok('a click outside closes it', await p.evaluate(() => !sideMenu.isOpen()));
   await p.hover('#menuBtn'); await p.waitForTimeout(200);
@@ -23,8 +23,8 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await p.hover('#sideMenu .sideitem >> nth=2'); await p.waitForTimeout(150); await p.mouse.move(900, 600); await p.waitForTimeout(600);
   ok('moving the mouse away closes it', await p.evaluate(() => !sideMenu.isOpen()));
   // Add orders from the menu; one area, Add to list; another area, Add to list
-  await p.click('#menuBtn'); await p.click('#sideMenu button:has-text("Add orders")'); await p.waitForTimeout(400);
-  ok('menu: Add orders opens it (and the menu closes)', await p.isVisible('#addOrders') && await p.evaluate(() => !sideMenu.isOpen()));
+  await p.click('#menuBtn'); await p.click('#sideMenu button:text-is("Orders")'); await p.waitForTimeout(400);
+  ok('menu: Orders shows the orders page (and the menu closes)', await p.isVisible('#addOrders') && await p.evaluate(() => !sideMenu.isOpen() && uiPage === 'orders'));
   const areas = await p.$$eval('#addOrders select[aria-label="Area"] option', o => o.map(x => x.value).filter(Boolean));
   await p.selectOption('#addOrders select[aria-label="Area"]', areas[0]); await p.check('#addOrders input[aria-label="Select all shown"]');
   const n1 = await p.evaluate(() => ao.chosen.size);
@@ -44,12 +44,12 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await p.click('#addOrders .aobar button:has-text("Pick & Print")'); await p.waitForFunction(() => window.__sheetsDone, null, { timeout: 15000 }).catch(() => {});
   const onPick = await p.evaluate(() => plan ? plan.orders.map(o => String(o.raw)) : []);
   ok('Pick & Print: every order in the list is on the pick list', listed.every(x => onPick.includes(x)) && onPick.length === listed.length, onPick.join(','));
-  ok('…the pick list is showing, Add orders closed, your list emptied', await p.evaluate(() => !ao && stage.size === 0 && document.querySelector('.tabs button.on').dataset.tab === 'pick') && await p.isVisible('#results'));
+  ok('…the Pick page is showing, your list emptied', await p.evaluate(() => uiPage === 'pick' && stage.size === 0) && await p.isVisible('#results') && await p.isVisible('#pageCtl button:text-is("Step by step")') && !(await p.isVisible('#addOrders')));
   const sheets = await p.evaluate(() => window.__sheets), labels = await p.evaluate(() => plan.orders.slice().sort((a, b) => a.label - b.label).map(o => [String(o.label), String(o.raw)]));
   ok('…an order sheet each, in sorting order, each with its sorting number and order number', sheets.length === listed.length && labels.every(([l, raw], i) => sheets[i].includes('SORT #') && sheets[i].split(/\s+/).includes(l) && sheets[i].includes(`Order #${raw}`)), sheets.map(x => x.slice(0, 50)).join(' | '));
   ok('…with each item and its bin', sheets.every(t => /Bin\s+Item\s+Qty/.test(t) && /Total items: \d+/.test(t)), sheets[0].slice(0, 300));
   // again: orders already on the pick list: add these / start new / cancel
-  await p.evaluate(() => { window.__sheets = []; window.__sheetsDone = false; openAddOrders(); });
+  await p.evaluate(() => { window.__sheets = []; window.__sheetsDone = false; showPage('orders'); });
   await p.check('#addOrders .aorow input >> nth=0'); await p.click('#addOrders button:has-text("Add to list (1)")');
   await p.click('#addOrders .aobar button[aria-label="Other choices"]'); await p.click('#addOrders .packmenu button:text-is("Just pick")');
   ok('orders already on the pick list: it asks (add these / start new / cancel)', /already \d+ orders on the pick list[\s\S]*Add these to it[\s\S]*Start new with these[\s\S]*Cancel/.test(await p.innerText('#addOrders .aobar')));
@@ -57,15 +57,16 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('Cancel: nothing changes', await p.evaluate(n => plan.orders.length === n && stage.size === 1 && !!ao, onPick.length));
   await p.click('#addOrders .aobar button:has-text("Just pick")'); await p.click('#addOrders button:text-is("Add these to it")'); await p.waitForTimeout(500);
   ok('Just pick, Add these to it: one more on the pick list, nothing printed', await p.evaluate(n => plan.orders.length === n + 1 && window.__sheets.length === 0, onPick.length));
-  await p.evaluate(() => openAddOrders()); await p.check('#addOrders .aorow input >> nth=0'); await p.click('#addOrders button:has-text("Add to list (1)")');
+  await p.evaluate(() => showPage('orders')); await p.check('#addOrders .aorow input >> nth=0'); await p.click('#addOrders button:has-text("Add to list (1)")');
   await p.click('#addOrders .aobar button[aria-label="Other choices"]'); await p.click('#addOrders .packmenu button:text-is("Just print")'); await p.waitForFunction(() => window.__sheetsDone, null, { timeout: 10000 }).catch(() => {});
   ok('Just print: a sheet, the pick list unchanged', await p.evaluate(n => plan.orders.length === n + 1 && window.__sheets.length === 1, onPick.length));
   // the menu's other places
   const visit = async (label, check) => { await p.click('#menuBtn'); await p.click(`#sideMenu button:has-text("${label}")`); await p.waitForTimeout(300); return p.evaluate(check); };
-  ok('menu: Sort list', await visit('Sort list', () => view === 'home' && document.querySelector('.tabs button.on').dataset.tab === 'unpack'));
+  ok('menu: Sort (opens the scanner straight away)', await visit('Sort', () => uiPage === 'sort' && !!document.querySelector('.scanner[aria-label="Scan to unpack"]')));
+  await p.click('.scanner button:has-text("Done")'); await p.waitForTimeout(300);
   ok('menu: Packing', await visit('Packing', () => !!document.getElementById('packPanel')));
   ok('menu: Catalog (from Packing: it closes first)', await visit('Catalog', () => view === 'settings' && /^bins/.test(setPage) && !document.getElementById('packPanel')));
-  ok('menu: Pick list (from Settings)', await visit('Pick list', () => view === 'home' && document.querySelector('.tabs button.on').dataset.tab === 'pick'));
+  ok('menu: Pick (from Settings)', await visit('Pick', () => view === 'home' && uiPage === 'pick'));
   ok('menu: Settings', await visit('Settings', () => view === 'settings' && setPage === 'home'));
   // a phone: tap opens, tap outside closes
   const ph = await (await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })).newPage(); ph.on('pageerror', e => errs.push('phone: ' + e.message));

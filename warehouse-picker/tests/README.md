@@ -125,6 +125,12 @@ everyone in the company (two people changing different sizes at once both keep t
 both); orders added from the store get each item's bin from Bins, one without a bin waits under Please look and gets
 its bin as soon as it's set on any phone.
 
+`pages.test.js` (test address): one page per job. Orders (just the orders: number, where, when, status, due),
+Pick (Step by step; the list and PDF only when asked; step by step's List button), Sort (into the scanner), no Packing
+button at the top; statuses New → In your list → On pick list → Started picking → Picked → Started sorting → Ready to
+pack → Packed; an order's own page (items with bins; pack it, its papers, add to your list); deadlines (due today, late,
+tomorrow) and the reminder before the driver comes, once.
+
 `order-list.test.js` (test address): Add orders, your list and the side menu. Tick orders, Add to list (it stays open:
 one area, then another), see and trim your list, Pick & Print: every order on the pick list (shown straight away) and an
 order sheet each, in sorting order, with the sorting number and each item's bin; Just pick / Just print; with orders on
