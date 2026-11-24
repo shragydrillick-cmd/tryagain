@@ -125,7 +125,9 @@ everyone in the company (two people changing different sizes at once both keep t
 both); orders added from the store get each item's bin from Bins, one without a bin waits under Please look and gets
 its bin as soon as it's set on any phone.
 
-`pages.test.js` (test address): one page per job. Orders (just the orders: number, where, when, status, due),
+`pages.test.js` (test address): one page per job (menu: Orders; Pick & Sort: Create list, List, Pick, Sort, Packing);
+List shows orders, items to pick, bins to visit, and its orders and items with their status (not picked first), any of
+them taken off; Pick has no box around it; Sort goes straight to the scanner box on a computer (inside Shopify too). Orders (just the orders: number, where, when, status, due),
 Pick (Step by step; the list and PDF only when asked; step by step's List button), Sort (into the scanner), no Packing
 button at the top; statuses New → In your list → On pick list → Started picking → Picked → Started sorting → Ready to
 pack → Packed → Fulfilled → Delivered (renamed: Unfulfilled, Sorted, ready to pack); an order's own page (items with bins; pack it, its papers, add to your list); deadlines (due today, late,

@@ -138,7 +138,7 @@ const server = app.listen(8766);
   // Orders → From Shopify: filter by area, tick, add to the list; items without a bin go to "Please look"
   await a.evaluate(() => { try { closePack(); } catch (e) {} closeFind(); closePacking(); });
   ok("the Orders page (in the menu)", await a.evaluate(() => typeof showPage === "function"));
-  await a.evaluate(() => { shop.orders = null; }); await a.evaluate(() => { closeAddOrders(); showPage("orders"); }); await a.waitForFunction(() => !shop.busy, null, { timeout: 8000 }).catch(() => {}); await a.waitForTimeout(300);
+  await a.evaluate(() => { shop.orders = null; }); await a.evaluate(() => { closeAddOrders(); showPage("create"); }); await a.waitForFunction(() => !shop.busy, null, { timeout: 8000 }).catch(() => {}); await a.waitForTimeout(300);
   ok("Add orders: the store's orders show by themselves once they arrive", (await a.$$("#addOrders .aorow")).length === 2 && !/Getting the orders/.test(await a.innerText("#addOrders")));
   const filter = async (cat, opt) => { await a.click('#addOrders button:text-is("Filter & sort")'); await a.click(`.fsheet .fcat:has-text("${cat}")`); await a.click(`.fsheet .fopt:text-is("${opt}")`); await a.click('.fsheet button:text-is("Apply")'); await a.waitForTimeout(200); };
   await filter("Area", "Brooklyn");
@@ -152,7 +152,7 @@ const server = app.listen(8766);
   await a.click('#addOrders button:text-is("Start new with these")').catch(() => {}); await a.waitForTimeout(800);
   const look = await a.innerText("#review").catch(() => "");
   ok("added: both orders on the list, and Please look asks for the bins", await a.evaluate(() => plan && plan.orders.length === 2) && /Please look/.test(look) && /missing bin/.test(look), look.slice(0, 200));
-  await a.evaluate(() => { closeAddOrders(); showPage("orders"); }); await a.waitForTimeout(600);
+  await a.evaluate(() => { closeAddOrders(); showPage("create"); }); await a.waitForTimeout(600);
   ok("opened again: orders already on the list aren't shown", (await a.$$("#addOrders .aorow")).length === 0);
   await a.evaluate(() => closeAddOrders());
   // disconnect

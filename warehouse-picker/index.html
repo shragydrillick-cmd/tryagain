@@ -395,11 +395,22 @@ body.withmenu .detailpanel, body.withmenu .packscreen, body.withmenu #stepper { 
 body.withmenu .scanner { z-index: 75; }
 /* one page per job */
 body.withmenu #homeView > section.card.no-print:first-of-type .ordershead, body.withmenu #homeView .addtiles { display: none; }
-body.withmenu[data-page="orders"] #results { display: none !important; }
-body.withmenu:not([data-page="orders"]) #addOrders { display: none; }
+body.withmenu[data-page="orders"] #results, body.withmenu[data-page="create"] #results, body.withmenu[data-page="list"] #results { display: none !important; }
+body.withmenu:not([data-page="orders"]):not([data-page="create"]) #addOrders { display: none; }
+/* the old box at the top (only when it has something to say) */
+body.withmenu #homeView > section.card.no-print:first-of-type { display: none; }
+body.withmenu #homeView > section.card.no-print:first-of-type:has(#loadMsg > *) { display: block; }
+/* Pick and Sort: straight to the job; no "Your lists" box around it */
+body.withmenu #results > h2, body.withmenu #results > .row.no-print, body.withmenu #syncLine, body.withmenu #stats { display: none !important; }
+body.withmenu #results { background: none; border: 0; box-shadow: none; padding: 0; }
 body.withmenu #results .actcols, body.withmenu #results .tabs, body.withmenu #tab-key { display: none !important; }
 body.withmenu:not([data-list="on"]) #tab-pick, body.withmenu:not([data-list="on"]) #tab-unpack { display: none !important; }
 .pagectl { margin: 10px 0; }
+.listtiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0 12px; }
+.listtile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; text-align: left; }
+.listtile b { font-size: 22px; }
+.listtile.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+body.withmenu:not([data-page="list"]) #listPage { display: none; }
 .bigaction { width: 100%; padding: 20px; font-size: 20px; font-weight: 700; }
 #addOrders.inpage { position: static; inset: auto; padding: 0; background: none; overflow: visible; z-index: auto; } /* the scanner screen: over everything, top bar too (it has its own Done) */
 header.top .menubtn + h1 { flex: 1; }
@@ -2451,7 +2462,8 @@ async function openBarcodeScanner() {
   try { beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); beepCtx.resume(); } catch (e) {} // sound has to start from a tap on iPhone
   // a computer: the barcode scanner, not a camera (it types into the box)
   if (TEST_FEATURES && !phoneLike()) { scanByScanner(scan.el, msg, typed, "Scan each item with the barcode scanner."); return; }
-  if (IN_SHOPIFY) { scanInShopify(scan.el, msg, code => { typed.value = code; okBtn.click(); }); return; }
+  if (IN_SHOPIFY && onPhone()) { scanInShopify(scan.el, msg, code => { typed.value = code; okBtn.click(); }); return; }
+  if (IN_SHOPIFY) { scanByScanner(scan.el, msg, typed, "Scan each item with the barcode scanner."); return; }
   let read;
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
@@ -2819,6 +2831,8 @@ function scanByScanner(el, msg, typed, text) {
 }
 /** Inside the Shopify app (phone): pages shown inside Shopify may not use the camera, so Shopify's own scanner is used
     (App Bridge). It opens again after each scan, until it's closed. Without it: Pick & Sort opens on its own to scan. */
+// the device itself (not the camera / scanner choice): a phone or tablet. Shopify's own scanner only works there.
+const onPhone = () => { try { return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (matchMedia("(any-pointer: coarse)").matches && !matchMedia("(any-pointer: fine)").matches); } catch (e) { return false; } };
 const shopifyScanner = () => !!(window.shopify && window.shopify.scanner && typeof window.shopify.scanner.capture === "function");
 function scanInShopify(el, msg, feed, stopped) {
   if (!el) return;
@@ -2910,7 +2924,7 @@ async function startPackCamera() {
   const video = $("packVideo"), msg = $("packCamMsg"); if (!video) return;
   let read, stream, timer, stopped = false;
   pk.stop = () => { stopped = true; clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); pk && (pk.stop = null); };
-  if (IN_SHOPIFY) { const box = $("packScreen"); scanInShopify(box, msg || h("p"), code => packScan(code), () => stopped || !pk); return; }
+  if (IN_SHOPIFY && onPhone()) { const box = $("packScreen"); scanInShopify(box, msg || h("p"), code => packScan(code), () => stopped || !pk); return; }
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
     read = await barcodeReader();
@@ -3337,8 +3351,8 @@ else if (/[?&]shopify=/.test(location.search) && /^pick-and-sort\.(web\.app|fire
 let ao = null; // { q, sort, kind, area, when, show, chosen: Set of numbers }
 const aoOrders = () => (shop.orders || (TEST_FEATURES ? practiceStore().orders : [])).map(o => ({ ...o, units: o.items.reduce((a, x) => a + x.qty, 0) }));
 const onList = n => !!(plan && plan.orders.some(x => String(x.raw) === String(n)));
-function openAddOrders() {
-  ao = { q: "", sort: "created", kind: "all", area: "", when: "all", show: "new", due: "", chosen: new Set() };
+function openAddOrders(mode = "create") {
+  ao = { mode, q: "", sort: "created", kind: "all", area: "", when: "all", show: mode === "browse" ? "open" : "new", due: "", chosen: new Set() };
   if (TEST_FEATURES) refreshShopify(true);
   drawAddOrders();
 }
@@ -3373,30 +3387,31 @@ function drawAddOrders() {
   const allShown = list.length && list.every(o => ao.chosen.has(o.number));
   const n = ao.chosen.size;
   el.replaceChildren(h("div", { class: "detailbox" },
-    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, TEST_FEATURES ? "Orders" : "Add orders"), TEST_FEATURES ? null : h("button", { class: "btn small", type: "button", onclick: closeAddOrders }, "Back")),
+    h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, !TEST_FEATURES ? "Add orders" : ao.mode === "browse" ? "Orders" : "Create list"), TEST_FEATURES ? null : h("button", { class: "btn small", type: "button", onclick: closeAddOrders }, "Back")),
     // a note only when it matters: the store couldn't be reached, or these are practice orders
     !shop.orders && !shop.busy ? h("div", { class: "notice warn", style: "margin:0 0 8px" }, shop.err ? `Couldn't get the store's orders (${shop.err}): showing practice orders.` : "Practice orders: no Shopify store connected (Settings → More).") : null,
     h("div", { class: "row", style: "gap:8px;align-items:center;flex-wrap:nowrap" }, search,
       h("button", { class: "btn secondary", type: "button", style: "flex:none", onclick: () => openOrderFilter() }, "Filter & sort")),
     filterChips(),
-    h("div", { class: "row", style: "align-items:center;margin:6px 0" },
+    ao.mode === "browse" ? null : h("div", { class: "row", style: "align-items:center;margin:6px 0" },
       h("label", { class: "checkrow", style: "flex:1" }, h("input", { type: "checkbox", "aria-label": "Select all shown", checked: !!allShown, onchange: e => { list.forEach(o => e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number)); drawAddOrders(); } }),
         h("span", null, ` Select all (${list.length})`)),
       n ? h("button", { class: "link small", type: "button", onclick: () => { ao.chosen.clear(); drawAddOrders(); } }, "Clear") : null),
     h("div", { class: "dlist" }, list.slice(0, 300).map(o => {
       const st = orderStage(o), due = dueOf(o);
       return h("div", { class: "drow aorow" + (ao.chosen.has(o.number) ? " st-blue" : "") },
-        h("input", { type: "checkbox", "aria-label": `Order ${o.number}`, checked: ao.chosen.has(o.number), onchange: e => { e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number); drawAddOrders(); } }),
+        ao.mode === "browse" ? null : h("input", { type: "checkbox", "aria-label": `Order ${o.number}`, checked: ao.chosen.has(o.number), onchange: e => { e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number); drawAddOrders(); } }),
         h("button", { class: "aomain", type: "button", "aria-label": `Open order ${o.number}`, onclick: () => openOrderPage(o.number) },
           h("b", null, `#${o.number}`), h("span", { class: "small" }, ` · ${[o.city, o.created ? fmtWhen(o.created) : ""].filter(Boolean).join(" · ")}`),
           h("div", { class: "aobadges" }, h("span", { class: "stbadge " + st.cls }, st.text), due ? h("span", { class: "stbadge " + due.cls }, due.text) : null)),
         h("span", { class: "small muted" }, o.delivery.type === "shipping" ? "UPS" : "Driver"));
     })),
     list.length > 300 ? h("p", { class: "small muted" }, "Showing the first 300: narrow it down to see the rest.") : null,
-    stageBar(n)));
+    ao.mode === "browse" ? null : stageBar(n)));
 }
 /* Filter & sort: one button; a panel with each kind of filter, an option for it, Apply. Filters in use show as chips. */
-const AO_DEFAULTS = { sort: "created", area: "", when: "all", kind: "all", due: "", show: "new" };
+const AO_BASE = { sort: "created", area: "", when: "all", kind: "all", due: "", show: "new" };
+const aoDefaults = () => ({ ...AO_BASE, show: ao && ao.mode === "browse" ? "open" : "new" });
 function aoCats() {
   const areas = [...new Set(aoOrders().map(o => o.city).filter(Boolean))].sort(natural);
   return [
@@ -3410,14 +3425,14 @@ function aoCats() {
 }
 const optLabel = (cat, v) => ((aoCats().find(c => c[0] === cat) || [, , []])[2].find(o => o[0] === v) || [, v])[1];
 function filterChips() {
-  const on = Object.keys(AO_DEFAULTS).filter(k => ao[k] !== AO_DEFAULTS[k]);
+  const on = Object.keys(aoDefaults()).filter(k => ao[k] !== aoDefaults()[k]);
   if (!on.length) return null;
   return h("div", { class: "fchips" }, on.map(k => h("span", { class: "fchip" }, optLabel(k, ao[k]),
-      h("button", { type: "button", "aria-label": `Remove ${optLabel(k, ao[k])}`, onclick: () => { ao[k] = AO_DEFAULTS[k]; drawAddOrders(); } }, "✕"))),
-    h("button", { class: "link small", type: "button", onclick: () => { Object.assign(ao, AO_DEFAULTS); drawAddOrders(); } }, "Clear"));
+      h("button", { type: "button", "aria-label": `Remove ${optLabel(k, ao[k])}`, onclick: () => { ao[k] = aoDefaults()[k]; drawAddOrders(); } }, "✕"))),
+    h("button", { class: "link small", type: "button", onclick: () => { Object.assign(ao, aoDefaults()); drawAddOrders(); } }, "Clear"));
 }
 function openOrderFilter() {
-  const draft = Object.fromEntries(Object.keys(AO_DEFAULTS).map(k => [k, ao[k]]));
+  const draft = Object.fromEntries(Object.keys(aoDefaults()).map(k => [k, ao[k]]));
   let cat = null;
   const shade = h("div", { class: "fshade", onclick: e => { if (e.target === shade) shade.remove(); } });
   const draw = () => {
@@ -3425,7 +3440,7 @@ function openOrderFilter() {
     if (!cat) box.append(h("div", { class: "fhead" }, h("b", null, "Filter & sort"), h("button", { class: "link", type: "button", onclick: () => shade.remove() }, "Cancel")),
       ...cats.map(([k, label]) => h("button", { class: "fcat", type: "button", onclick: () => { cat = k; draw(); } }, h("span", null, label), h("span", { class: "muted" }, optLabel(k, draft[k]) + " ›"))),
       h("div", { class: "row", style: "gap:8px;margin-top:12px" },
-        h("button", { class: "btn secondary", type: "button", style: "flex:1", onclick: () => { Object.assign(draft, AO_DEFAULTS); draw(); } }, "Clear all"),
+        h("button", { class: "btn secondary", type: "button", style: "flex:1", onclick: () => { Object.assign(draft, aoDefaults()); draw(); } }, "Clear all"),
         h("button", { class: "btn", type: "button", style: "flex:2", onclick: () => { Object.assign(ao, draft); shade.remove(); drawAddOrders(); } }, "Apply")));
     else { const [k, label, opts] = cats.find(c => c[0] === cat);
       box.append(h("div", { class: "fhead" }, h("button", { class: "link", type: "button", onclick: () => { cat = null; draw(); } }, "‹ Back"), h("b", null, label), h("span")),
@@ -3491,6 +3506,7 @@ function runStage(mode) {
     if (pick) showPage("pick");
   };
   if (pick && current && plan) {
+    if (!$("addOrders") || !$("addOrders").querySelector(".aobar")) { if (TEST_FEATURES) showPage("create"); else openAddOrders(); } // the question shows under your list
     const box = h("div", { class: "notice warn askmerge", style: "text-align:center;margin-top:10px" },
       h("b", null, `There are already ${plural(plan.orders.length, "order")} on the pick list.`),
       h("div", { class: "row", style: "margin-top:10px;justify-content:center;gap:6px;flex-wrap:wrap" },
@@ -3715,10 +3731,77 @@ function goTab(t) {
 let uiPage = "orders";
 function showPage(p, opts = {}) {
   toHome(); uiPage = p; document.body.dataset.page = p; delete document.body.dataset.list;
-  if (p === "orders") { if (!ao) openAddOrders(); } else if (ao) closeAddOrders();
+  const mode = p === "orders" ? "browse" : p === "create" ? "create" : null;
+  if (mode) { if (!ao || ao.mode !== mode) { if (ao) closeAddOrders(); openAddOrders(mode); } } else if (ao) closeAddOrders();
+  if (p === "list") drawListPage(); else if ($("listPage")) $("listPage").remove();
   if (p === "pick" || p === "sort") { const t = document.querySelector(`.tabs button[data-tab="${p === "pick" ? "pick" : "unpack"}"]`); if (t) t.click(); }
   drawPageCtl(); window.scrollTo(0, 0);
   if (p === "sort" && opts.scan && plan) setTimeout(() => $("scanUnpackBtn").click(), 50);
+}
+/* ---------- List: what's on the pick list now. Its orders and its items, each with where it's up to; any of them
+   can be taken off. ---------- */
+let listView = null; // "orders" | "items" | null
+/** One item for one order: not picked, picked, sorted, packed. */
+function lineStage(u) {
+  const o = plan.orders.find(x => x.label === u.label);
+  if (o && packed.has(o.raw)) return { key: 3, cls: "st-grey", text: "Packed" };
+  const n = unpackDone.has(u.step) ? u.qty : Math.min(u.qty, placed.get(u.step) || 0);
+  if (n >= u.qty) return { key: 2, cls: "st-green", text: "Sorted" };
+  const k = pickOf(u);
+  if (n > 0) return { key: 1, cls: "st-yellow", text: `${n} of ${u.qty} sorted` };
+  if (k && pickedDone.has(k.step)) return { key: 1, cls: "st-blue", text: "Picked" };
+  return { key: 0, cls: "st-red", text: "Not picked" };
+}
+/** Take lines off the list (a whole order, or one item of one order); what's been done on the rest stays. */
+function takeOffList(match, what) {
+  const keep = tickKeys();
+  current.lines = current.lines.filter(l => !match(l));
+  if (current.review) current.review = current.review.filter(r => current.lines.some(l => l.slip === r.slip));
+  if (!current.lines.length) { clearList(true); toast(`${what} taken off. The list is empty now.`); drawListPage(); return; }
+  rebuild(); applyTickKeys(keep); saveListSoon(); toast(`${what} taken off the list.`); drawListPage();
+}
+function drawListPage() {
+  let el = $("listPage");
+  if (!el) { el = h("section", { id: "listPage", class: "card" }); $("homeView").prepend(el); }
+  if (!plan) {
+    el.replaceChildren(h("h2", null, "List"), h("p", { class: "muted" }, "Nothing on the list yet."),
+      h("button", { class: "btn bigaction", type: "button", onclick: () => showPage("create") }, "Create list"));
+    return;
+  }
+  const units = plan.picks.reduce((a, k) => a + k.qty, 0), toPick = plan.picks.filter(k => !pickedDone.has(k.step));
+  const toPickUnits = toPick.reduce((a, k) => a + k.qty, 0), boxes = new Set(toPick.map(k => k.box)).size;
+  const lines = plan.unpack.slice(), st = new Map(lines.map(u => [u, lineStage(u)]));
+  const sortedU = lines.reduce((a, u) => a + (st.get(u).key >= 2 ? u.qty : 0), 0), packedO = plan.orders.filter(o => packed.has(o.raw)).length;
+  const tile = (key, big, small) => h("button", { class: "listtile" + (listView === key ? " on" : ""), type: "button", onclick: () => { listView = listView === key ? null : key; drawListPage(); } }, h("b", null, big), h("span", { class: "small" }, small));
+  let body = null;
+  if (listView === "orders") body = h("div", { class: "dlist" }, plan.orders.slice().sort((a, b) => a.label - b.label).map(o => {
+    const s2 = orderStage({ number: String(o.raw) }), n = plan.unpack.filter(u => u.label === o.label).reduce((a, u) => a + u.qty, 0);
+    return h("div", { class: "drow static" },
+      h("span", { class: "pile" }, String(o.label)),
+      h("button", { class: "aomain", type: "button", onclick: () => openOrderPage(String(o.raw)) }, h("b", null, `#${o.raw}`), h("span", { class: "small" }, ` · ${plural(n, "item")}`),
+        h("div", { class: "aobadges" }, h("span", { class: "stbadge " + s2.cls }, s2.text))),
+      h("button", { class: "link small", type: "button", onclick: e => tapTwice(e.currentTarget, `Take #${o.raw} off?`, () => takeOffList(l => String(l.order) === String(o.raw), `Order #${o.raw}`)) }, "Remove"));
+  }));
+  if (listView === "items") body = h("div", { class: "dlist" }, lines.sort((a, b) => st.get(a).key - st.get(b).key || a.label - b.label || natural(itemName(a), itemName(b))).map(u => {
+    const s2 = st.get(u);
+    return h("div", { class: "drow static" },
+      h("span", { class: "pile" }, String(u.label)),
+      h("div", { style: "flex:1;min-width:0" }, h("b", null, `${u.qty}× ${itemName(u)}`), u.details ? h("span", { class: "small" }, ` · ${u.details}`) : null,
+        h("div", { class: "small muted" }, `Bin ${u.box === "?" ? "?" : boxLabel(u)} · order #${u.raw}`), h("div", { class: "aobadges" }, h("span", { class: "stbadge " + s2.cls }, s2.text))),
+      h("button", { class: "link small", type: "button", onclick: e => tapTwice(e.currentTarget, "Take off?", () => takeOffList(l => String(l.order) === String(u.raw) && l.name === u.name && (l.details || "") === (u.details || ""), itemName(u))) }, "Remove"));
+  }));
+  el.replaceChildren(
+    h("h2", null, "List"),
+    h("div", { class: "listtiles" },
+      tile("orders", plural(plan.orders.length, "order"), `${packedO} packed`),
+      tile("items", `${toPickUnits} to pick`, `of ${plural(units, "item")} · ${sortedU} sorted · ${plural(boxes, "bin")} to visit`)),
+    body,
+    h("div", { class: "row", style: "gap:8px;margin-top:12px" },
+      h("button", { class: "btn", type: "button", style: "flex:1", onclick: () => showPage("pick") }, "Pick"),
+      h("button", { class: "btn", type: "button", style: "flex:1", onclick: () => showPage("sort", { scan: true }) }, "Sort")),
+    h("div", { class: "row", style: "gap:8px;margin-top:8px" },
+      h("button", { class: "btn secondary", type: "button", style: "flex:1", onclick: () => showPage("create") }, "Add more orders"),
+      h("button", { class: "btn secondary", type: "button", onclick: e => tapTwice(e.currentTarget, "Clear the whole list?", () => { clearList(true); drawListPage(); }) }, "Clear list")));
 }
 /** The top of the Pick and Sort pages: the one main thing, and the list if wanted. */
 function drawPageCtl() {
@@ -3738,8 +3821,8 @@ function drawPageCtl() {
   else el.replaceChildren();
 }
 const MENU = [
-  ["Orders", [["Orders", () => showPage("orders")], ["Find an order", () => { toHome(); openFind(); }]]],
-  ["Work", [["Pick", () => showPage("pick")], ["Sort", () => showPage("sort", { scan: true })], ["Packing", () => { toHome(); openPacking(); }]]],
+  ["Orders", [["Orders", () => showPage("orders")]]],
+  ["Pick & Sort", [["Create list", () => showPage("create")], ["List", () => showPage("list")], ["Pick", () => showPage("pick")], ["Sort", () => showPage("sort", { scan: true })], ["Packing", () => { toHome(); openPacking(); }]]],
   ["Items", [["Catalog", () => goSettingsPage(bins ? "binsInventory" : "bins")], ["Bins", () => goSettingsPage(bins ? "binsList" : "bins")], ["Put away", () => { if (bins) putAway(null); else goSettingsPage("bins"); }]]],
   [null, [["Settings", () => goSettingsPage("home")]]],
 ];
@@ -3757,7 +3840,7 @@ function setupSideMenu() {
     panel.replaceChildren(h("div", { class: "sidehead" }, "Pick & Sort"),
       ...MENU.map(([title, items]) => h("div", { class: "sidegroup" }, title ? h("div", { class: "sidetitle" }, title) : null,
         items.map(([label, fn]) => h("button", { class: "sideitem", type: "button", onclick: () => { close(); closeOverlays(); fn(); } }, label,
-          (label === "Pick" || label === "Sort") && n ? h("span", { class: "sidecount" }, String(n)) : null)))));
+          label === "List" && n ? h("span", { class: "sidecount" }, String(n)) : null)))));
   };
   const show = pin => { if (!open) draw();
     const top = Math.max(0, document.querySelector("header.top").getBoundingClientRect().bottom) + "px"; // under the top bar: the button stays there to tap
@@ -3781,7 +3864,7 @@ if (TEST_FEATURES) {
   $("packBtn").classList.add("hidden");
   $("stepClose").before(h("button", { class: "btn secondary small", type: "button", id: "stepList", style: "margin-right:6px",
     onclick: () => { const pickMode = stepMode === "pick"; closeSteps(); showPage(pickMode ? "pick" : "sort"); document.body.dataset.list = "on"; drawPageCtl(); } }, "List"));
-  setTimeout(() => showPage(plan ? "pick" : "orders"), 0);
+  setTimeout(() => showPage(plan ? "list" : "create"), 0);
   const ut = document.querySelector('.tabs button[data-tab="unpack"]'); if (ut) ut.textContent = "Sort list";
   const b = $("shopifyAddBtn");
   if (b) { b.classList.remove("hidden"); b.onclick = openAddOrders; b.replaceChildren(h("b", null, "Add orders"), h("span", { class: "small muted" }, "from the store")); }
@@ -5093,7 +5176,8 @@ async function binScan(onCode, opts = {}) {
   document.body.append(scan.el); document.body.style.overflow = "hidden";
   try { beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); beepCtx.resume(); } catch (e) {}
   if (TEST_FEATURES && !phoneLike()) { scanByScanner(scan.el, msg, typed, "Scan with the barcode scanner (or type the code and press Enter)."); return; }
-  if (IN_SHOPIFY) { scanInShopify(scan.el, msg, code => { typed.value = code; ok.click(); }); return; }
+  if (IN_SHOPIFY && onPhone()) { scanInShopify(scan.el, msg, code => { typed.value = code; ok.click(); }); return; }
+  if (IN_SHOPIFY) { scanByScanner(scan.el, msg, typed, "Scan with the barcode scanner (or type the code and press Enter)."); return; }
   let read;
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");

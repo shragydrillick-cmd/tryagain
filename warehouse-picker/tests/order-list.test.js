@@ -15,7 +15,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   // the menu: a click keeps it open; a click outside closes it
   ok('the menu button at the top left', await p.isVisible('#menuBtn'));
   await p.click('#menuBtn');
-  ok('clicked: the menu is open, with every place', await p.evaluate(() => sideMenu.isOpen() && sideMenu.isPinned()) && /Orders[\s\S]*Find an order[\s\S]*Pick[\s\S]*Sort[\s\S]*Packing[\s\S]*Catalog[\s\S]*Bins[\s\S]*Put away[\s\S]*Settings/.test(await p.innerText('#sideMenu')));
+  ok('clicked: the menu is open, with every place', await p.evaluate(() => sideMenu.isOpen() && sideMenu.isPinned()) && /Orders[\s\S]*Create list[\s\S]*List[\s\S]*Pick[\s\S]*Sort[\s\S]*Packing[\s\S]*Catalog[\s\S]*Bins[\s\S]*Put away[\s\S]*Settings/.test(await p.innerText('#sideMenu')));
   await p.mouse.click(900, 500); await p.waitForTimeout(250);
   ok('a click outside closes it', await p.evaluate(() => !sideMenu.isOpen()));
   await p.hover('#menuBtn'); await p.waitForTimeout(200);
@@ -24,7 +24,9 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('moving the mouse away closes it', await p.evaluate(() => !sideMenu.isOpen()));
   // Add orders from the menu; one area, Add to list; another area, Add to list
   await p.click('#menuBtn'); await p.click('#sideMenu button:text-is("Orders")'); await p.waitForTimeout(400);
-  ok('menu: Orders shows the orders page (and the menu closes)', await p.isVisible('#addOrders') && await p.evaluate(() => !sideMenu.isOpen() && uiPage === 'orders'));
+  ok('menu: Orders: just the orders (no ticking, no list)', await p.isVisible('#addOrders') && await p.evaluate(() => !sideMenu.isOpen() && uiPage === 'orders') && !(await p.$('#addOrders .aorow input')) && !(await p.$('#addOrders .aobar')));
+  await p.click('#menuBtn'); await p.click('#sideMenu button:text-is("Create list")'); await p.waitForTimeout(400);
+  ok('menu: Create list: the orders to tick', await p.evaluate(() => uiPage === 'create') && !!(await p.$('#addOrders .aorow input')));
   // Filter & sort: one button, a panel (a kind of filter, an option, Apply); filters in use show as chips
   const filter = async (cat, opt) => { await p.click('#addOrders button:text-is("Filter & sort")'); await p.click(`.fsheet .fcat:has-text("${cat}")`); await p.click(`.fsheet .fopt:text-is("${opt}")`); await p.click('.fsheet button:text-is("Apply")'); await p.waitForTimeout(200); };
   ok('the Orders page: search and one Filter & sort button (no row of boxes), no small print', await p.isVisible('#addOrders button:text-is("Filter & sort")') && !(await p.$('#addOrders select')) && !/Open orders in|Practice orders/.test(await p.innerText('#addOrders')) || /Practice orders: no Shopify/.test(await p.innerText('#addOrders')));
@@ -58,7 +60,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('…an order sheet each, in sorting order, each with its sorting number and order number', sheets.length === listed.length && labels.every(([l, raw], i) => sheets[i].includes('SORT #') && sheets[i].split(/\s+/).includes(l) && sheets[i].includes(`Order #${raw}`)), sheets.map(x => x.slice(0, 50)).join(' | '));
   ok('…with each item and its bin', sheets.every(t => /Bin\s+Item\s+Qty/.test(t) && /Total items: \d+/.test(t)), sheets[0].slice(0, 300));
   // again: orders already on the pick list: add these / start new / cancel
-  await p.evaluate(() => { window.__sheets = []; window.__sheetsDone = false; showPage('orders'); });
+  await p.evaluate(() => { window.__sheets = []; window.__sheetsDone = false; showPage('create'); });
   await p.check('#addOrders .aorow input >> nth=0'); await p.click('#addOrders button:has-text("Add to list (1)")');
   await p.click('#addOrders .aobar button[aria-label="Other choices"]'); await p.click('#addOrders .packmenu button:text-is("Just pick")');
   ok('orders already on the pick list: it asks (add these / start new / cancel)', /already \d+ orders on the pick list[\s\S]*Add these to it[\s\S]*Start new with these[\s\S]*Cancel/.test(await p.innerText('#addOrders .aobar')));
@@ -66,7 +68,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('Cancel: nothing changes', await p.evaluate(n => plan.orders.length === n && stage.size === 1 && !!ao, onPick.length));
   await p.click('#addOrders .aobar button:has-text("Just pick")'); await p.click('#addOrders button:text-is("Add these to it")'); await p.waitForTimeout(500);
   ok('Just pick, Add these to it: one more on the pick list, nothing printed', await p.evaluate(n => plan.orders.length === n + 1 && window.__sheets.length === 0, onPick.length));
-  await p.evaluate(() => showPage('orders')); await p.check('#addOrders .aorow input >> nth=0'); await p.click('#addOrders button:has-text("Add to list (1)")');
+  await p.evaluate(() => showPage('create')); await p.check('#addOrders .aorow input >> nth=0'); await p.click('#addOrders button:has-text("Add to list (1)")');
   await p.click('#addOrders .aobar button[aria-label="Other choices"]'); await p.click('#addOrders .packmenu button:text-is("Just print")'); await p.waitForFunction(() => window.__sheetsDone, null, { timeout: 10000 }).catch(() => {});
   ok('Just print: a sheet, the pick list unchanged', await p.evaluate(n => plan.orders.length === n + 1 && window.__sheets.length === 1, onPick.length));
   // the menu's other places

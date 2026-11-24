@@ -47,7 +47,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
     binsChange('setup', () => { bins.products.push({ id: 'pt1', title: 'Store item A', vendor: 'X', variants: [{ id: 'pt1v1', colour: '', size: '', opts: [], sku: '', barcode: c[0], stock: 3, bins: [{ bin: 'C9', qty: 3, at: 1 }] }] },
       { id: 'pt2', title: 'Store item B', vendor: 'X', variants: [{ id: 'pt2v1', colour: '', size: '', opts: [], sku: '', barcode: c[1], stock: 2, bins: [] }] }); });
   }, codes.codes);
-  await a.evaluate(() => { closeAddOrders(); showPage('orders'); }); await a.fill('#addOrders input[aria-label="Search orders"]', codes.n); await a.waitForTimeout(600);
+  await a.evaluate(() => { closeAddOrders(); showPage('create'); }); await a.fill('#addOrders input[aria-label="Search orders"]', codes.n); await a.waitForTimeout(600);
   await a.check(`#addOrders input[aria-label="Order ${codes.n}"]`); await a.click('#addOrders button:has-text("Add to list")'); await a.evaluate(() => runStage('pick')); await a.waitForTimeout(800);
   const boxes = await a.evaluate(c => c.map(code => (current.lines.find(l => l.barcode === code) || {}).box), codes.codes);
   ok("added from the store: the item in Bins goes to its bin (C9), the other has none yet", boxes[0] === 'C9' && boxes[1] === '?', boxes.join(','));

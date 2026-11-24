@@ -10,8 +10,8 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   const b = await chromium.launch(); const errs = [];
   const p = await (await b.newContext({ viewport: { width: 1200, height: 850 } })).newPage(); p.on('pageerror', e => errs.push(e.message));
   await p.goto(BASE); await p.evaluate(() => { localStorage.clear(); localStorage.setItem('pick-and-sort-test-features', '1'); }); await p.reload(); await p.waitForTimeout(300);
-  ok('opens on the Orders page; no Packing button at the top', await p.evaluate(() => uiPage === 'orders') && await p.isVisible('#addOrders') && !(await p.isVisible('#packBtn')));
-  ok('the Orders page has nothing else under it (no pick list, step by step, tabs)', !(await p.isVisible('#results')) && !(await p.isVisible('#stepPickBtn')));
+  ok('opens on Create list (nothing on the list yet); no Packing button at the top', await p.evaluate(() => uiPage === 'create') && await p.isVisible('#addOrders') && !(await p.isVisible('#packBtn')));
+  ok('the page has nothing else under it (no pick list, step by step, tabs)', !(await p.isVisible('#results')) && !(await p.isVisible('#stepPickBtn')));
   const row = await p.$eval('#addOrders .aorow', x => x.innerText.replace(/\s+/g, ' '));
   const o0 = await p.evaluate(() => aoShown()[0]);
   ok('an order row: number, where, when and its status, not its items', row.includes(`#${o0.number}`) && row.includes(o0.city) && /Unfulfilled/.test(row) && !row.includes(o0.items[0].name), row);
@@ -48,6 +48,27 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('status: all sorted → Ready to pack', await st() === 'Sorted, ready to pack');
   await p.evaluate(n => packed.set(plan.orders.find(x => String(x.raw) === n).raw, Date.now()), o0.number);
   ok('status: packed → Packed', await st() === 'Packed');
+  // the List page: counts; its orders and items with where they're up to; take things off
+  await p.evaluate(() => { stage.clear(); aoOrders().slice(0, 4).forEach(o => stage.set(o.number, o)); runStage('pick'); });
+  await p.waitForTimeout(300); await p.click('.fsheet button:text-is("Cancel")').catch(() => {});
+  await p.click('#addOrders button:text-is("Start new with these")').catch(() => {}); await p.waitForTimeout(400);
+  await p.evaluate(() => showPage('list'));
+  const lt = await p.innerText('#listPage');
+  ok('List: how many orders, how many to pick, bins to visit', /4 orders[\s\S]*\d+ to pick[\s\S]*bins? to visit/.test(lt) && !(await p.isVisible('#results')), lt.slice(0, 120));
+  await p.click('#listPage .listtile:has-text("to pick")');
+  await p.evaluate(() => { const u = plan.unpack[plan.unpack.length - 1]; pickedDone.add(pickOf(u).step); drawListPage(); });
+  const items = await p.$$eval('#listPage .dlist .drow', r => r.map(x => x.innerText.replace(/\s+/g, ' ')));
+  ok('Items: each with its status, the ones not picked first', items.length >= 4 && /Not picked/.test(items[0]) && /Picked/.test(items[items.length - 1]), items[0].slice(0, 80) + ' … ' + items[items.length - 1].slice(0, 80));
+  await p.click('#listPage .listtile:has-text("orders")');
+  const before = await p.evaluate(() => plan.orders.length), first = await p.evaluate(() => String(plan.orders.slice().sort((a, b) => a.label - b.label)[0].raw));
+  await p.click('#listPage .dlist .drow >> nth=0 >> button:text-is("Remove")'); await p.click('#listPage button:has-text("Tap again")');
+  ok('Orders: one taken off the list', await p.evaluate(([n, f]) => plan.orders.length === n - 1 && !plan.orders.some(o => String(o.raw) === f), [before, first]));
+  // Pick: straight to it, no box of text around; Sort: straight into the scanner (a computer: the scanner's box)
+  await p.evaluate(() => showPage('pick'));
+  ok('Pick: the big Step by step, no "Your lists" box or file name', await p.isVisible('#pageCtl button:text-is("Step by step")') && !(await p.isVisible('#results > h2')) && !(await p.isVisible('#fileName')));
+  await p.evaluate(() => showPage('sort', { scan: true })); await p.waitForTimeout(300);
+  ok('Sort: straight into scanning; on a computer the scanner box (no camera, no Scan button)', await p.isVisible('.scanner input[aria-label="Barcode or SKU"]') && !(await p.$('.scanner .scanview')) && !(await p.$('.scanner .shopscan')));
+  await p.click('.scanner button:has-text("Done")');
   // deadlines
   const due = await p.evaluate(() => {
     settings.deadlines = [{ on: true, kind: 'any', area: '', cutoff: '12:00', driver: '16:00', remind: 15 }];
@@ -63,6 +84,13 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('…once (not again a minute later)', !(await p.$('#dueAlert')));
   await p.click('#navBtn'); await p.evaluate(() => go('more'));
   ok('Settings → More → Deadlines: the rule to change', /Deadlines[\s\S]*Orders in by[\s\S]*Driver comes at[\s\S]*Remind/.test(await p.innerText('#settingsView')));
+  // inside Shopify on a computer: the scanner box too (Shopify's own scanner is for phones)
+  const sc = await b.newContext({ viewport: { width: 1200, height: 800 } });
+  await sc.addInitScript(() => { window.shopify = { idToken: async () => 'x', scanner: { capture: () => new Promise(() => {}) } }; });
+  const sp = await sc.newPage(); sp.on('pageerror', e => errs.push('in shopify: ' + e.message));
+  await sp.goto(BASE); await sp.evaluate(() => { localStorage.clear(); localStorage.setItem('pick-and-sort-test-features', '1'); localStorage.setItem('pick-and-sort-test-noauth', '1'); localStorage.setItem('pick-and-sort-scan-mode', 'camera'); }); await sp.reload();
+  await sp.evaluate(() => document.getElementById('exampleBtn').click()); await sp.waitForTimeout(400); await sp.evaluate(() => document.getElementById('scanUnpackBtn').click()); await sp.waitForTimeout(300);
+  ok("inside Shopify on a computer: the scanner box, not Shopify's scanner (even with the camera chosen)", await sp.isVisible('.scanner input[aria-label="Barcode or SKU"]') && !(await sp.$('.scanner .shopscan')));
   ok('no page errors', !errs.length, errs.join(' / '));
   console.log(bad ? `${bad} FAILED` : 'all ok'); await b.close(); process.exit(bad ? 1 : 0);
 })();
