@@ -4642,7 +4642,7 @@ function fromShopify(list) {
     const cName = names.find(n => /colou?r|style|pattern|print/i.test(n)), sName = names.find(n => /size/i.test(n));
     // more than a colour and a size (or options with other names): shown, but its sizes / colours are changed in Shopify
     const complex = names.length > 2 || names.some(n => n !== cName && n !== sName);
-    return { id: prev ? prev.id : "s" + num(sp.id), sid: sp.id, title: sp.title, vendor: sp.vendor || "—", draft: sp.status === "DRAFT",
+    return { id: prev ? prev.id : "s" + num(sp.id), sid: sp.id, title: sp.title, vendor: sp.vendor || "—", draft: sp.status === "DRAFT", created: sp.created || (prev && prev.created) || null,
       optNames: [cName || "Color", sName || "Size"], complex,
       variants: sp.variants.map(sv => {
         const pv = oldV.get(sv.id), opt = re => (sv.options.find(o => re.test(o.name)) || {}).value || "";
@@ -5296,7 +5296,7 @@ function renderInventoryList(v) {
     h("div", { class: "binctls" }, h("label", { class: "binctl" }, h("span", { class: "fixlab" }, "Show"), h("select", { "aria-label": "Show", onchange: e => { B.showi = e.target.value; renderSettings(); } },
       [["all", "Everything"], ["un", "Not all in a bin yet"]].map(([x, t]) => h("option", { value: x, selected: (B.showi || "all") === x }, t))))),
     rows.length ? h("div", { class: "dlist" }, rows.map(r => h("button", { class: "drow invrow", type: "button", onclick: () => openStock(r.p.id) },
-      h("div", { style: "flex:1;min-width:0;text-align:left" }, h("b", null, r.p.title), h("div", { class: "small muted" }, `${r.p.vendor} · ${plural(r.p.variants.length, "variant")}`),
+      h("div", { style: "flex:1;min-width:0;text-align:left" }, h("b", null, r.p.title), h("div", { class: "small muted" }, `${r.p.vendor} · ${plural(r.p.variants.length, "variant")}${r.p.created ? " · added " + new Date(r.p.created).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : ""}`),
         r.fl.length ? h("div", { class: "small" }, r.fl.map(([k, n]) => `${k[0].toUpperCase() + k.slice(1)}: ${n}`).join(" · ")) : null),
       h("div", { class: "invnums" }, h("b", null, String(r.st)), h("span", { class: "small" }, r.un ? `${r.un} to put away` : r.st ? "all in bins" : "none")))))
       : h("p", { class: "muted" }, bins.products.length ? "Nothing matches." : "Nothing in the inventory yet. Add a new item, or scan one to count it in.")));

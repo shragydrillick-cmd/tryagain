@@ -77,12 +77,19 @@ async function storeKey(company) {
   return t.data();
 }
 async function graphql(key, query, variables) {
-  const r = await fetch(`${shopBase(key.shop)}/admin/api/${API_VERSION}/graphql.json`, {
-    method: "POST", headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": key.token }, body: JSON.stringify({ query, variables }) });
-  if (r.status === 401 || r.status === 403) throw new Problem(409, "Shopify refused the store's key: connect the store again in Settings.");
-  if (!r.ok) throw new Problem(502, `Shopify answered ${r.status}.`);
-  return r.json();
+  for (let tries = 0; ; tries++) {
+    const r = await fetch(`${shopBase(key.shop)}/admin/api/${API_VERSION}/graphql.json`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": key.token }, body: JSON.stringify({ query, variables }) });
+    if (r.status === 401 || r.status === 403) throw new Problem(409, "Shopify refused the store's key: connect the store again in Settings.");
+    if (r.status === 429 && tries < 6) { await new Promise(ok => setTimeout(ok, 1500)); continue; }
+    if (!r.ok) throw new Problem(502, `Shopify answered ${r.status}.`);
+    const d = await r.json();
+    // asked too fast: Shopify says to slow down; wait a moment and ask again
+    if (d.errors && d.errors.some(e => (e.extensions && e.extensions.code) === "THROTTLED") && tries < 6) { await new Promise(ok => setTimeout(ok, 1500)); continue; }
+    return d;
+  }
 }
+const accessProblem = errs => /access|scope|permission|denied|not approved/i.test(JSON.stringify(errs || ""));
 
 // people: "all" (the customer's record and the delivery address), "address" (the delivery address, with the name on it),
 // "none". The customer's record needs read_customers; without it the name on the delivery address is used.
@@ -242,29 +249,35 @@ async function route(req, res) {
     return res.json({ made, problems });
   }
   // the store's inventory: every product with its sizes / colours, barcodes, SKUs and how many
+  // the store's catalogue: every size / colour of every product (not archived ones), 50 at a time so each request
+  // stays well within what Shopify allows; grouped back into products. Amounts are on hand (needs the inventory permission:
+  // without it the products still come, without amounts, and it says so).
   if (path === "/products") {
     const who = await caller(req, false); await dailyGuard("shopifyProducts");
     const key = await storeKey(who.company);
-    // amounts need the inventory permission: without it the products still come, without amounts (and it says so)
-    let out = [], after = null, amounts = "on_hand", amountsErr = "";
-    const fields = { on_hand: `inventoryQuantity inventoryItem { id tracked inventoryLevels(first: 10) { nodes { quantities(names: ["on_hand"]) { quantity } } } }`,
+    let after = null, amounts = "on_hand", amountsErr = "";
+    const fields = { on_hand: `inventoryQuantity inventoryItem { id inventoryLevels(first: 3) { nodes { quantities(names: ["on_hand"]) { quantity } } } }`,
       total: "inventoryQuantity inventoryItem { id }", none: "inventoryItem { id }" };
-    for (let page = 0; page < 20; page++) {
-      const q = () => `query($after: String) { products(first: 100, after: $after, query: "status:active OR status:draft") { pageInfo { hasNextPage endCursor }
-        nodes { id title vendor status options { name } variants(first: 100) { nodes { id title sku barcode price selectedOptions { name value } ${fields[amounts]} } } } } }`;
+    const byId = new Map();
+    for (let page = 0; page < 200; page++) {
+      const q = () => `query($after: String) { productVariants(first: 50, after: $after) { pageInfo { hasNextPage endCursor }
+        nodes { id title sku barcode price selectedOptions { name value } ${fields[amounts]} product { id title vendor status createdAt options { name } } } } }`;
       let d = await graphql(key, q(), { after });
-      while (d.errors && amounts !== "none") {
-        if (!amountsErr) { amountsErr = d.errors.map(e => e.message).join("; ").slice(0, 300); console.error("products with amounts refused:", JSON.stringify(d.errors).slice(0, 800)); }
+      while (d.errors && amounts !== "none" && accessProblem(d.errors)) {
+        if (!amountsErr) { amountsErr = d.errors.map(e => e.message).join("; ").slice(0, 300); console.error("variants with amounts refused:", JSON.stringify(d.errors).slice(0, 800)); }
         amounts = amounts === "on_hand" ? "total" : "none";
         d = await graphql(key, q(), { after });
       }
       if (d.errors) throw new Problem(502, "Shopify: " + d.errors[0].message);
-      out = out.concat(d.data.products.nodes.map(p => ({ id: p.id, title: p.title, vendor: p.vendor || "", status: p.status, optionNames: (p.options || []).map(o => o.name),
-        variants: p.variants.nodes.map(v => ({ id: v.id, title: v.title, sku: v.sku || "", barcode: v.barcode || "", price: v.price, stock: onHand(v), item: v.inventoryItem && v.inventoryItem.id,
-          options: (v.selectedOptions || []).filter(o => !(o.name === "Title" && o.value === "Default Title")) })) })));
-      if (!d.data.products.pageInfo.hasNextPage) break; after = d.data.products.pageInfo.endCursor;
+      d.data.productVariants.nodes.forEach(v => {
+        const p = v.product; if (!p || p.status === "ARCHIVED") return;
+        if (!byId.has(p.id)) byId.set(p.id, { id: p.id, title: p.title, vendor: p.vendor || "", status: p.status, created: Date.parse(p.createdAt) || null, optionNames: (p.options || []).map(o => o.name), variants: [] });
+        byId.get(p.id).variants.push({ id: v.id, title: v.title, sku: v.sku || "", barcode: v.barcode || "", price: v.price, stock: onHand(v), item: v.inventoryItem && v.inventoryItem.id,
+          options: (v.selectedOptions || []).filter(o => !(o.name === "Title" && o.value === "Default Title")) });
+      });
+      if (!d.data.productVariants.pageInfo.hasNextPage) break; after = d.data.productVariants.pageInfo.endCursor;
     }
-    return res.json({ products: out, at: Date.now(), amounts, amountsErr: amounts === "on_hand" ? "" : amountsErr });
+    return res.json({ products: [...byId.values()], at: Date.now(), amounts, amountsErr: amounts === "on_hand" ? "" : amountsErr });
   }
   // changes made in Pick & Sort, written to the store: a product's name / company, a variant's barcode / SKU, how many
   if (path === "/edit") {

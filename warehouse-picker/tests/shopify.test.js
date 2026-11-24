@@ -44,11 +44,16 @@ app.post("/fake/:shop/admin/api/:v/graphql.json", (req, res) => {
   if (/partnerDevelopment/.test(req.body.query)) return res.json({ data: { shop: { currencyCode: "USD", plan: { partnerDevelopment: fake.dev !== false } },
     products: { nodes: [{ title: "Fleece blanket", variants: { nodes: [{ id: "gid://shopify/ProductVariant/1", title: "Blue" }, { id: "gid://shopify/ProductVariant/2", title: "Gray" }] } }] } } });
   // the store's inventory: products, and the changes Pick & Sort sends back
-  if (/products\(first: 100/.test(req.body.query) && fake.productsFail) { fake.productCalls = (fake.productCalls || 0) + 1; return res.status(500).end(); }
-  if (/products\(first: 100/.test(req.body.query)) return res.json({ data: { products: { pageInfo: { hasNextPage: false }, nodes: [
-    { id: "gid://shopify/Product/9", title: "Fleece blanket", vendor: "Cozy Co", status: "ACTIVE", options: [{ name: "Color" }, { name: "Size" }], variants: { nodes: [
-      { id: "gid://shopify/ProductVariant/91", title: "Blue / One", sku: "FB-BLU", barcode: "5012345000015", inventoryQuantity: fake.qty91 ?? 4, selectedOptions: [{ name: "Color", value: "Blue" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/191" } },
-      { id: "gid://shopify/ProductVariant/92", title: "Gray / One", sku: "FB-GRY", barcode: "", inventoryQuantity: 0, selectedOptions: [{ name: "Color", value: "Gray" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/192" } }] } }] } } });
+  // the catalogue, 50 sizes at a time (here: two pages); an archived product stays out
+  if (/productVariants\(first: 50/.test(req.body.query) && fake.productsFail) { fake.productCalls = (fake.productCalls || 0) + 1; return res.status(500).end(); }
+  if (/productVariants\(first: 50/.test(req.body.query)) {
+    const prod = { id: "gid://shopify/Product/9", title: "Fleece blanket", vendor: "Cozy Co", status: "ACTIVE", createdAt: "2026-03-05T10:00:00Z", options: [{ name: "Color" }, { name: "Size" }] };
+    const page1 = [{ id: "gid://shopify/ProductVariant/91", title: "Blue / One", sku: "FB-BLU", barcode: "5012345000015", inventoryQuantity: fake.qty91 ?? 4, selectedOptions: [{ name: "Color", value: "Blue" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/191" }, product: prod }];
+    const page2 = [{ id: "gid://shopify/ProductVariant/92", title: "Gray / One", sku: "FB-GRY", barcode: "", inventoryQuantity: 0, selectedOptions: [{ name: "Color", value: "Gray" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/192" }, product: prod },
+      { id: "gid://shopify/ProductVariant/99", title: "Default Title", sku: "OLD-1", barcode: "", inventoryQuantity: 0, selectedOptions: [{ name: "Title", value: "Default Title" }], inventoryItem: { id: "gid://shopify/InventoryItem/199" }, product: { id: "gid://shopify/Product/90", title: "Old summer hat", vendor: "Cozy Co", status: "ARCHIVED", createdAt: "2024-05-01T10:00:00Z", options: [{ name: "Title" }] } }];
+    const second = (req.body.variables || {}).after === "p2";
+    return res.json({ data: { productVariants: { pageInfo: { hasNextPage: !second, endCursor: second ? null : "p2" }, nodes: second ? page2 : page1 } } });
+  }
   if (/productSet/.test(req.body.query)) { // the whole product: give each size an id (new ones get new ids)
     const inp = req.body.variables.input; (fake.sets = fake.sets || []).push(inp); let n = 500 + fake.sets.length * 10;
     return res.json({ data: { productSet: { userErrors: [], product: { id: inp.id || "gid://shopify/Product/77", variants: { nodes: inp.variants.map(v => ({ id: v.id || "gid://shopify/ProductVariant/" + (++n),
@@ -206,6 +211,7 @@ const server = app.listen(8766);
   ok("Inventory: the store's products, with how many (the practice items gone)", invRows.length === 1 && /Fleece blanket.*Cozy Co.*2 variants.*4/.test(invRows[0]) && /From Shopify: practice-store · 1 item/.test(await e.innerText("#settingsView")), invRows.join(" // "));
   const vs = await e.evaluate(() => bins.products[0].variants.map(v => `${optText(v)}|${v.sku}|${v.barcode}|${v.stock}`).join(", "));
   ok("…each size with its colour, size, SKU, barcode and how many", vs === "Blue / One|FB-BLU|5012345000015|4, Gray / One|FB-GRY||0", vs);
+  ok("…from two pages, the archived one left out, with when it was added (Mar 2026)", await e.evaluate(() => bins.products.length === 1 && !bins.products.some(p => /Old summer/.test(p.title)) && new Date(bins.products[0].created).getMonth() === 2) && /added Mar 2026/.test(await e.innerText("#settingsView")));
   await e.click("#settingsView .invrow");
   await e.fill('input[aria-label="Barcode of Gray / One"]', "5012345000022"); await e.press('input[aria-label="Barcode of Gray / One"]', "Tab");
   await e.click('button[aria-label="How many Blue / One: one more"]'); await e.click('button[aria-label="How many Blue / One: one more"]');
