@@ -69,6 +69,12 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   a = await open(ca, 'desk again'); await a.waitForFunction(() => acct && amStation() && station.unsubJobs, null, { timeout: 15000 }).catch(() => {});
   await a.waitForTimeout(3000);
   ok('desk back: the UPS order that waited is there', new RegExp(`#${ups2}.*buy its label in Shopify`).test(await a.$eval('#stationBar', x => x.innerText.replace(/\n+/g, ' ')).catch(() => '')));
+  // order sheets (Add orders → your list → Just print) from the phone: they print on the desk, in one go
+  await a.evaluate(() => { window.__sheetsPrinted = []; window.__stationPrint = (o, blob) => { window.__sheetsPrinted.push(blob ? blob.size : 0); }; });
+  await a.evaluate(() => heartbeat()); await ph.waitForFunction(() => stationOnline(), null, { timeout: 8000 }).catch(() => {}); // the desk checks in (this test counts 4 s as online)
+  await ph.evaluate(() => { stage.clear(); practiceStore().orders.slice(0, 3).forEach(o => stage.set(o.number, { ...o, units: o.items.reduce((s, x) => s + x.qty, 0) })); runStage('print'); });
+  await a.waitForFunction(() => window.__sheetsPrinted.length, null, { timeout: 15000 }).catch(() => {}); await a.waitForTimeout(800);
+  ok('order sheets from the phone print on the print station', await a.evaluate(() => window.__sheetsPrinted.length === 1 && window.__sheetsPrinted[0] > 1000) && /3 order sheets printed/.test(await a.$eval('#stationBar', x => x.innerText).catch(() => '')));
   ok('no page errors', !errs.length, errs.join(' / '));
   console.log(bad ? `${bad} FAILED` : 'all ok'); await b.close(); process.exit(bad ? 1 : 0);
 })();

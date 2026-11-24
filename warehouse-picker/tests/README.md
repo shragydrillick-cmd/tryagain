@@ -107,7 +107,8 @@ opens any order.
 `print-station.test.js` (with the Firebase emulator): devices are named; holding the green circle lists every device in
 the company, online first; the admin makes a computer the print station; a phone packing a local order sends its label
 there and goes back to the list; a UPS order opens there for Shopify; with the station offline the phone prints its own
-label and the UPS order waits, then reaches the station when it's back.
+label and the UPS order waits, then reaches the station when it's back; order sheets sent from a phone print there
+in one go.
 
 `shopify.test.js` (with the Firebase emulator): the Shopify connection. The real server code
 (`firebase/functions/shopify.js`) runs against the emulator and a pretend Shopify: the admin connects the store from
@@ -123,6 +124,12 @@ brand-new item (a draft in the store, with its amounts) and deleting an item all
 everyone in the company (two people changing different sizes at once both keep their change; a deleted item goes on
 both); orders added from the store get each item's bin from Bins, one without a bin waits under Please look and gets
 its bin as soon as it's set on any phone.
+
+`order-list.test.js` (test address): Add orders, your list and the side menu. Tick orders, Add to list (it stays open:
+one area, then another), see and trim your list, Pick & Print: every order on the pick list (shown straight away) and an
+order sheet each, in sorting order, with the sorting number and each item's bin; Just pick / Just print; with orders on
+the pick list already it asks (add these / start new / cancel). The menu: click keeps it open, a click outside closes it,
+a mouse over it opens it and moving away closes it, a tap on a phone; each place it goes to.
 
 `scan-anywhere.test.js` (test address): a barcode scanner on a computer works on any page: an order's barcode opens it
 for packing (confirmed) and items count for it; an item on the list starts separating (the scanner's box, no camera)
