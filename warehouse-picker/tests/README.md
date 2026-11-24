@@ -131,7 +131,8 @@ button at the top; statuses New → In your list → On pick list → Started pi
 pack → Packed → Fulfilled → Delivered (renamed: Unfulfilled, Sorted, ready to pack); an order's own page (items with bins; pack it, its papers, add to your list); deadlines (due today, late,
 tomorrow) and the reminder before the driver comes, once.
 
-`order-list.test.js` (test address): Add orders, your list and the side menu. Tick orders, Add to list (it stays open:
+`order-list.test.js` (test address): Add orders, your list and the side menu. One Filter & sort button (a panel: a
+kind of filter, an option, Apply; chips for filters in use, Clear); tick orders, Add to list (it stays open:
 one area, then another), see and trim your list, Pick & Print: every order on the pick list (shown straight away) and an
 order sheet each, in sorting order, with the sorting number and each item's bin; Just pick / Just print; with orders on
 the pick list already it asks (add these / start new / cancel). The menu: click keeps it open, a click outside closes it,

@@ -25,13 +25,22 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   // Add orders from the menu; one area, Add to list; another area, Add to list
   await p.click('#menuBtn'); await p.click('#sideMenu button:text-is("Orders")'); await p.waitForTimeout(400);
   ok('menu: Orders shows the orders page (and the menu closes)', await p.isVisible('#addOrders') && await p.evaluate(() => !sideMenu.isOpen() && uiPage === 'orders'));
-  const areas = await p.$$eval('#addOrders select[aria-label="Area"] option', o => o.map(x => x.value).filter(Boolean));
-  await p.selectOption('#addOrders select[aria-label="Area"]', areas[0]); await p.check('#addOrders input[aria-label="Select all shown"]');
+  // Filter & sort: one button, a panel (a kind of filter, an option, Apply); filters in use show as chips
+  const filter = async (cat, opt) => { await p.click('#addOrders button:text-is("Filter & sort")'); await p.click(`.fsheet .fcat:has-text("${cat}")`); await p.click(`.fsheet .fopt:text-is("${opt}")`); await p.click('.fsheet button:text-is("Apply")'); await p.waitForTimeout(200); };
+  ok('the Orders page: search and one Filter & sort button (no row of boxes), no small print', await p.isVisible('#addOrders button:text-is("Filter & sort")') && !(await p.$('#addOrders select')) && !/Open orders in|Practice orders/.test(await p.innerText('#addOrders')) || /Practice orders: no Shopify/.test(await p.innerText('#addOrders')));
+  const areas = await p.evaluate(() => [...new Set(aoOrders().map(o => o.city).filter(Boolean))].sort(natural));
+  await p.click('#addOrders button:text-is("Filter & sort")');
+  ok('Filter & sort: the kinds of filter', /Sort by[\s\S]*Area[\s\S]*Due[\s\S]*Ordered[\s\S]*Delivery[\s\S]*Show/.test(await p.innerText('.fsheet')));
+  await p.mouse.click(5, 5); await p.waitForTimeout(150);
+  ok('…a tap outside closes it, nothing changed', !(await p.$('.fsheet')) && await p.evaluate(() => ao.area === ''));
+  await filter('Area', areas[0]);
+  ok(`Area ${areas[0]} applied: a chip, and only those orders`, (await p.innerText('#addOrders .fchips')).includes(areas[0]) && await p.evaluate(a => aoShown().every(o => o.city === a), areas[0]));
+  await p.check('#addOrders input[aria-label="Select all shown"]');
   const n1 = await p.evaluate(() => ao.chosen.size);
   await p.click('#addOrders button:has-text("Add to list")');
   ok(`Add to list: ${n1} orders in your list, the screen stays open`, await p.evaluate(() => stage.size) === n1 && await p.isVisible('#addOrders') && new RegExp(`Your list: ${n1} orders`).test(await p.innerText('#addOrders .aobar')));
   ok('…and they no longer show as ones to choose', (await p.$$('#addOrders .aorow')).length === 0);
-  await p.selectOption('#addOrders select[aria-label="Area"]', areas[1]);
+  await filter('Area', areas[1]);
   await p.check('#addOrders .aorow input >> nth=0'); await p.check('#addOrders .aorow input >> nth=1');
   await p.click('#addOrders button:has-text("Add to list (2)")');
   ok('another area: 2 more added to your list', await p.evaluate(() => stage.size) === n1 + 2);

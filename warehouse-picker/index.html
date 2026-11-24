@@ -369,6 +369,16 @@ header.top #title { white-space: nowrap; }
 .aorow { align-items: center; }
 .aomain { flex: 1; min-width: 0; text-align: left; margin-left: 8px; background: none; border: 0; color: inherit; font: inherit; padding: 4px 0; cursor: pointer; }
 .aobadges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.row > .binsearch { flex: 1; min-width: 0; margin: 0; }
+.fchips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 8px 0 2px; }
+.fchip { display: inline-flex; align-items: center; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 14px; }
+.fchip button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; }
+.fshade { position: fixed; inset: 0; z-index: 92; background: rgba(0,0,0,.35); display: flex; align-items: flex-end; justify-content: center; }
+.fsheet { background: var(--card); color: var(--text); width: min(520px, 100%); max-height: 80vh; overflow-y: auto; border-radius: 16px 16px 0 0; padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 700px) { .fshade { align-items: center; } .fsheet { border-radius: 16px; } }
+.fhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 17px; }
+.fcat, .fopt { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); color: inherit; font-size: 16px; padding: 13px 4px; cursor: pointer; }
+.fopt.on { font-weight: 700; }
 .orderacts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
 .orderacts .btn:first-child { grid-column: 1 / -1; padding: 14px; font-size: 17px; }
 .duealert { position: fixed; left: 12px; right: 12px; top: calc(var(--headh, 64px) + 8px); z-index: 95; background: #fff1e0; color: #5a3200; border: 2px solid #f0a24a; border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: 560px; margin: 0 auto; }
@@ -3364,18 +3374,14 @@ function drawAddOrders() {
   const n = ao.chosen.size;
   el.replaceChildren(h("div", { class: "detailbox" },
     h("div", { class: "detailhead" }, h("h2", { style: "flex:1;margin:0" }, TEST_FEATURES ? "Orders" : "Add orders"), TEST_FEATURES ? null : h("button", { class: "btn small", type: "button", onclick: closeAddOrders }, "Back")),
-    h("p", { class: "small muted", style: "margin-top:0" }, shop.orders ? `Open orders in ${shop.status.shop.replace(/\.myshopify\.com$/, "")}${shop.busy ? " (updating…)" : ""}` : shop.busy ? "Getting the orders…" : shop.err ? `Couldn't get the Shopify orders: ${shop.err}. Showing practice orders.` : "Practice orders (no Shopify store connected: Settings → More)"),
-    search,
-    h("div", { class: "binctls" },
-      sel("Sort", "sort", [["created", "Newest first"], ["oldest", "Oldest first"], ["due", "Due first"], ["number", "Order number"], ["delivery", "Delivery date"], ["place", "Area"], ["items", "Most items"]]),
-      sel("Area", "area", [["", "Every area"], ...areas.map(a => [a, a])]),
-      sel("Ordered", "when", [["all", "Any time"], ["today", "Today"], ["day", "Last 24 hours"], ["three", "Last 3 days"], ["week", "Last week"], ["older", "Over 3 days ago"]]),
-      sel("Delivery", "kind", [["all", "Any delivery"], ["local", "Own driver"], ["shipping", "UPS / shipped"]]),
-      sel("Show", "show", [["new", "Not picked or in your list yet"], ["open", "Everything not sent yet"], ["done", "Fulfilled / delivered (last 3 days)"], ["all", "All"]]),
-      sel("Due", "due", [["", "Any time"], ["late", "Late"], ["today", "Due today"], ["later", "Due later"]])),
+    // a note only when it matters: the store couldn't be reached, or these are practice orders
+    !shop.orders && !shop.busy ? h("div", { class: "notice warn", style: "margin:0 0 8px" }, shop.err ? `Couldn't get the store's orders (${shop.err}): showing practice orders.` : "Practice orders: no Shopify store connected (Settings → More).") : null,
+    h("div", { class: "row", style: "gap:8px;align-items:center;flex-wrap:nowrap" }, search,
+      h("button", { class: "btn secondary", type: "button", style: "flex:none", onclick: () => openOrderFilter() }, "Filter & sort")),
+    filterChips(),
     h("div", { class: "row", style: "align-items:center;margin:6px 0" },
       h("label", { class: "checkrow", style: "flex:1" }, h("input", { type: "checkbox", "aria-label": "Select all shown", checked: !!allShown, onchange: e => { list.forEach(o => e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number)); drawAddOrders(); } }),
-        h("span", null, ` ${list.length} order${list.length === 1 ? "" : "s"} shown`)),
+        h("span", null, ` Select all (${list.length})`)),
       n ? h("button", { class: "link small", type: "button", onclick: () => { ao.chosen.clear(); drawAddOrders(); } }, "Clear") : null),
     h("div", { class: "dlist" }, list.slice(0, 300).map(o => {
       const st = orderStage(o), due = dueOf(o);
@@ -3388,6 +3394,45 @@ function drawAddOrders() {
     })),
     list.length > 300 ? h("p", { class: "small muted" }, "Showing the first 300: narrow it down to see the rest.") : null,
     stageBar(n)));
+}
+/* Filter & sort: one button; a panel with each kind of filter, an option for it, Apply. Filters in use show as chips. */
+const AO_DEFAULTS = { sort: "created", area: "", when: "all", kind: "all", due: "", show: "new" };
+function aoCats() {
+  const areas = [...new Set(aoOrders().map(o => o.city).filter(Boolean))].sort(natural);
+  return [
+    ["sort", "Sort by", [["created", "Newest first"], ["oldest", "Oldest first"], ["due", "Due first"], ["number", "Order number"], ["place", "Area"], ["items", "Most items"]]],
+    ["area", "Area", [["", "Every area"], ...areas.map(a => [a, a])]],
+    ["due", "Due", [["", "Any time"], ["late", "Late"], ["today", "Due today"], ["later", "Due later"]]],
+    ["when", "Ordered", [["all", "Any time"], ["today", "Today"], ["day", "Last 24 hours"], ["three", "Last 3 days"], ["week", "Last week"], ["older", "Over 3 days ago"]]],
+    ["kind", "Delivery", [["all", "Any delivery"], ["local", "Own driver"], ["shipping", "UPS / shipped"]]],
+    ["show", "Show", [["new", "Not picked yet"], ["open", "Everything not sent yet"], ["done", "Fulfilled / delivered"], ["all", "All"]]],
+  ];
+}
+const optLabel = (cat, v) => ((aoCats().find(c => c[0] === cat) || [, , []])[2].find(o => o[0] === v) || [, v])[1];
+function filterChips() {
+  const on = Object.keys(AO_DEFAULTS).filter(k => ao[k] !== AO_DEFAULTS[k]);
+  if (!on.length) return null;
+  return h("div", { class: "fchips" }, on.map(k => h("span", { class: "fchip" }, optLabel(k, ao[k]),
+      h("button", { type: "button", "aria-label": `Remove ${optLabel(k, ao[k])}`, onclick: () => { ao[k] = AO_DEFAULTS[k]; drawAddOrders(); } }, "✕"))),
+    h("button", { class: "link small", type: "button", onclick: () => { Object.assign(ao, AO_DEFAULTS); drawAddOrders(); } }, "Clear"));
+}
+function openOrderFilter() {
+  const draft = Object.fromEntries(Object.keys(AO_DEFAULTS).map(k => [k, ao[k]]));
+  let cat = null;
+  const shade = h("div", { class: "fshade", onclick: e => { if (e.target === shade) shade.remove(); } });
+  const draw = () => {
+    const cats = aoCats(), box = h("div", { class: "fsheet", role: "dialog", "aria-label": "Filter and sort" });
+    if (!cat) box.append(h("div", { class: "fhead" }, h("b", null, "Filter & sort"), h("button", { class: "link", type: "button", onclick: () => shade.remove() }, "Cancel")),
+      ...cats.map(([k, label]) => h("button", { class: "fcat", type: "button", onclick: () => { cat = k; draw(); } }, h("span", null, label), h("span", { class: "muted" }, optLabel(k, draft[k]) + " ›"))),
+      h("div", { class: "row", style: "gap:8px;margin-top:12px" },
+        h("button", { class: "btn secondary", type: "button", style: "flex:1", onclick: () => { Object.assign(draft, AO_DEFAULTS); draw(); } }, "Clear all"),
+        h("button", { class: "btn", type: "button", style: "flex:2", onclick: () => { Object.assign(ao, draft); shade.remove(); drawAddOrders(); } }, "Apply")));
+    else { const [k, label, opts] = cats.find(c => c[0] === cat);
+      box.append(h("div", { class: "fhead" }, h("button", { class: "link", type: "button", onclick: () => { cat = null; draw(); } }, "‹ Back"), h("b", null, label), h("span")),
+        ...opts.map(([v, t]) => h("button", { class: "fopt" + (draft[k] === v ? " on" : ""), type: "button", onclick: () => { draft[k] = v; cat = null; draw(); } }, t, draft[k] === v ? h("span", null, "✓") : null))); }
+    shade.replaceChildren(box);
+  };
+  draw(); document.body.append(shade);
 }
 /* Your list: orders gathered from the store (Add to list, as many times as you like: one area, then another...),
    then Pick & Print them all: onto the pick list, and an order sheet each, in sorting-number order. */
