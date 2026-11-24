@@ -239,18 +239,26 @@ async function route(req, res) {
   if (path === "/products") {
     const who = await caller(req, false); await dailyGuard("shopifyProducts");
     const key = await storeKey(who.company);
-    let out = [], after = null;
+    // amounts need the inventory permission: without it the products still come, without amounts (and it says so)
+    let out = [], after = null, amounts = "on_hand", amountsErr = "";
+    const fields = { on_hand: `inventoryQuantity inventoryItem { id tracked inventoryLevels(first: 10) { nodes { quantities(names: ["on_hand"]) { quantity } } } }`,
+      total: "inventoryQuantity inventoryItem { id }", none: "inventoryItem { id }" };
     for (let page = 0; page < 20; page++) {
-      const d = await graphql(key, `query($after: String) { products(first: 100, after: $after, query: "status:active OR status:draft") { pageInfo { hasNextPage endCursor }
-        nodes { id title vendor status options { name } variants(first: 100) { nodes { id title sku barcode price inventoryQuantity selectedOptions { name value }
-          inventoryItem { id tracked inventoryLevels(first: 10) { nodes { quantities(names: ["on_hand"]) { quantity } } } } } } } } }`, { after });
+      const q = () => `query($after: String) { products(first: 100, after: $after, query: "status:active OR status:draft") { pageInfo { hasNextPage endCursor }
+        nodes { id title vendor status options { name } variants(first: 100) { nodes { id title sku barcode price selectedOptions { name value } ${fields[amounts]} } } } } }`;
+      let d = await graphql(key, q(), { after });
+      while (d.errors && amounts !== "none") {
+        if (!amountsErr) { amountsErr = d.errors.map(e => e.message).join("; ").slice(0, 300); console.error("products with amounts refused:", JSON.stringify(d.errors).slice(0, 800)); }
+        amounts = amounts === "on_hand" ? "total" : "none";
+        d = await graphql(key, q(), { after });
+      }
       if (d.errors) throw new Problem(502, "Shopify: " + d.errors[0].message);
       out = out.concat(d.data.products.nodes.map(p => ({ id: p.id, title: p.title, vendor: p.vendor || "", status: p.status, optionNames: (p.options || []).map(o => o.name),
         variants: p.variants.nodes.map(v => ({ id: v.id, title: v.title, sku: v.sku || "", barcode: v.barcode || "", price: v.price, stock: onHand(v), item: v.inventoryItem && v.inventoryItem.id,
           options: (v.selectedOptions || []).filter(o => !(o.name === "Title" && o.value === "Default Title")) })) })));
       if (!d.data.products.pageInfo.hasNextPage) break; after = d.data.products.pageInfo.endCursor;
     }
-    return res.json({ products: out, at: Date.now() });
+    return res.json({ products: out, at: Date.now(), amounts, amountsErr: amounts === "on_hand" ? "" : amountsErr });
   }
   // changes made in Pick & Sort, written to the store: a product's name / company, a variant's barcode / SKU, how many
   if (path === "/edit") {

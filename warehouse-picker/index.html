@@ -2395,6 +2395,7 @@ async function openBarcodeScanner() {
   try { beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); beepCtx.resume(); } catch (e) {} // sound has to start from a tap on iPhone
   // a computer: the barcode scanner, not a camera (it types into the box)
   if (TEST_FEATURES && !phoneLike()) { scanByScanner(scan.el, msg, typed, "Scan each item with the barcode scanner."); return; }
+  if (IN_SHOPIFY) { scanInShopify(scan.el, msg, code => { typed.value = code; okBtn.click(); }); return; }
   let read;
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
@@ -2760,6 +2761,34 @@ function scanByScanner(el, msg, typed, text) {
   typed.removeAttribute("inputmode");
   setTimeout(() => typed.focus(), 30);
 }
+/** Inside the Shopify app (phone): pages shown inside Shopify may not use the camera, so Shopify's own scanner is used
+    (App Bridge). It opens again after each scan, until it's closed. Without it: Pick & Sort opens on its own to scan. */
+const shopifyScanner = () => !!(window.shopify && window.shopify.scanner && typeof window.shopify.scanner.capture === "function");
+function scanInShopify(el, msg, feed, stopped) {
+  if (!el) return;
+  el.querySelectorAll(".scanview, .packcam video, .packcam .scanframe").forEach(x => x.remove());
+  const old = el.querySelector(".shopscan"); if (old) old.remove();
+  if (!shopifyScanner()) {
+    msg.textContent = "The camera can't open inside the Shopify app. Open Pick & Sort on its own to scan with the camera (or type the codes).";
+    msg.after(h("div", { class: "shopscan" }, h("button", { class: "btn", type: "button", style: "width:100%;margin:8px 0", onclick: () => window.open(location.origin + "/", "_blank") }, "Open Pick & Sort to scan")));
+    return;
+  }
+  let running = false;
+  const loop = async () => {
+    if (running) return; running = true; btn.disabled = true;
+    while (document.body.contains(el) && !(stopped && stopped())) {
+      let r; try { r = await window.shopify.scanner.capture(); } catch (e) { break; } // closed
+      const code = r && (r.data || r.code || r.value || (typeof r === "string" ? r : ""));
+      if (!code) break;
+      feed(String(code).trim());
+    }
+    running = false; btn.disabled = false;
+  };
+  const btn = h("button", { class: "btn", type: "button", style: "width:100%;margin:8px 0", onclick: loop }, "Scan");
+  msg.textContent = "Scans with Shopify's scanner. It opens again after each scan; close it to stop, then tap Scan to carry on.";
+  msg.after(h("div", { class: "shopscan" }, btn));
+  loop();
+}
 function scannedAnywhere(code) {
   const box = document.querySelector('.scanner input[aria-label="Barcode or SKU"]');
   if (scan.el && box) { box.value = code; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return true; }
@@ -2825,6 +2854,7 @@ async function startPackCamera() {
   const video = $("packVideo"), msg = $("packCamMsg"); if (!video) return;
   let read, stream, timer, stopped = false;
   pk.stop = () => { stopped = true; clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); pk && (pk.stop = null); };
+  if (IN_SHOPIFY) { const box = $("packScreen"); scanInShopify(box, msg || h("p"), code => packScan(code), () => stopped || !pk); return; }
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
     read = await barcodeReader();
@@ -4101,11 +4131,11 @@ function fromShopify(list) {
 let shopInv = { busy: false, err: "" };
 async function loadShopInventory(force) {
   if (!TEST_FEATURES || !acct || !acct.company || shopInv.busy) return;
-  if (!force && bins && bins.shopifyAt && Date.now() - bins.shopifyAt < 120e3) return;
-  shopInv.busy = true; shopInv.err = ""; refreshBins();
+  if (!force && Date.now() - (shopInv.tried || 0) < 120e3) return; // at most every 2 minutes by itself (tried, worked or not)
+  shopInv.busy = true; shopInv.tried = Date.now(); shopInv.err = ""; refreshBins();
   try {
     if (!shop.status) shop.status = await shopifyApi("status");
-    if (shop.status.connected) fromShopify((await shopifyApi("products")).products);
+    if (shop.status.connected) { const d = await shopifyApi("products"); fromShopify(d.products); shopInv.amountsErr = d.amountsErr || ""; }
   } catch (e) { shopInv.err = e.message; }
   shopInv.busy = false; refreshBins();
 }
@@ -4617,6 +4647,7 @@ async function binScan(onCode, opts = {}) {
   document.body.append(scan.el); document.body.style.overflow = "hidden";
   try { beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); beepCtx.resume(); } catch (e) {}
   if (TEST_FEATURES && !phoneLike()) { scanByScanner(scan.el, msg, typed, "Scan with the barcode scanner (or type the code and press Enter)."); return; }
+  if (IN_SHOPIFY) { scanInShopify(scan.el, msg, code => { typed.value = code; ok.click(); }); return; }
   let read;
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera");
@@ -4715,14 +4746,16 @@ function renderInventoryList(v) {
     .filter(r => B.showi !== "un" || r.un).sort((a, b) => natural(a.p.title, b.p.title));
   const search = h("input", { type: "search", class: "binsearch", placeholder: "Search: name, company, barcode, SKU", value: B.qi || "", "aria-label": "Search the inventory",
     oninput: e => { B.qi = e.target.value; clearTimeout(search.t); search.t = setTimeout(() => { renderSettings(); const s = document.querySelector('input[aria-label="Search the inventory"]'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }, 250); } });
-  if (acct && acct.company && !shopInv.busy && (!shopInv.checked || (shopConnected() && Date.now() - (bins.shopifyAt || 0) > 120e3))) { shopInv.checked = true; setTimeout(() => loadShopInventory(false), 0); }
+  if (acct && acct.company && !shopInv.busy && Date.now() - (shopInv.tried || 0) > 120e3) setTimeout(() => loadShopInventory(false), 0);
   const fromShop = bins.products.some(p => p.sid);
   const shopLineInv = !acct || !acct.company ? null : h("div", { class: "notice " + (shopInv.err ? "warn" : fromShop ? "good" : ""), style: "margin:6px 0 10px" },
     shopInv.busy ? "Getting the inventory from Shopify…"
       : shopInv.err ? `Couldn't get the inventory from Shopify: ${shopInv.err}`
       : shopConnected() ? `From Shopify: ${shop.status.shop.replace(/\.myshopify\.com$/, "")} · ${plural(bins.products.filter(p => p.sid).length, "item")}${bins.shopifyAt ? " · " + new Date(bins.shopifyAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : ""}. Changes here go to the store${binsSettings().inventoryEdits ? "" : " (turn on Allow inventory changes to edit them)"}.`
       : "No Shopify store connected: this inventory is only on this device.",
-    shopConnected() && !shopInv.busy ? h("button", { class: "link small", type: "button", style: "margin-left:6px", onclick: () => loadShopInventory(true) }, "Update") : null);
+    !shopInv.busy && (shopConnected() || shopInv.err) ? h("button", { class: "link small", type: "button", style: "margin-left:6px", onclick: () => loadShopInventory(true) }, shopInv.err ? "Try again" : "Update") : null,
+    !shopInv.busy && !shopInv.err && shopInv.amountsErr ? h("div", { class: "small", style: "margin-top:6px;color:var(--text)" },
+      `Shopify isn't sharing how many of each yet, so amounts show 0. Add read_inventory, write_inventory and read_locations to the app's scopes in the Dev Dashboard, release, and approve it in the store. Shopify says: ${shopInv.amountsErr}`) : null);
   v.replaceChildren(h("section", { class: "card" }, backRow("Bins", "bins"),
     h("h2", null, "Inventory"), shopLineInv,
     h("div", { class: "binbig" },

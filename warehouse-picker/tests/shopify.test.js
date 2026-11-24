@@ -44,7 +44,8 @@ app.post("/fake/:shop/admin/api/:v/graphql.json", (req, res) => {
   if (/partnerDevelopment/.test(req.body.query)) return res.json({ data: { shop: { currencyCode: "USD", plan: { partnerDevelopment: fake.dev !== false } },
     products: { nodes: [{ title: "Fleece blanket", variants: { nodes: [{ id: "gid://shopify/ProductVariant/1", title: "Blue" }, { id: "gid://shopify/ProductVariant/2", title: "Gray" }] } }] } } });
   // the store's inventory: products, and the changes Pick & Sort sends back
-  if (/inventoryQuantity selectedOptions/.test(req.body.query)) return res.json({ data: { products: { pageInfo: { hasNextPage: false }, nodes: [
+  if (/products\(first: 100/.test(req.body.query) && fake.productsFail) { fake.productCalls = (fake.productCalls || 0) + 1; return res.status(500).end(); }
+  if (/products\(first: 100/.test(req.body.query)) return res.json({ data: { products: { pageInfo: { hasNextPage: false }, nodes: [
     { id: "gid://shopify/Product/9", title: "Fleece blanket", vendor: "Cozy Co", status: "ACTIVE", options: [{ name: "Color" }, { name: "Size" }], variants: { nodes: [
       { id: "gid://shopify/ProductVariant/91", title: "Blue / One", sku: "FB-BLU", barcode: "5012345000015", inventoryQuantity: fake.qty91 ?? 4, selectedOptions: [{ name: "Color", value: "Blue" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/191" } },
       { id: "gid://shopify/ProductVariant/92", title: "Gray / One", sku: "FB-GRY", barcode: "", inventoryQuantity: 0, selectedOptions: [{ name: "Color", value: "Gray" }, { name: "Size", value: "One" }], inventoryItem: { id: "gid://shopify/InventoryItem/192" } }] } }] } } });
@@ -185,6 +186,10 @@ const server = app.listen(8766);
   await e.evaluate(() => { bins = practiceBins(); bins.settings = { inventoryEdits: true }; saveBins(); go("binsInventory"); });
   await e.waitForFunction(() => bins.shopifyAt && !shopInv.busy, null, { timeout: 10000 }).catch(() => {});
   const invRows = await e.$$eval("#settingsView .invrow", r => r.map(x => x.innerText.replace(/\s+/g, " ")));
+  // Shopify failing: tried once and the reason shown, not tried over and over (the screen used to blink)
+  fake.productsFail = true; await e.evaluate(() => { shopInv.tried = 0; renderSettings(); }); await e.waitForTimeout(3000);
+  ok("inventory failing: tried once, says why, with Try again (no blinking)", fake.productCalls === 1 && /Couldn't get the inventory from Shopify[\s\S]*Try again/.test(await e.innerText("#settingsView")), String(fake.productCalls));
+  fake.productsFail = false; await e.click('#settingsView button:text-is("Try again")'); await e.waitForFunction(() => !shopInv.busy && bins.shopifyAt, null, { timeout: 8000 }).catch(() => {});
   ok("Inventory: the store's products, with how many (the practice items gone)", invRows.length === 1 && /Fleece blanket.*Cozy Co.*2 variants.*4/.test(invRows[0]) && /From Shopify: practice-store · 1 item/.test(await e.innerText("#settingsView")), invRows.join(" // "));
   const vs = await e.evaluate(() => bins.products[0].variants.map(v => `${optText(v)}|${v.sku}|${v.barcode}|${v.stock}`).join(", "));
   ok("…each size with its colour, size, SKU, barcode and how many", vs === "Blue / One|FB-BLU|5012345000015|4, Gray / One|FB-GRY||0", vs);

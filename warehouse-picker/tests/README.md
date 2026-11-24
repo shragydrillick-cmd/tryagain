@@ -127,7 +127,7 @@ its bin as soon as it's set on any phone.
 `scan-anywhere.test.js` (test address): a barcode scanner on a computer works on any page: an order's barcode opens it
 for packing (confirmed) and items count for it; an item on the list starts separating (the scanner's box, no camera)
 and the next scans go there; an item in Bins opens its page, a bin sticker its bin; typing slowly or into a search box
-does nothing; a phone keeps the camera.
+does nothing; a phone keeps the camera; inside the Shopify app Shopify's own scanner is used (separating, packing).
 
 `statuses.test.js` (test address, Use bins for orders on): an order list made of items in Bins (matched by barcode or
 SKU): each item says how many are in its bin now, to pick, picked, sorted, packed; the bin's page shows how many are

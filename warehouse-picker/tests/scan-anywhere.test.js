@@ -50,6 +50,20 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await ph.goto(BASE); await ph.evaluate(() => { localStorage.clear(); localStorage.setItem('pick-and-sort-test-features', '1'); }); await ph.reload();
   await ph.evaluate(() => document.getElementById('exampleBtn').click()); await ph.waitForTimeout(400); await ph.evaluate(() => document.getElementById('scanUnpackBtn').click()); await ph.waitForTimeout(300);
   ok('a phone: separating uses the camera', !!(await ph.$('.scanner .scanview')));
+  // inside the Shopify app on a phone: Shopify's own scanner (a pretend one that reads the codes it's given, then is closed)
+  const sc = await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  await sc.addInitScript(() => { window.__codes = []; window.shopify = { idToken: async () => 'x', scanner: { capture: () => new Promise((ok, no) => setTimeout(() => window.__codes.length ? ok({ data: window.__codes.shift() }) : no(new Error('closed')), 80)) } }; });
+  const sp = await sc.newPage(); sp.on('pageerror', e => errs.push('in shopify: ' + e.message));
+  await sp.goto(BASE); await sp.evaluate(() => { localStorage.clear(); localStorage.setItem('pick-and-sort-test-features', '1'); localStorage.setItem('pick-and-sort-test-noauth', '1'); }); await sp.reload();
+  await sp.evaluate(() => document.getElementById('exampleBtn').click()); await sp.waitForTimeout(400);
+  const two = await sp.evaluate(() => { pickedDone = new Set(plan.picks.map(k => k.step)); const us = plan.unpack.filter(u => u.barcode && u.qty === 1).slice(0, 2); window.__codes = us.map(u => u.barcode); return us.map(u => u.step); });
+  await sp.evaluate(() => document.getElementById('scanUnpackBtn').click()); await sp.waitForTimeout(1200);
+  ok("inside the Shopify app: separating uses Shopify's scanner (no camera), each scan goes onto its order", !(await sp.$('.scanner .scanview')) && await sp.evaluate(s => s.every(x => unpackDone.has(x) || (placed.get(x) || 0) > 0), two));
+  ok('…and when the scanner is closed, a Scan button carries on', await sp.isVisible('.scanner .shopscan button:text-is("Scan")'));
+  await sp.click('.scanner button:has-text("Done")');
+  const po = await sp.evaluate(() => { const o = practiceStore().orders[2]; window.__codes = [o.number, o.items[0].barcode]; startPack(findPackOrder(o.number), false); return o.number; });
+  await sp.waitForTimeout(1000);
+  ok("inside the Shopify app: packing uses Shopify's scanner (the sheet, then an item)", await sp.evaluate(n => pk && pk.o.number === n && pk.paper && (pk.got.get(0) || 0) === 1, po) && !(await sp.$('#packVideo')));
   ok('no page errors', !errs.length, errs.join(' / '));
   console.log(bad ? `${bad} FAILED` : 'all ok'); await b.close(); process.exit(bad ? 1 : 0);
 })();
