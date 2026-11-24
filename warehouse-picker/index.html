@@ -3006,6 +3006,10 @@ function drawPack() {
 async function packAction(what) {
   if (!pk) return;
   const o = pk.o; pk.menu = false;
+  const ship = o.delivery.type === "shipping";
+  // a UPS / shipped order with no print station: its Shopify page opens here, to buy the label (opened right away,
+  // on the tap, so the browser doesn't block it)
+  const shopHere = what !== "print" && ship && !station.id && o.shopifyUrl ? window.open(o.shopifyUrl, "_blank") : null;
   if (what !== "print") {
     const t = Date.now(), tag = `Packed ${new Date(t).toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" })}`;
     const lo = plan && plan.orders.find(x => String(x.raw) === o.number);
@@ -3024,7 +3028,11 @@ async function packAction(what) {
   if (what !== "print" && o.delivery.type === "shipping" && station.id) {
     if (await sendToStation("shopify", full)) sentTo = stationOnline() ? `${station.doc.name} is opening it in Shopify for the label.` : `${(station.doc && station.doc.name) || "The print station"} is offline: it opens there in Shopify as soon as it's back.`;
   }
-  if (what !== "pack" && !(o.delivery.type === "shipping" && what === "pack")) {
+  if (what !== "print" && ship && !station.id) // no print station: here
+    sentTo = !o.shopifyUrl ? "This is a practice order, not from Shopify: a real UPS order opens in Shopify here to buy its label."
+      : shopHere ? "Opened in Shopify (a new tab): buy its label there with Create shipping label."
+      : "Allow pop-ups for Pick & Sort so Shopify opens by itself, or open the order and tap Open in Shopify.";
+  if (what !== "pack" && !ship) { // the driver label is for our own driver; a UPS label comes from Shopify
     if (stationOnline() && await sendToStation("label", full)) sentTo = `Label sent to ${station.doc.name}.`;
     else {
       if (station.id) sentTo = `${(station.doc && station.doc.name) || "The print station"} is offline: printing here.`;
@@ -3037,6 +3045,7 @@ async function packAction(what) {
   if (el && what !== "print") el.querySelector(".packactions").append(h("button", { class: "btn secondary", type: "button", style: "width:100%;margin-top:8px", onclick: closePack }, "Back to Packing"));
   // sent to the print station: the phone goes straight back to the list of orders to pack
   if (sentTo && /sent to|opening it|opens there/.test(sentTo) && what !== "print") setTimeout(() => { if (pk && pk.o === o) { closePack(); toast(sentTo); } }, 1500);
+  if (ship && what === "print") toast("UPS orders get their label in Shopify: open the order and tap Open in Shopify.");
 }
 
 /* Find an order: type to filter, sort, tap to pack */

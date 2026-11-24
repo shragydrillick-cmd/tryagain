@@ -137,6 +137,12 @@ const server = app.listen(8766);
   await a.waitForTimeout(1500);
   ok("Pack: the Packed tag went on the order in Shopify", fake.tags.length === 1 && fake.tags[0].id === "gid://shopify/Order/5501" && /^Packed /.test(fake.tags[0].tags[0]), JSON.stringify(fake.tags));
   ok("…and the order shows as packed here", await a.evaluate(() => !!findPackOrder("1001").packedAt));
+  // a UPS order with no print station: its Shopify page opens here (to buy the label); no driver label
+  await a.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(u || "(blank)"); return { closed: false, close() {}, document: { title: "", body: {} }, location: {} }; }; });
+  await a.evaluate(async () => { startPack(findPackOrder("1002"), true); pk.o.items.forEach((it, i) => pk.got.set(i, it.qty)); drawPack(); await packAction("both"); });
+  const opened = await a.evaluate(() => window.__opened), packMsg = await a.$eval("#packScreen .packmsg", x => x.innerText).catch(() => "");
+  ok("UPS order, no print station: its Shopify page opens here, no driver label printed", opened.length === 1 && /admin\.shopify\.com\/store\/practice-store\/orders\/5502/.test(opened[0]) && /Opened in Shopify/.test(packMsg), opened.join(",") + " / " + packMsg);
+  await a.evaluate(() => closePack());
   // the worker's device sees the same store
   const ord = await (await fetch(SRV + "/shopify/orders", { headers: { Authorization: "Bearer " + wtok } })).json();
   ok("worker: gets the store's orders, with names (from the delivery address) and areas", ord.orders.length === 2 && ord.orders[0].customer === "Rivka Klein" && ord.orders[0].city === "Brooklyn");
