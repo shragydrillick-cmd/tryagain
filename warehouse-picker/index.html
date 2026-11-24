@@ -226,6 +226,14 @@ img.qr.big { width: min(420px, 100%); } /* big squares: easy to read off a scree
 .scanresult .lastnote { color: #5fd08f; font-weight: 700; margin-top: 4px; }
 .scanprog { font-size: 14px; text-align: center; color: #c9d1db; margin-bottom: 6px; }
 .scanrow { flex-wrap: nowrap; } .scanrow input { flex: 1; min-width: 0; }
+.scanner.byscanner { background: var(--bg); color: var(--text); }
+.scanner.byscanner .scanhead .btn { color: var(--accent); border-color: var(--accent); }
+.scanner.byscanner .scanmsg { order: 1; text-align: left; margin: 4px 0 8px; }
+.scanner.byscanner .scanrow { order: 2; margin-bottom: 10px; }
+.scanner.byscanner .scanrow input { font-size: 20px; padding: 14px; }
+.scanner.byscanner .scanresult { order: 3; flex: 0 1 auto; min-height: 120px; }
+.scanner.byscanner .scanprog { order: 4; color: var(--muted); }
+.scanner.byscanner > :not(.scanhead):not(.scanmsg):not(.scanrow):not(.scanresult):not(.scanprog) { order: 5; }
 .pickitems { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-height: 30vh; overflow: auto; }
 .scanmain { display: flex; gap: 14px; align-items: center; }
 .scanverdict { font-size: 18px; font-weight: 800; }
@@ -2934,7 +2942,10 @@ async function startPackCamera() {
     if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
     video.srcObject = stream; await video.play();
     if (msg) msg.textContent = "";
-  } catch (e) { if (msg) msg.textContent = "The camera can't be used here: type the codes below, or use a scanner."; return; }
+  } catch (e) {
+    if (pk) { pk.cam = false; const c = document.querySelector("#packScreen .packcam"); if (c) c.remove(); pk.msg = { kind: "ok", text: "No camera here: scan with the barcode scanner, or type the code." }; drawPack(); }
+    return;
+  }
   const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
   let last = "", lastSeen = 0;
   const tick = async () => {
