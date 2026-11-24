@@ -207,12 +207,12 @@ async function route(req, res) {
     return res.json(t.exists ? { connected: true, shop: t.data().shop, at: t.data().at, scope: t.data().scope || "", need: SCOPES } : { connected: false, need: SCOPES });
   }
   if (path === "/orders") {
-    const who = await caller(req, false); await dailyGuard("shopifyOrders");
+    const who = await caller(req, false); await dailyGuard("shopifyOrders", 20000);
     const key = await storeKey(who.company);
     return res.json({ shop: key.shop, at: Date.now(), ...(await openOrders(key)) });
   }
   if (path === "/packed") {
-    const who = await caller(req, false); await dailyGuard("shopifyPacked");
+    const who = await caller(req, false); await dailyGuard("shopifyPacked", 5000);
     const key = await storeKey(who.company);
     const id = String(body.id || ""), tag = String(body.tag || "Packed").slice(0, 60);
     if (!/^gid:\/\/shopify\/Order\/\d+$/.test(id)) throw new Problem(400, "Which order?");
@@ -253,7 +253,7 @@ async function route(req, res) {
   // stays well within what Shopify allows; grouped back into products. Amounts are on hand (needs the inventory permission:
   // without it the products still come, without amounts, and it says so).
   if (path === "/products") {
-    const who = await caller(req, false); await dailyGuard("shopifyProducts");
+    const who = await caller(req, false); await dailyGuard("shopifyProducts", 3000);
     const key = await storeKey(who.company);
     let after = null, amounts = "on_hand", amountsErr = "";
     const fields = { on_hand: `inventoryQuantity inventoryItem { id inventoryLevels(first: 3) { nodes { quantities(names: ["on_hand"]) { quantity } } } }`,
@@ -281,7 +281,7 @@ async function route(req, res) {
   }
   // changes made in Pick & Sort, written to the store: a product's name / company, a variant's barcode / SKU, how many
   if (path === "/edit") {
-    const who = await caller(req, false); await dailyGuard("shopifyEdit");
+    const who = await caller(req, false); await dailyGuard("shopifyEdit", 5000);
     const key = await storeKey(who.company), e = body || {}, gid = (x, kind) => new RegExp(`^gid://shopify/${kind}/\\d+$`).test(String(x || ""));
     const fail = d => { const err = d.errors ? d.errors[0].message : Object.values(d.data || {}).map(x => x && x.userErrors || []).flat().map(x => x.message).join("; "); if (err) throw new Problem(502, "Shopify: " + err); };
     if (e.kind === "product") {
@@ -314,7 +314,7 @@ async function route(req, res) {
   // a whole product as it is in Pick & Sort (new, or sizes / colours added, removed or renamed): Shopify is made the same.
   // Sizes that aren't listed any more are removed; new ones get the price of the others; a new product starts as a draft.
   if (path === "/productset") {
-    const who = await caller(req, false); await dailyGuard("shopifyEdit");
+    const who = await caller(req, false); await dailyGuard("shopifyEdit", 5000);
     const key = await storeKey(who.company), q = body.product || {};
     if (q.id && !/^gid:\/\/shopify\/Product\/\d+$/.test(q.id)) throw new Problem(400, "Which product?");
     const vs = (q.variants || []).slice(0, 100);
@@ -339,7 +339,7 @@ async function route(req, res) {
     return res.json({ id: pr.id, variants: pr.variants.nodes.map(v => ({ id: v.id, item: v.inventoryItem && v.inventoryItem.id, options: v.selectedOptions })) });
   }
   if (path === "/productdelete") {
-    const who = await caller(req, false); await dailyGuard("shopifyEdit");
+    const who = await caller(req, false); await dailyGuard("shopifyEdit", 5000);
     const key = await storeKey(who.company);
     if (!/^gid:\/\/shopify\/Product\/\d+$/.test(String(body.id || ""))) throw new Problem(400, "Which product?");
     const d = await graphql(key, `mutation($id: ID!) { productDelete(input: { id: $id }) { deletedProductId userErrors { message } } }`, { id: body.id });

@@ -3426,7 +3426,7 @@ const aoOrders = () => (shop.orders || (ordersLoading() ? [] : TEST_FEATURES ? p
 const onList = n => !!(plan && plan.orders.some(x => String(x.raw) === String(n)));
 function openAddOrders(mode = "create") {
   ao = { mode, q: "", sort: "created", kind: "all", area: "", when: "all", show: mode === "browse" ? "open" : "new", due: "", chosen: new Set() };
-  if (TEST_FEATURES) refreshShopify(true);
+  if (TEST_FEATURES) refreshShopify(false); // at most once a minute by itself
   drawAddOrders();
 }
 function closeAddOrders() { ao = null; const el = $("addOrders"); if (el) el.remove(); document.body.style.overflow = ""; }
@@ -3666,7 +3666,15 @@ function showDueAlert(text, orders) {
       h("button", { class: "btn small", type: "button", onclick: () => { $("dueAlert").remove(); closeOverlays(); showPage("orders"); if (ao) { ao.when = "all"; ao.show = "all"; drawAddOrders(); } } }, "Show"),
       h("button", { class: "btn small secondary", type: "button", onclick: () => $("dueAlert").remove() }, "OK"))));
 }
-if (TEST_FEATURES) setInterval(() => { try { refreshShopify(false); checkDeadlines(); } catch (e) {} }, 30e3);
+// the store's orders: fetched again only while they're on screen (Orders, Create list, Packing), in the window being
+// looked at, at most every 2 minutes (and when Update is tapped). The reminder works from what's already here.
+if (TEST_FEATURES) setInterval(() => {
+  try {
+    const showing = document.visibilityState === "visible" && (ao || $("packPanel") || $("packFind"));
+    if (showing && Date.now() - shop.at > 120e3) refreshShopify(false);
+    checkDeadlines();
+  } catch (e) {}
+}, 30e3);
 /** Settings → More → Deadlines. */
 function deadlinesSection() {
   if (!settings.deadlines) settings.deadlines = [{ ...DEFAULT_DEADLINE }];
