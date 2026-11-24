@@ -62,7 +62,8 @@ app.post("/fake/:shop/admin/api/:v/graphql.json", (req, res) => {
   if (/orderCreate/.test(req.body.query)) { fake.created = (fake.created || []).concat(req.body.variables.order); return res.json({ data: { orderCreate: { order: { name: "#" + (1100 + fake.created.length) }, userErrors: [] } } }); }
   // like the real store without read_customers: the customer record is refused (the name on the delivery address is fine)
   if (/customer \{/.test(req.body.query)) return res.json({ errors: [{ message: "Access denied for customer field. Required access: `read_customers` access scope." }] });
-  res.json({ data: { orders: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: ORDERS } } });
+  fake.lastQ = req.body.variables && req.body.variables.q;
+  res.json({ data: { orders: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: ORDERS.concat(fake.withDone ? [{ id: "gid://shopify/Order/5503", name: "#1003", createdAt: "2026-11-19T15:00:00Z", tags: [], displayFulfillmentStatus: "FULFILLED", fulfillments: [{ displayStatus: "DELIVERED" }], shippingAddress: { name: "Leah Stern", address1: "9 Lee Ave", city: "Brooklyn", zip: "11211" }, shippingLine: { title: "Local Delivery" }, lineItems: { nodes: [{ title: "Notebook", variantTitle: "", quantity: 1, currentQuantity: 1, unfulfilledQuantity: 0, sku: "NB-A5", variant: { barcode: "5012345000039" } }] } }] : []) } } });
 });
 app.all(/^\/shopify(\/.*)?$/, (req, res) => handle(req, res));
 const server = app.listen(8766);
@@ -141,7 +142,7 @@ const server = app.listen(8766);
   ok("Add orders: the store's orders show by themselves once they arrive", (await a.$$("#addOrders .aorow")).length === 2 && !/Getting the orders/.test(await a.innerText("#addOrders")));
   await a.selectOption('#addOrders select[aria-label="Area"]', "Brooklyn");
   const rows = await a.$$eval("#addOrders .aorow", r => r.map(x => x.innerText.replace(/\s+/g, " ")));
-  ok("filtered by area: only the Brooklyn order (number, where, when, status)", rows.length === 1 && /#1001 · Brooklyn · .*(Packed|New)/.test(rows[0]) && !/Fleece blanket/.test(rows[0]), rows.join(" // "));
+  ok("filtered by area: only the Brooklyn order (number, where, when, status)", rows.length === 1 && /#1001 · Brooklyn · .*(Packed|Unfulfilled)/.test(rows[0]) && !/Fleece blanket/.test(rows[0]), rows.join(" // "));
   await a.selectOption('#addOrders select[aria-label="Area"]', ""); await a.selectOption('#addOrders select[aria-label="Sort"]', "oldest");
   ok("sorted oldest first", /#1001/.test(await a.$eval("#addOrders .aorow", x => x.innerText)));
   await a.check('#addOrders input[aria-label="Select all shown"]');
@@ -180,6 +181,17 @@ const server = app.listen(8766);
   fake.dev = false;
   const real = await fetch(SRV + "/shopify/testorders", { method: "POST", headers: { Authorization: "Bearer " + await e.evaluate(() => fb.auth.currentUser.getIdToken()), "Content-Type": "application/json" }, body: "{}" });
   ok("…and never in a real store", real.status === 403 && (fake.created || []).length === 5);
+  // finished orders: Fulfilled / Delivered (from the last 3 days), not among the ones to do
+  fake.withDone = true; await e.waitForFunction(() => !shop.busy, null, { timeout: 8000 }).catch(() => {}); await e.evaluate(async () => { shop.at = 0; await refreshShopify(true); });
+  await e.waitForFunction(() => shop.orders && shop.orders.some(o => o.number === "1003"), null, { timeout: 8000 }).catch(() => {});
+  const doneSt = await e.evaluate(() => [orderStage({ number: "1003" }).text, ao ? 1 : 0].join("|"));
+  await e.evaluate(() => { closeAddOrders(); showPage("orders"); });
+  const shownNew = await e.evaluate(() => aoShown().map(o => o.number));
+  await e.evaluate(() => { ao.show = "done"; drawAddOrders(); });
+  const shownDone = await e.evaluate(() => aoShown().map(o => o.number));
+  ok("a delivered order: status Delivered; not among the ones to do; under Fulfilled / delivered", /^Delivered/.test(doneSt) && !shownNew.includes("1003") && shownDone.join() === "1003", `${doneSt} / ${shownNew} / ${shownDone}`);
+  ok("…the store is asked for what's still to do and what finished in the last 3 days", /fulfillment_status:unfulfilled/.test(fake.lastQ || "") && /updated_at:>/.test(fake.lastQ || ""), fake.lastQ);
+  fake.withDone = false; await e.evaluate(() => { ao.show = "new"; drawAddOrders(); if (view !== "settings") document.getElementById("navBtn").click(); go("more"); });
   const wt = await fetch(SRV + "/shopify/testorders", { method: "POST", headers: { Authorization: "Bearer " + wtok2, "Content-Type": "application/json" }, body: "{}" });
   ok("…and not by a worker", wt.status === 403);
   // Bins → Inventory: the store's products come in (the practice items go); changes go back to the store

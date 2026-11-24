@@ -128,7 +128,7 @@ its bin as soon as it's set on any phone.
 `pages.test.js` (test address): one page per job. Orders (just the orders: number, where, when, status, due),
 Pick (Step by step; the list and PDF only when asked; step by step's List button), Sort (into the scanner), no Packing
 button at the top; statuses New → In your list → On pick list → Started picking → Picked → Started sorting → Ready to
-pack → Packed; an order's own page (items with bins; pack it, its papers, add to your list); deadlines (due today, late,
+pack → Packed → Fulfilled → Delivered (renamed: Unfulfilled, Sorted, ready to pack); an order's own page (items with bins; pack it, its papers, add to your list); deadlines (due today, late,
 tomorrow) and the reminder before the driver comes, once.
 
 `order-list.test.js` (test address): Add orders, your list and the side menu. Tick orders, Add to list (it stays open:

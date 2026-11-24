@@ -14,7 +14,7 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('the Orders page has nothing else under it (no pick list, step by step, tabs)', !(await p.isVisible('#results')) && !(await p.isVisible('#stepPickBtn')));
   const row = await p.$eval('#addOrders .aorow', x => x.innerText.replace(/\s+/g, ' '));
   const o0 = await p.evaluate(() => aoShown()[0]);
-  ok('an order row: number, where, when and its status, not its items', row.includes(`#${o0.number}`) && row.includes(o0.city) && /New/.test(row) && !row.includes(o0.items[0].name), row);
+  ok('an order row: number, where, when and its status, not its items', row.includes(`#${o0.number}`) && row.includes(o0.city) && /Unfulfilled/.test(row) && !row.includes(o0.items[0].name), row);
   // its own page
   await p.click(`#addOrders button[aria-label="Open order ${o0.number}"]`);
   const pg = await p.innerText('#orderPage');
@@ -43,9 +43,9 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   await p.evaluate(n => { const po = plan.orders.find(x => String(x.raw) === n); plan.unpack.filter(u => u.label === po.label).forEach(u => { const k = pickOf(u); pickedDone.add(k.step); }); }, o0.number);
   ok('status: all picked → Picked', await st() === 'Picked');
   await p.evaluate(n => { const po = plan.orders.find(x => String(x.raw) === n); const u = plan.unpack.find(x => x.label === po.label); placed.set(u.step, 1); }, o0.number);
-  ok('status: one sorted → Started sorting (or Ready to pack if that was all)', /Started sorting|Ready to pack/.test(await st()));
+  ok('status: one sorted → Started sorting (or Ready to pack if that was all)', /Started sorting|Sorted, ready to pack/.test(await st()));
   await p.evaluate(n => { const po = plan.orders.find(x => String(x.raw) === n); plan.unpack.filter(u => u.label === po.label).forEach(u => unpackDone.add(u.step)); }, o0.number);
-  ok('status: all sorted → Ready to pack', await st() === 'Ready to pack');
+  ok('status: all sorted → Ready to pack', await st() === 'Sorted, ready to pack');
   await p.evaluate(n => packed.set(plan.orders.find(x => String(x.raw) === n).raw, Date.now()), o0.number);
   ok('status: packed → Packed', await st() === 'Packed');
   // deadlines
@@ -55,10 +55,10 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
     const mk = c => ({ number: 'T' + c, created: c, delivery: { type: 'local' }, city: 'Brooklyn', items: [] });
     return [dueOf(mk(at(day, 10)), now).text, dueOf(mk(at(day, 13.5)), now).text, dueOf(mk(at(day - 864e5, 10)), now).text, dueOf(mk(at(day, 10)), at(day, 17)).text];
   });
-  ok('deadlines: in by 12 → Due today; after 12 → Tomorrow; yesterday → Late; after the driver left → Late', /^Due today/.test(due[0]) && due[1] === 'Tomorrow' && due[2] === 'Late' && due[3] === 'Late', due.join(' | '));
+  ok('deadlines: in by 12 → Due today; after 12 → Tomorrow; yesterday → Late; after the driver left → Late', /^Due today/.test(due[0]) && /^Due tomorrow/.test(due[1]) && due[2] === 'Late' && due[3] === 'Late', due.join(' | '));
   await p.evaluate(() => { localStorage.removeItem('pick-and-sort-reminded-v1'); const day = startOfDay(Date.now()); practiceStore().orders.push({ number: '79999', created: day + 9 * 36e5, customer: 'Due Test', address: '1 Main St', city: 'Brooklyn', zip: '11219', delivery: { type: 'local', title: 'Local' }, tags: [], items: [{ name: 'Notebook', details: '', sku: 'NB', barcode: '5012345000039', bin: 'A14', qty: 1 }] }); checkDeadlines(day + 15.8 * 36e5); });
   const alert = await p.$eval('#dueAlert', x => x.innerText.replace(/\s+/g, ' ')).catch(() => '');
-  ok('the reminder before the driver comes: how many due today aren\'t ready', /\d+ orders? due by .* (isn't|aren't) ready yet/.test(alert) && /#\d+ \(New\)/.test(alert), alert.slice(0, 200));
+  ok('the reminder before the driver comes: how many due today aren\'t ready', /\d+ orders? due by .* (isn't|aren't) ready yet/.test(alert) && /#\d+ \(Unfulfilled\)/.test(alert), alert.slice(0, 200));
   await p.evaluate(() => { document.getElementById('dueAlert').remove(); checkDeadlines(startOfDay(Date.now()) + 15.85 * 36e5); });
   ok('…once (not again a minute later)', !(await p.$('#dueAlert')));
   await p.click('#navBtn'); await p.evaluate(() => go('more'));

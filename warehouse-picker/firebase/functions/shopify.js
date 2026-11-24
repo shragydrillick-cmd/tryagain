@@ -86,19 +86,24 @@ async function graphql(key, query, variables) {
 
 // people: "all" (the customer's record and the delivery address), "address" (the delivery address, with the name on it),
 // "none". The customer's record needs read_customers; without it the name on the delivery address is used.
-const ORDER_FIELDS = (people) => `id name createdAt tags displayFulfillmentStatus
+const ORDER_FIELDS = (people) => `id name createdAt tags displayFulfillmentStatus cancelledAt fulfillments(first: 10) { displayStatus }
   ${people === "all" ? "customer { displayName } " : ""}${people !== "none" ? "shippingAddress { name firstName lastName address1 address2 city zip }" : ""}
   shippingLine { title }
   lineItems(first: 100) { nodes { name title variantTitle quantity currentQuantity unfulfilledQuantity sku variant { barcode sku } } }`;
-const ORDERS = withPeople => `query($n: Int!, $after: String) {
-  orders(first: $n, after: $after, sortKey: CREATED_AT, reverse: true, query: "status:open AND (fulfillment_status:unfulfilled OR fulfillment_status:partial)") {
+// the orders still to do, and the ones finished in the last 3 days (to show them as Fulfilled / Delivered)
+const ORDERS_QUERY = () => `(fulfillment_status:unfulfilled OR fulfillment_status:partial OR updated_at:>'${new Date(Date.now() - 3 * 864e5).toISOString()}') AND (status:open OR status:closed)`;
+const ORDERS = withPeople => `query($n: Int!, $after: String, $q: String!) {
+  orders(first: $n, after: $after, sortKey: CREATED_AT, reverse: true, query: $q) {
     pageInfo { hasNextPage endCursor } nodes { ${ORDER_FIELDS(withPeople)} } } }`;
 /** A Shopify order in the shape the app packs: number, customer, area, local delivery or shipping, items. */
 function toPackOrder(o, shop) {
   const a = o.shippingAddress || {}, title = (o.shippingLine && o.shippingLine.title) || "";
   const local = /local|deliver|pick ?up|pickup/i.test(title) && !/ups|usps|fedex|dhl|ground|priority|express/i.test(title);
   const idNum = String(o.id).split("/").pop();
+  const fs = o.displayFulfillmentStatus || "", fl = o.fulfillments || [];
+  const fulfilled = fs === "FULFILLED", delivered = fulfilled && fl.length > 0 && fl.every(f => f.displayStatus === "DELIVERED");
   return {
+    fulfilled, delivered, shopStatus: fs, cancelled: !!o.cancelledAt,
     number: String(o.name || "").replace(/^#/, ""), id: o.id, created: Date.parse(o.createdAt) || null,
     customer: (o.customer && o.customer.displayName) || a.name || [a.firstName, a.lastName].filter(Boolean).join(" ") || "", address: [a.address1, a.address2].filter(Boolean).join(", "), city: a.city || "", zip: a.zip || "",
     delivery: { type: local || !title ? "local" : "shipping", title, date: null },
@@ -107,7 +112,8 @@ function toPackOrder(o, shop) {
     items: (o.lineItems && o.lineItems.nodes || []).map(l => ({
       name: l.title || l.name || "", details: l.variantTitle && l.variantTitle !== "Default Title" ? l.variantTitle : "",
       sku: l.sku || (l.variant && l.variant.sku) || "", barcode: (l.variant && l.variant.barcode) || "", bin: "",
-      qty: l.unfulfilledQuantity != null ? l.unfulfilledQuantity : l.currentQuantity != null ? l.currentQuantity : l.quantity })).filter(x => x.qty > 0),
+      // still to send: what isn't fulfilled yet; a finished order: everything it had
+      qty: !fulfilled && l.unfulfilledQuantity != null ? l.unfulfilledQuantity : l.currentQuantity != null ? l.currentQuantity : l.quantity })).filter(x => x.qty > 0),
   };
 }
 /** How many are in the building (on hand, at every location); what Shopify calls available leaves out what's ordered. */
@@ -121,17 +127,17 @@ async function openOrders(key) {
   // names and addresses are "protected customer data": if Shopify refuses them, the orders come without (and its reason is kept)
   let people = "all", peopleErr = "", out = [], after = null;
   for (let page = 0; page < 5; page++) {
-    let d = await graphql(key, ORDERS(people), { n: 100, after });
+    let d = await graphql(key, ORDERS(people), { n: 100, after, q: ORDERS_QUERY() });
     while (d.errors && people !== "none") {
       if (!peopleErr) { peopleErr = d.errors.map(e => e.message).join("; ").slice(0, 300); console.error("orders with people refused:", JSON.stringify(d.errors).slice(0, 1000)); }
       people = people === "all" ? "address" : "none";
-      d = await graphql(key, ORDERS(people), { n: 100, after });
+      d = await graphql(key, ORDERS(people), { n: 100, after, q: ORDERS_QUERY() });
     }
     if (d.errors) throw new Problem(502, "Shopify: " + (d.errors[0] && d.errors[0].message || "error"));
     const c = d.data.orders; out = out.concat(c.nodes.map(o => toPackOrder(o, key.shop)));
     if (!c.pageInfo.hasNextPage) break; after = c.pageInfo.endCursor;
   }
-  return { orders: out.filter(o => o.items.length), people, peopleErr };
+  return { orders: out.filter(o => o.items.length && !o.cancelled), people, peopleErr };
 }
 
 async function route(req, res) {

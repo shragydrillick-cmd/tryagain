@@ -3328,7 +3328,7 @@ let ao = null; // { q, sort, kind, area, when, show, chosen: Set of numbers }
 const aoOrders = () => (shop.orders || (TEST_FEATURES ? practiceStore().orders : [])).map(o => ({ ...o, units: o.items.reduce((a, x) => a + x.qty, 0) }));
 const onList = n => !!(plan && plan.orders.some(x => String(x.raw) === String(n)));
 function openAddOrders() {
-  ao = { q: "", sort: "created", kind: "all", area: "", when: "all", show: "new", chosen: new Set() };
+  ao = { q: "", sort: "created", kind: "all", area: "", when: "all", show: "new", due: "", chosen: new Set() };
   if (TEST_FEATURES) refreshShopify(true);
   drawAddOrders();
 }
@@ -3336,13 +3336,16 @@ function closeAddOrders() { ao = null; const el = $("addOrders"); if (el) el.rem
 function aoShown() {
   const q = ao.q.trim().toLowerCase(), now = Date.now(), H = 36e5;
   const within = { all: Infinity, today: (now - new Date().setHours(0, 0, 0, 0)), day: 24 * H, three: 72 * H, week: 168 * H }[ao.when];
-  let list = aoOrders().filter(o => (ao.show === "all" || (!onList(o.number) && !stage.has(o.number))) && (ao.kind === "all" || (o.delivery.type === "shipping") === (ao.kind === "shipping"))
+  const done = o => o.fulfilled || o.delivered;
+  let list = aoOrders().filter(o => (ao.show === "all" || (ao.show === "done" ? done(o) : ao.show === "open" ? !done(o) : (!done(o) && !onList(o.number) && !stage.has(o.number))))
+    && (!ao.due || (dueOf(o) || {}).key === ao.due) && (ao.kind === "all" || (o.delivery.type === "shipping") === (ao.kind === "shipping"))
     && (!ao.area || (o.city || "") === ao.area) && (ao.when === "older" ? now - (o.created || 0) > 72 * H : !o.created || now - o.created <= within));
   if (q) list = list.filter(o => orderKey(o.number).includes(orderKey(ao.q)) || [o.customer, o.city, o.zip, o.address, o.delivery.title].some(x => String(x || "").toLowerCase().includes(q))
     || o.items.some(it => [it.name, it.details, it.sku, it.barcode].some(x => String(x || "").toLowerCase().includes(q))));
   const by = { created: (a, b) => (b.created || 0) - (a.created || 0), oldest: (a, b) => (a.created || 0) - (b.created || 0), number: (a, b) => natural(a.number, b.number),
     delivery: (a, b) => (a.delivery.date || 9e15) - (b.delivery.date || 9e15) || natural(a.number, b.number),
-    place: (a, b) => natural(a.city || "~", b.city || "~") || natural(a.zip, b.zip) || natural(a.number, b.number), items: (a, b) => b.units - a.units }[ao.sort];
+    place: (a, b) => natural(a.city || "~", b.city || "~") || natural(a.zip, b.zip) || natural(a.number, b.number), items: (a, b) => b.units - a.units,
+    due: (a, b) => ((dueOf(a) || {}).due || 9e15) - ((dueOf(b) || {}).due || 9e15) || (a.created || 0) - (b.created || 0) }[ao.sort];
   return list.sort(by);
 }
 function drawAddOrders() {
@@ -3364,11 +3367,12 @@ function drawAddOrders() {
     h("p", { class: "small muted", style: "margin-top:0" }, shop.orders ? `Open orders in ${shop.status.shop.replace(/\.myshopify\.com$/, "")}${shop.busy ? " (updating…)" : ""}` : shop.busy ? "Getting the orders…" : shop.err ? `Couldn't get the Shopify orders: ${shop.err}. Showing practice orders.` : "Practice orders (no Shopify store connected: Settings → More)"),
     search,
     h("div", { class: "binctls" },
-      sel("Sort", "sort", [["created", "Newest first"], ["oldest", "Oldest first"], ["number", "Order number"], ["delivery", "Delivery date"], ["place", "Area"], ["items", "Most items"]]),
+      sel("Sort", "sort", [["created", "Newest first"], ["oldest", "Oldest first"], ["due", "Due first"], ["number", "Order number"], ["delivery", "Delivery date"], ["place", "Area"], ["items", "Most items"]]),
       sel("Area", "area", [["", "Every area"], ...areas.map(a => [a, a])]),
       sel("Ordered", "when", [["all", "Any time"], ["today", "Today"], ["day", "Last 24 hours"], ["three", "Last 3 days"], ["week", "Last week"], ["older", "Over 3 days ago"]]),
       sel("Delivery", "kind", [["all", "Any delivery"], ["local", "Own driver"], ["shipping", "UPS / shipped"]]),
-      sel("Show", "show", [["new", "Not picked or in your list yet"], ["all", "All open orders"]])),
+      sel("Show", "show", [["new", "Not picked or in your list yet"], ["open", "Everything not sent yet"], ["done", "Fulfilled / delivered (last 3 days)"], ["all", "All"]]),
+      sel("Due", "due", [["", "Any time"], ["late", "Late"], ["today", "Due today"], ["later", "Due later"]])),
     h("div", { class: "row", style: "align-items:center;margin:6px 0" },
       h("label", { class: "checkrow", style: "flex:1" }, h("input", { type: "checkbox", "aria-label": "Select all shown", checked: !!allShown, onchange: e => { list.forEach(o => e.target.checked ? ao.chosen.add(o.number) : ao.chosen.delete(o.number)); drawAddOrders(); } }),
         h("span", null, ` ${list.length} order${list.length === 1 ? "" : "s"} shown`)),
@@ -3454,24 +3458,28 @@ function runStage(mode) {
   }
   finish("new");
 }
-/* ---------- where an order is: New, In your list, On pick list, Started picking, Picked, Started sorting,
-   Ready to pack (sorted), Packed. "Started picking" = at least one of its items picked. ---------- */
+/* ---------- where an order is: Unfulfilled, In your list, On pick list, Started picking, Picked, Started sorting,
+   Sorted (ready to pack), Packed, Fulfilled, Delivered. "Started picking" = at least one of its items picked.
+   Fulfilled / Delivered come from Shopify (a label bought or marked fulfilled; the carrier or driver delivered it). ---------- */
 function orderStage(o) {
   const n = String(o.number);
+  const so = o.fulfilled != null ? o : (shop.orders && shop.orders.find(x => String(x.number) === n)) || {};
+  if (so.delivered) return { key: "delivered", cls: "st-grey", text: "Delivered" };
+  if (so.fulfilled) return { key: "fulfilled", cls: "st-grey", text: "Fulfilled" };
   const po = plan && plan.orders.find(x => String(x.raw) === n);
   if ((po && packed.has(po.raw)) || shop.packed[n] || o.packed || (o.source === "store" && packedTime({ ...o, source: "store" }))) return { key: "packed", cls: "st-grey", text: "Packed" };
   if (po) {
     const lines = plan.unpack.filter(u => u.label === po.label), units = lines.reduce((a, u) => a + u.qty, 0);
     const sorted = lines.reduce((a, u) => a + (unpackDone.has(u.step) ? u.qty : Math.min(u.qty, placed.get(u.step) || 0)), 0);
     const picked = lines.reduce((a, u) => { const k = pickOf(u); return a + (k && pickedDone.has(k.step) ? u.qty : 0); }, 0);
-    if (sorted >= units) return { key: "ready", cls: "st-green", text: "Ready to pack" };
+    if (sorted >= units) return { key: "ready", cls: "st-green", text: "Sorted, ready to pack" };
     if (sorted > 0) return { key: "sorting", cls: "st-yellow", text: "Started sorting" };
     if (picked >= units) return { key: "picked", cls: "st-blue", text: "Picked" };
     if (picked > 0) return { key: "picking", cls: "st-blue", text: "Started picking" };
     return { key: "listed", cls: "st-orange", text: "On pick list" };
   }
   if (stage.has(n)) return { key: "yourlist", cls: "st-orange", text: "In your list" };
-  return { key: "new", cls: "", text: "New" };
+  return { key: "new", cls: "", text: "Unfulfilled" };
 }
 /* ---------- deadlines (Settings → More → Deadlines): when an order has to go out ----------
    A rule: which orders (delivery type, area), the cut-off ("orders in by 12:00 go out the same day"), when the driver
@@ -3486,12 +3494,13 @@ function ruleFor(o) {
 /** Due today / Late / Tomorrow (or a day) for an order that isn't packed yet; null if no rule fits. */
 function dueOf(o, now = Date.now()) {
   const r = ruleFor(o); if (!r || !o.created) return null;
-  const st = orderStage(o); if (st.key === "packed") return null;
+  const st = orderStage(o); if (st.key === "fulfilled" || st.key === "delivered") return null;
   let day = startOfDay(o.created); if (o.created > atTime(day, r.cutoff)) day = startOfDay(day + 36e5 * 30); // in after the cut-off: the next day
   const today = startOfDay(now), out = atTime(day, r.driver || "23:59");
-  if (day < today || now > out) return { key: "late", cls: "st-red", text: "Late", due: out, rule: r };
-  if (day === today) return { key: "today", cls: "st-orange", text: `Due today${r.driver ? " " + new Date(out).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : ""}`, due: out, rule: r };
-  return { key: "later", cls: "st-grey", text: day - today < 864e5 * 1.5 ? "Tomorrow" : fmtDay(day), due: out, rule: r };
+  const at = r.driver ? " " + new Date(out).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
+  if (day < today || now > out) return st.key === "packed" ? null : { key: "late", cls: "st-red", text: "Late", due: out, rule: r }; // packed in time: it went out
+  if (day === today) return { key: "today", cls: "st-orange", text: `Due today${at}`, due: out, rule: r };
+  return { key: "later", cls: "st-grey", text: day - today < 864e5 * 1.5 ? `Due tomorrow${at}` : `Due ${new Date(day).toLocaleDateString(undefined, { weekday: "short" })}${at}`, due: out, rule: r };
 }
 /* the reminder: shortly before the driver comes, how many of today's orders aren't ready yet (once a day per rule) */
 const remindedKey = "pick-and-sort-reminded-v1";
