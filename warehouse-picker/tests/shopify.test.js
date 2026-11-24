@@ -145,9 +145,9 @@ const server = app.listen(8766);
   await a.selectOption('#addOrders select[aria-label="Area"]', ""); await a.selectOption('#addOrders select[aria-label="Sort"]', "oldest");
   ok("sorted oldest first", /#1001/.test(await a.$eval("#addOrders .aorow", x => x.innerText)));
   await a.check('#addOrders input[aria-label="Select all shown"]');
-  ok("select all: the button says Add 2 orders", /Add 2 orders to pick/.test(await a.innerText("#addOrders .aobar")));
-  await a.click("#addOrders .aobar button"); await a.waitForTimeout(800);
-  await a.click('button:text-is("Replace")').catch(() => {}); await a.waitForTimeout(800);
+  ok("select all: the button says Add to list (2)", /Add to list \(2\)/.test(await a.innerText("#addOrders .aobar")));
+  await a.click('#addOrders button:has-text("Add to list")'); await a.evaluate(() => runStage("pick")); await a.waitForTimeout(500);
+  await a.click('#addOrders button:text-is("Start new with these")').catch(() => {}); await a.waitForTimeout(800);
   const look = await a.innerText("#review").catch(() => "");
   ok("added: both orders on the list, and Please look asks for the bins", await a.evaluate(() => plan && plan.orders.length === 2) && /Please look/.test(look) && /missing bin/.test(look), look.slice(0, 200));
   await a.click("#shopifyAddBtn"); await a.waitForTimeout(600);
@@ -211,7 +211,11 @@ const server = app.listen(8766);
   ok("added a colour here: the store's product gets it (the others keep their ids)", set1 && set1.id === "gid://shopify/Product/9" && set1.variants.length === 3 && set1.variants.filter(v => v.id).length === 2
     && set1.productOptions[0].name === "Color" && set1.productOptions[0].values.map(x => x.name).join() === "Blue,Gray,Pink", JSON.stringify(set1 || {}).slice(0, 300));
   ok("…and the new size has the store's id here now", await e.evaluate(() => bins.products[0].variants.find(v => v.colour === "Pink").sid === "gid://shopify/ProductVariant/511"));
-  await e.click('#binSheet .chip:has-text("One") >> nth=1'); await e.click('#binSheet button:has-text("Remove this size")'); await e.click('#binSheet button:has-text("Tap again")'); await e.waitForTimeout(1500);
+  await e.waitForFunction(() => !document.getElementById("binsUndo"), null, { timeout: 10000 }).catch(() => {}); // the Undo bar from adding Pink has gone
+  await e.click('#binSheet .chip:has-text("One") >> nth=1');
+  await e.click('#binSheet button:has-text("Remove this size")');
+  await e.click('#binSheet button:has-text("Tap again")');
+  await e.waitForTimeout(1500);
   const set2 = (fake.sets || [])[1];
   ok("removed a size here: it's left out of the store's product", set2 && set2.variants.length === 2 && !set2.variants.some(v => v.id === "gid://shopify/ProductVariant/92"), JSON.stringify(set2 || {}).slice(0, 200));
   // a brand-new item here: made in the store as a draft, with its sizes, barcodes and how many

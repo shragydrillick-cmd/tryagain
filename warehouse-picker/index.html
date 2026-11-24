@@ -245,7 +245,7 @@ img.qr.big { width: min(420px, 100%); } /* big squares: easy to read off a scree
 .helpbox { background: var(--card); color: var(--text); border-radius: 14px; padding: 16px; max-width: 460px; max-height: 80vh; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,.3); font-size: 15px; }
 .helpbox p { margin: 0 0 10px; }
 .bigbarcode { font-size: clamp(17px, 5.6vw, 28px); font-weight: 800; letter-spacing: .02em; max-width: 100%; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin: 4px 0 2px; }
-.detailpanel { position: fixed; inset: 0; z-index: 40; background: var(--bg); overflow: auto; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px calc(env(safe-area-inset-bottom, 0px) + 16px); }
+.detailpanel { position: fixed; inset: 0; z-index: 40; background: var(--bg); overflow: auto; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px calc(env(safe-area-inset-bottom, 0px) + 84px); } /* room at the bottom: nothing stays under the Undo bar */
 .detailbox { max-width: 760px; margin: 0 auto; }
 .detailhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; background: var(--bg); padding: 6px 0 8px; z-index: 1; }
 .detailhead h2 { margin: 0; font-size: 22px; }
@@ -375,6 +375,7 @@ header.top .menubtn { border-color: transparent; padding: 0; }
 /* with the menu: pages open under the top bar, so the menu is always there (the camera scanner stays full screen) */
 body.withmenu header.top { z-index: 60; }
 body.withmenu .detailpanel, body.withmenu .packscreen, body.withmenu #stepper { top: var(--headh, 64px); padding-top: 10px; }
+body.withmenu .scanner { z-index: 75; } /* the scanner screen: over everything, top bar too (it has its own Done) */
 header.top .menubtn + h1 { flex: 1; }
 .menushade { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 89; opacity: 0; pointer-events: none; transition: opacity .15s; }
 .sidemenu { position: fixed; top: 0; left: 0; bottom: 0; width: min(280px, 82vw); background: var(--card); color: var(--text); z-index: 90; transform: translateX(-105%); transition: transform .18s ease; box-shadow: 4px 0 24px rgba(0,0,0,0.25); overflow-y: auto; padding: 10px 0 20px; }
@@ -4133,9 +4134,16 @@ function mergeBins(mine, theirs) {
 }
 const binsSyncOn = () => !!(TEST_FEATURES && !testNoAuth && acct && acct.company && fb.db);
 const binsDoc = () => fb.db.collection("companies").doc(acct.company).collection("bins").doc("state");
-let unwatchBins = null, binsUpTimer = null, binsRemoteAt = 0, binsDirty = false, binsUploading = false;
+let unwatchBins = null, binsUpTimer = null, binsRemoteAt = 0, binsSendingAt = 0, binsDirty = false, binsUploading = false;
 function scheduleBinsUpload() { if (!binsSyncOn()) return; binsDirty = true; clearTimeout(binsUpTimer); binsUpTimer = setTimeout(uploadBins, 800); }
+// the items as text, the same whatever order their fields are in (change times and in-flight marks left out)
+const canon = x => Array.isArray(x) ? "[" + x.map(canon).join(",") + "]"
+  : x && typeof x === "object" ? "{" + Object.keys(x).filter(k => !["mt", "goneV", "sending"].includes(k) && x[k] !== undefined).sort().map(k => JSON.stringify(k) + ":" + canon(x[k])).join(",") + "}"
+  : JSON.stringify(x);
+const binsContent = b => canon((b && b.products) || []);
 function applyBins(next) {
+  // nothing new: keep the items as they are (screens that are open point at them) and don't redraw
+  if (bins && binsContent(next) === binsContent(bins)) { bins.gone = next.gone; return; }
   bins = next; try { localStorage.setItem(BINS_KEY, JSON.stringify(bins)); } catch (e) {}
   binsSnap = snapOf(bins); refreshBins(); fillListBins();
 }
@@ -4146,7 +4154,7 @@ function watchBins() {
   unwatchBins = binsDoc().onSnapshot(async s => {
     if (s.metadata.hasPendingWrites) return;
     if (!s.exists) { if (bins && bins.products.length) { binsDirty = true; uploadBins(); } return; }
-    const d = s.data(); if (d.at === binsRemoteAt) return;
+    const d = s.data(); if (d.at === binsRemoteAt || d.at === binsSendingAt) return; // this device's own save coming back
     let remote; try { remote = JSON.parse(await unpackText(d.z)); } catch (e) { return; }
     binsRemoteAt = d.at;
     applyBins(bins ? mergeBins(bins, remote) : { ...remote, settings: binsSettings() });
@@ -4162,7 +4170,7 @@ async function uploadBins() {
       const s = await tx.get(ref);
       merged = bins;
       if (s.exists && s.data().at !== binsRemoteAt) merged = mergeBins(bins, JSON.parse(await unpackText(s.data().z)));
-      at = Date.now();
+      at = Date.now(); binsSendingAt = at;
       const out = { ...merged, log: (merged.log || []).slice(0, 150) }; delete out.settings;
       tx.set(ref, { z: await packText(JSON.stringify(out)), at, by: acct.uid, byEmail: acct.email });
     });
