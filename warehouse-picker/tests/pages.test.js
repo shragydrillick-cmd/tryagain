@@ -68,6 +68,9 @@ let bad = 0; const ok = (l, c, x = '') => { if (!c) bad++; console.log(`${c ? 'o
   ok('Pick: the big Step by step, no "Your lists" box or file name', await p.isVisible('#pageCtl button:text-is("Step by step")') && !(await p.isVisible('#results > h2')) && !(await p.isVisible('#fileName')));
   await p.evaluate(() => showPage('sort', { scan: true })); await p.waitForTimeout(300);
   ok('Sort: straight into scanning; on a computer the scanner box (no camera, no Scan button)', await p.isVisible('.scanner input[aria-label="Barcode or SKU"]') && !(await p.$('.scanner .scanview')) && !(await p.$('.scanner .shopscan')));
+  await p.click('.scanner button:text-is("List")'); await p.waitForTimeout(300);
+  ok('the sort scanner has List: back on Sort with the list to tick', await p.evaluate(() => uiPage === 'sort' && document.body.dataset.list === 'on' && !scan.el) && await p.isVisible('#tab-unpack'));
+  await p.evaluate(() => showPage('sort', { scan: true })); await p.waitForTimeout(300);
   await p.click('.scanner button:has-text("Done")');
   // deadlines
   const due = await p.evaluate(() => {

@@ -2448,7 +2448,9 @@ async function openBarcodeScanner() {
     showProgress();
   };
   scan.el = h("div", { class: "scanner barcode", role: "dialog", "aria-label": "Scan to unpack" },
-    h("div", { class: "scanhead" }, h("b", null, "Scan to unpack"), h("button", { class: "btn secondary small", type: "button", onclick: closeScanner }, "✕ Done")),
+    h("div", { class: "scanhead" }, h("b", null, TEST_FEATURES ? "Scan to sort" : "Scan to unpack"),
+      TEST_FEATURES ? h("button", { class: "btn secondary small", type: "button", style: "margin-left:auto;margin-right:6px", onclick: () => { closeScanner(); showPage("sort"); document.body.dataset.list = "on"; drawPageCtl(); } }, "List") : null,
+      h("button", { class: "btn secondary small", type: "button", onclick: closeScanner }, "✕ Done")),
     h("div", { class: "scanview" }, video, h("div", { class: "scanframe wide" })), msg, result, prog,
     h("div", { class: "row scanrow" }, typed, okBtn, undoBtn));
   scan.onClose = () => { // back on the Unpack list, so the ticks from the scans are what you see
